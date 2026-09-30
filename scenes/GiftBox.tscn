@@ -1,0 +1,123 @@
+[gd_scene format=3 uid="uid://ct1086eebqyr0"]
+
+[ext_resource type="Script" uid="uid://b66s6ltd3v1r4" path="res://scripts/GiftBox.gd" id="1_giftbox"]
+
+[node name="GiftBox" type="Control" unique_id=1456500286]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_giftbox")
+
+[node name="Title" type="Label" parent="." unique_id=1634424705]
+layout_mode = 0
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -300.0
+offset_top = 90.0
+offset_right = 300.0
+offset_bottom = 160.0
+theme_override_colors/font_color = Color(0.961, 0.784, 0.494, 1)
+theme_override_font_sizes/font_size = 48
+text = "188号礼物"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Subtitle" type="Label" parent="." unique_id=802964882]
+layout_mode = 0
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -300.0
+offset_top = 165.0
+offset_right = 300.0
+offset_bottom = 200.0
+theme_override_colors/font_color = Color(0.788, 0.635, 0.42, 1)
+theme_override_font_sizes/font_size = 22
+text = "把家乡的山水装进行囊"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Guide" type="Label" parent="." unique_id=1625866340]
+layout_mode = 0
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -350.0
+offset_top = 470.0
+offset_right = 350.0
+offset_bottom = 500.0
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 18
+text = "沿着188，重演东坡的五件赏心乐事"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="StartBtn" type="Button" parent="." unique_id=152679793]
+layout_mode = 0
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -110.0
+offset_top = 540.0
+offset_right = 110.0
+offset_bottom = 610.0
+theme_override_font_sizes/font_size = 24
+text = "开启旅程"
+
+[node name="LanguageBtn" type="Button" parent="." unique_id=152797932]
+layout_mode = 0
+anchor_left = 1.0
+anchor_top = 0.0
+offset_left = -280.0
+offset_top = 24.0
+offset_right = -124.0
+offset_bottom = 70.0
+theme_override_font_sizes/font_size = 16
+text = "语言：中文"
+
+[node name="Disclaimer" type="Label" parent="." unique_id=1908486150]
+layout_mode = 0
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -420.0
+offset_top = -72.0
+offset_right = 420.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 12
+text = "本作为虚构叙事 Demo。路线形状、驿站名称与场景布局均为艺术化创作，取材于公有领域的东坡诗文，"
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="LoadingLayer" type="CanvasLayer" parent="." unique_id=2014391564]
+
+[node name="LoadingBg" type="ColorRect" parent="LoadingLayer" unique_id=1639202139]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.06, 0.1, 0.95)
+
+[node name="LoadingLabel" type="Label" parent="LoadingLayer" unique_id=2012714036]
+visible = false
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -30.0
+offset_right = 150.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.96, 0.78, 0.49, 1)
+theme_override_font_sizes/font_size = 28
+text = "正在加载中..."
+horizontal_alignment = 1
+vertical_alignment = 1

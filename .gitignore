@@ -1,0 +1,25 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+
+# 导出产物（可用 export_presets.cfg 重新生成，合计约 180MB）
+/188号礼物.exe
+/188号礼物.console.exe
+/188号礼物.wasm
+/188号礼物.pck
+/188号礼物.js
+/188号礼物.html
+/188号礼物.audio.worklet.js
+/188号礼物.audio.position.worklet.js
+/188号礼物.png
+/188号礼物.icon.png
+/188号礼物.apple-touch-icon.png
+
+# 旧版导出产物（218 命名，已废弃；保留忽略以免误提交）
+/218号礼物.*
+
+# Python
+tools/__pycache__/
+
+# 编辑模式标记文件 (res://.editor_mode):开发者本机激活用,不入库
+/.editor_mode

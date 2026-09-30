@@ -1,0 +1,62 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/EndCard.gd" id="1_endcard"]
+[ext_resource type="Script" path="res://scripts/Postcard.gd" id="2_postcard"]
+
+[node name="EndCard" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_endcard")
+
+[node name="BgColor" type="ColorRect" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.08, 0.06, 0.1, 1)
+
+[node name="Postcard" type="Control" parent="."]
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -450.0
+offset_top = 20.0
+offset_right = 450.0
+offset_bottom = 526.0
+script = ExtResource("2_postcard")
+
+[node name="ExportViewport" type="SubViewport" parent="."]
+transparent_bg = true
+size = Vector2(1920, 1080)
+render_target_update_mode = 4
+
+[node name="PostcardExport" type="Control" parent="ExportViewport"]
+script = ExtResource("2_postcard")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+anchor_left = 0.5
+anchor_right = 0.5
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = -200.0
+offset_top = -200.0
+offset_right = 200.0
+offset_bottom = -20.0
+alignment = 1
+
+[node name="ExportBtn" type="Button" parent="VBox"]
+layout_mode = 2
+text = "导出明信片"
+theme_override_font_sizes/font_size = 22
+
+[node name="ShareBtn" type="Button" parent="VBox"]
+layout_mode = 2
+text = "复制分享文案"
+theme_override_font_sizes/font_size = 18
+
+[node name="WriteBackBtn" type="Button" parent="VBox"]
+layout_mode = 2
+text = "写背面"
+theme_override_font_sizes/font_size = 18
+
+[node name="RestartBtn" type="Button" parent="VBox"]
+layout_mode = 2
+text = "重新开始"
+theme_override_font_sizes/font_size = 18
