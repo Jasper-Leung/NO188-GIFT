@@ -3,6 +3,8 @@
 /android/
 
 # 导出产物（可用 export_presets.cfg 重新生成，合计约 180MB）
+# Web 导出实测落在 build_web/（--export-release "Web" ./build_web/188.html）
+/build_web/
 /188号礼物.exe
 /188号礼物.console.exe
 /188号礼物.wasm
@@ -23,3 +25,10 @@ tools/__pycache__/
 
 # 编辑模式标记文件 (res://.editor_mode):开发者本机激活用,不入库
 /.editor_mode
+/.editor_mode1
+/.review/
+
+# 定妆照与调试截图不是游戏资源。它们在 res:// 底下，Godot 每次扫工程都会
+# 把它们当纹理导一遍，白占导入缓存；.import 是那个扫描的产物，不入库。
+/docs/**/*.import
+/tools/_nfs.png*

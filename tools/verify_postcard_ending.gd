@@ -266,8 +266,47 @@ func _audit_variant_independent() -> void:
 	_eq("布局档位齐全", layouts.size(), 5)
 	for li in layouts.size():
 		for entry in layouts[li]:
-			_eq("布局 %d 第 %s 格 占位标记与槽位一致" % [li, str(entry[0])],
-					entry[2] == (entry[0] < 0), "entry=%s" % str(entry))
+			_ck("布局 %d 第 %s 格 占位标记与槽位一致" % [li, str(entry[0])],
+					entry[1] == (entry[0] < 0), "entry=%s" % str(entry))
+
+	await _audit_panel_identity()
+
+
+## 画区那一格的「颜色 / 图标 / 标签」必须讲同一件碎片。
+## 历史上颜色表和图标分派各整体错位一格而标签是对的：五格里错四格，
+## 而两张错位的表彼此自洽，缩略图一眼扫过去完全正常——可玩家存走的那张
+## PNG 就是这张错位图。颜色已改成 FRAGMENT_COLS[slot_idx] 按下标查，
+## 下面这三条把「三处同序」钉死：调色板不许分叉、五个名字不许重名、
+## 完满档五格必须一次覆盖五件。
+func _audit_panel_identity() -> void:
+	print("\n---------- 3b. 画区颜色/图标/标签同序 ----------")
+	var cols: Array = _pc("FRAGMENT_COLS")
+	_eq("FRAGMENT_COLS 是五件", cols.size(), 5)
+
+	# 顶栏碎片栏那份同名常量表是玩家最先认下的配色，两处不许分叉
+	var fb = load("res://scripts/FragmentBar.gd")
+	_ck("与 FragmentBar.FRAGMENT_COLORS 逐件一致",
+			str(cols) == str(fb.FRAGMENT_COLORS),
+			"postcard=%s bar=%s" % [str(cols), str(fb.FRAGMENT_COLORS)])
+
+	# 五个格子写着五个字。两个 key 若指到同一句，上面那条同序就失去意义，
+	# 而「云字下面配一只鸟」在图上仍然是自洽的，只能靠这里拦。
+	var uniq := {}
+	for i in 5:
+		uniq[_loc.t("fragment_%d" % i)] = true
+	_eq("五件碎片的名字互不相同", uniq.size(), 5)
+
+	# 完满档五格全真，逐一确认它引用的正是 0..4 —— 布局表最容易出的错就是
+	# 少一格或重一格，五个真格如果只是四个下标加一个重复，图标就会重影。
+	var layout: Array = _pc_script.VARIANT_LAYOUTS[4]
+	_eq("完满档五格", layout.size(), 5)
+	var seen := {}
+	for i in layout.size():
+		var slot: int = layout[i][0]
+		_eq("完满第 %d 格就是第 %d 件" % [i, i], slot, i)
+		_eq("完满第 %d 格不是占位" % [i], layout[i][1], false)
+		seen[cols[slot].to_html(false)] = true
+	_ck("五格颜色恰好覆盖五件碎片", seen.size() == 5, "seen=%s" % str(seen.keys()))
 
 
 func _audit_ending_choice() -> void:
@@ -360,11 +399,37 @@ func _audit_ending_choice() -> void:
 	# 这一屏的布局全按 get_viewport_rect().size 算，写死 720 会在别的分辨率下
 	# 拿一个不存在的屏高去判（headless 这里的视口就不是 720 高）。
 	var vh: float = card.get_viewport_rect().size.y
-	_ck("缩略图不遮按钮",
-			card._back_thumb.offset_top > vh * 0.72 + 44.0,
-			"上沿 %.0f，按钮下沿 %.0f" % [card._back_thumb.offset_top, vh * 0.72 + 44.0])
+	var skip_bottom: float = vh * float(card.THUMB_BTN_Y_FRAC) + float(card.THUMB_BTN_H)
+	_ck("缩略图不遮按钮", card._back_thumb.offset_top > skip_bottom,
+			"上沿 %.0f，按钮下沿 %.0f" % [card._back_thumb.offset_top, skip_bottom])
+	_ck("两个按钮不叠在一起（叠着就各吃一行，预览的份额又少一截）",
+			absf(card._back_skip_btn.offset_left - card._back_confirm_btn.offset_left)
+					>= card._back_confirm_btn.offset_right
+					- card._back_confirm_btn.offset_left - 1.0,
+			"确认 %.0f~%.0f，跳过 %.0f~%.0f" % [
+				card._back_confirm_btn.offset_left, card._back_confirm_btn.offset_right,
+				card._back_skip_btn.offset_left, card._back_skip_btn.offset_right])
+	_ck("两个按钮都在屏内",
+			card._back_confirm_btn.offset_right <= card.get_viewport_rect().size.x
+			and card._back_skip_btn.offset_right <= card.get_viewport_rect().size.x,
+			"确认右沿 %.0f，跳过右沿 %.0f" % [card._back_confirm_btn.offset_right,
+			card._back_skip_btn.offset_right])
 	_ck("缩略图不出屏", card._back_thumb.offset_bottom <= vh,
 			"底沿 %.0f，屏高 %.0f" % [card._back_thumb.offset_bottom, vh])
+	_ck("说明行也没出屏", card._back_thumb_caption.offset_top >= 0.0
+			and card._back_thumb_caption.offset_bottom <= card._back_thumb.offset_top,
+			"caption %.0f~%.0f, thumb %.0f" % [card._back_thumb_caption.offset_top,
+			card._back_thumb_caption.offset_bottom, card._back_thumb.offset_top])
+	# 预览的意义全在"字看得清"。原来固定 200px 宽 —— 卡片在 SubViewport 里按原
+	# 尺寸画完再缩下来，200px 宽的预览里一行字只剩七来个像素高，放大三倍也读不
+	# 出是哪个字，"所见即导出"就成了一句空话。要 400 以上才认得出自己写的那句。
+	# 判的是宽度下限：`_add_back_thumb` 先按屏宽算一遍（上限 460），再按"按钮
+	# 下沿到屏底"的空当算一遍高度，取小的。headless 的视口比 720p 高，高度那道
+	# 约束在这里不生效，所以量到的就是屏宽那一档 —— 正好是个下界。
+	# 比 720p 更矮的屏上预览会等比缩下去，那是有意的降级，不在这里拦。
+	var tw: float = card._back_thumb.offset_right - card._back_thumb.offset_left
+	_ck("预览至少有 400px 宽（原来只有 200，字读不出来）", tw >= 400.0,
+			"%.0fpx @ 视口 %dx%d" % [tw, int(card.get_viewport_rect().size.x), int(vh)])
 
 	# 手动发信号：程序化赋 .text 不发 text_changed（_on_back_confirmed 里也是因此
 	# 才回头再读一次 TextEdit）。这里要的就是"玩家敲了一个键"那一刻发生的事。
@@ -560,7 +625,15 @@ func _audit_run_recap() -> void:
 	for st_idx in _frag_idx:
 		_gm.collected[st_idx] = 1
 	_ck("大师档：提示第五格", card._recap_lines().has(_loc.t("postcard_variant_hint")))
-	_gm.collected[_frag_idx[0]] = 3
+	# 完满判据是 all_fragments_maxed()，不是"任意一站到访 3 次"。
+	# 原来这里只把 [0] 摆到 3 就期望进完满档——那正是把旧那个 bug 当成规格写进了
+	# 测试：玩家只把云影台刷满三次、另外四站只去过一次，正面就已经是"完满"，
+	# 而导航还在指另外四站。现在只刷满一站仍是大师，五站全满才是完满。
+	_gm.collected[_frag_idx[0]] = _gm.MAX_VISITS_PER_STATION
+	_ck("只刷满一站：仍是大师，仍提示第五格", card._recap_lines().has(
+			_loc.t("postcard_variant_hint")))
+	for st_idx in _frag_idx:
+		_gm.collected[st_idx] = _gm.MAX_VISITS_PER_STATION
 	_ck("完满档：不再提第五格", not card._recap_lines().has(
 			_loc.t("postcard_variant_hint")))
 	# 摆回半途基线：只有前两块碎片收过、没选结局。

@@ -81,6 +81,22 @@ func _run() -> void:
 		_ck("第 %d 层比第 %d 层淡" % [i + 1, i], far.get_luminance() > near.get_luminance(),
 				"near=%.3f far=%.3f" % [near.get_luminance(), far.get_luminance()])
 
+	# 上面那条只管**逐层**递淡，它对"中远两层一起淡成一样白"完全免疫：
+	# 0.13/0.30/0.52 那一档每层都比上一层淡，断言全绿，而 AGX 之后中远两层
+	# 糊成一道白痕贴在天上，图上只剩近层那条暗绿——三层纵深根本不存在。
+	# 所以另钉两端：**最远那层不许亮到 AGX 会把它推成白**（离天空还得有对比），
+	# **最近那层不许暗到贴成一条纯黑的墙**（峰形得看得见）。
+	# 两个界是照着 2026-10-01 那两张 road_eye / hilltop 的实际渲图定的，
+	# 不是拍的：旧的远层 0.622 正好在这条线之外，现状 0.506 在里面。
+	var lums := PackedFloat32Array()
+	for layer in FarRidge.LAYERS:
+		lums.append((layer["col"] as Color).get_luminance())
+	_ck("最远那层没亮到会被 AGX 推成白（要有对比才看得出是山不是天）",
+			lums[lums.size() - 1] <= 0.55,
+			"far_lum=%.3f <= 0.55" % lums[lums.size() - 1])
+	_ck("最近那层没暗到贴成一条纯黑的墙（峰形要看得见）",
+			lums[0] >= 0.14, "near_lum=%.3f >= 0.14" % lums[0])
+
 	ridge.queue_free()
 	await process_frame
 

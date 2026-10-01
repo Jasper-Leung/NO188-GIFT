@@ -227,8 +227,7 @@ func _drive(st: Dictionary) -> void:
 			_phase = PH_SETTLE
 		"cloud":
 			# 空格落笔（光标初始就落在第一个轨迹点上），然后照着 _path_world 推着走。
-			# _update_draw 每调一次记一段路长的 0.1，绕一圈攒不到 0.75，
-			# 所以绕满一圈后要接着绕第二圈，到 0.95 才松手——留够余量。
+			# 描完七段就该到 100%，到 0.95 才松手——留够余量。
 			if not _space_down:
 				_last_act_f = _f
 				_space_down = true
@@ -246,7 +245,16 @@ func _drive(st: Dictionary) -> void:
 			if _cloud_t >= pts.size():
 				_cloud_t = 0
 			var tgt: Vector2 = pts[_cloud_t]
-			if _mg._key_cursor.distance_to(tgt) <= 6.0:
+			# 到达判据是「一个 KEY_STEP 以内」，不是「6 像素以内」。
+			# KEY_STEP = 12，所以两个相邻轨迹点隔着一百多像素时，整步走会在
+			# 目标两侧来回横跳——而 6px 的判据永远踩不进去，于是 _cloud_t
+			# 永远不前进，光标在原地抖到超时。
+			#
+			# 这个死循环当初是绿的：旧版完成度「每调一次 _update_draw 记
+			# 段长 × 0.1」，抖一下算一下，于是这个压根没描边的循环自己把进度
+			# 刷满了。一条回归在绿，可能是因为它自己踩在它要守的那个漏洞上。
+			# 换成 12px 之后光标是真的沿轨迹走完一圈，_drawn_ratio 才会到 1.0。
+			if _mg._key_cursor.distance_to(tgt) <= _mg.KEY_STEP:
 				_cloud_t += 1
 				return
 			if _f - _last_act_f < 2:

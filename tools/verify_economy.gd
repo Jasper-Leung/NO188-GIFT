@@ -51,27 +51,39 @@ func _count_shops_on_fragment_stations() -> int:
 ##
 ## 世界只有 1228.8m 一圈，188 摊上去就是 2km/s —— 玩家骑三十秒就能心算出
 ## 7200km/h，然后顶栏、灯铺那道 60km 的门、郑铎那三场 50/100/150km 的戏会一起
-## 变成噪音。STRINGS 里唯一豁免的是 "progress"，它已经没有任何消费者了。
-## 以后有人想再加一条带里程的提示，这条会当场拦下。
+## 变成噪音。以后有人想再加一条带里程的提示，这条会当场拦下。
 ##
 ## 关键词要查全：只查 "km" 会漏掉中文的「公里」和英文的 "kilometer"——
 ## 第一版就漏了 onboarding_subtitle 的「沿188公里环形路线」。
 ## 还要再带上英式拼法 "kilometre"：它不是 "kilometer" 的子串（e 和 r 换了位置），
 ## ending_keep_desc 里的 "188 kilometres" 就是这么活到现在的。
-const _KM_WORDS := ["km", "公里", "kilometer", "kilometre", "K0", "K188"]
+##
+## 里程碑牌号走正则而不是关键词表。原来写的是 "K0" 和 "K188" 两个**字面量**，
+## 于是 villain_2_1 的「K91 那一带有一条老路基…」两个都匹配不到 ——
+## 而那是全表里唯一真带着里程的一句正文，偏偏被一条看着齐全的扫描放过了。
+## 现在用 K\\d+ 匹配任意编号，以后写 K7、K250 一样拦得住。
+const _KM_WORDS := ["km", "公里", "kilometer", "kilometre"]
 
 
 func _check_km_offscreen() -> void:
 	var loc_script: GDScript = load("res://scripts/Localization.gd")
+	var milepost := RegEx.new()
+	milepost.compile("K\\d+")
+	var hits: Array[String] = []
 	for lang in ["zh", "en"]:
 		var table: Dictionary = loc_script.STRINGS[lang]
 		for key in table.keys():
-			if key == "progress":
-				continue
 			var s := str(table[key])
 			for w in _KM_WORDS:
-				_ck("[%s] %s 不含「%s」" % [lang, key, w], not s.contains(w),
-					"文案=%s" % s)
+				if s.contains(w):
+					hits.append("[%s] %s 命中「%s」：%s" % [lang, key, w, s])
+			var m := milepost.search(s)
+			if m != null:
+				hits.append("[%s] %s 命中里程碑牌号「%s」：%s" % [lang, key, m.get_string(), s])
+	# 一次断言报全部，而不是每个 key 每种写法各报一条 ——
+	# 漏网必须是"看得见的一件事"，不能被淹没在几百条 OK 里。
+	_ck("STRINGS 里没有任何里程（逐条列在下面）", hits.is_empty(),
+			"\n        " + "\n        ".join(hits))
 
 
 ## 预算按公式重算，不引用任何硬编码结论

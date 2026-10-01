@@ -11,6 +11,9 @@ extends SceneTree
 ##   ——尤其是 HUD 叠上去之后还剩多少 3D 画面、面板有没有把字挡住。
 ##
 ## 用法： godot --path . --script tools/lookdev_journey.gd
+##
+## 12b_dusk_黄昏 这一屏是**唯一**看得到世界光照的地方：光照全在环境层，
+## 别的 lookdev 都不管它，而 DayCycle 的黄昏常量只能靠这张图判对错。
 
 const SAVE_DIR := "user://lookdev_journey"
 const SHOT := Vector2i(1280, 720)
@@ -85,9 +88,35 @@ func _free_scene(n: Node) -> void:
 
 
 ## 把玩家挪到某个驿站边上，顺手把里程计和邻近状态摆成刚到站的样子。
+##
+## 摆位必须是玩家**真能站到**的地方。原来写的是「站心 + 3m」，那是建筑内部：
+## 站心离路 18m，而边界力在离路 12m 就开始推，玩家最近只能到 6m。
+## 于是定妆照里 04/05 两张糊着一面占满画面的墙 —— 车看不见、路看不见、
+## 打卡提示被几何挡在后面。这几张图是要给评审看的，它当时把一个
+## 玩家遇不到的状态当成了"到站长什么样"。
+## 现在按提示圈刚亮那一刻的真实位置摆：站心距 = STATION_PASS_RADIUS - 0.5，
+## 站在站心与最近中心线的连线上，正对站。
 func _teleport(station_idx: int) -> void:
 	_world._close_shop()
-	_world._player.position = _world._stations[station_idx].position + Vector3(0, 1.0, 3.0)
+	var st: Vector3 = _world._stations[station_idx].position
+	var road := _nearest_centerline(st)
+	var away := Vector3(st.x - road.x, 0.0, st.z - road.z)
+	if away.length() < 0.001:
+		away = Vector3(0.0, 0.0, 1.0)
+	away = away.normalized()
+	var p: Vector3 = st - away * (float(_world.STATION_PASS_RADIUS) - 0.5)
+	p.y = _world._get_terrain_height(p.x, p.z)
+	_world._player.global_position = p
+	# Player3D 的前方是 -basis.z，所以要车头指向站，角度得取反再转半圈
+	_world._player.global_rotation = Vector3(0.0,
+			atan2(st.x - p.x, st.z - p.z) + PI, 0.0)
+	# 相机必须跟上，否则拍到的是"相机还停在传送前"的画面。
+	# 关键不在 set_camera_locked，而在 set_can_move：Player3D._update_camera
+	# 只在 _physics_process 的 `if not _can_move: return` 之后才跑，
+	# 玩家一旦不能移动，相机就永远不更新。序章把 _can_move 设成 false，
+	# 而本脚本从不把它放回 true —— 于是传送之后相机钉在原地，车在画面里
+	# 缩成一半大（量过：107px vs 正常 226px）。
+	# 下面 run() 里在序章之后统一把玩家放回"能骑"的状态。
 	_world._last_global_pos = _world._player.global_position
 	_world._has_last_pos = true
 	_world._nearby_station_idx = -1
@@ -96,6 +125,18 @@ func _teleport(station_idx: int) -> void:
 	_world._recheck_armed = true
 	_world._nearby_station_dist = 999.0
 	_world._nearby_shop_dist = 999.0
+
+
+func _nearest_centerline(p: Vector3) -> Vector3:
+	var best := Vector3.ZERO
+	var bd := 1e9
+	for cl in _world._road_builder.get_all_centerlines():
+		for q in cl:
+			var d: float = Vector2(q.x - p.x, q.z - p.z).length()
+			if d < bd:
+				bd = d
+				best = q
+	return best
 
 
 ## 「下一处」的方向箭头必须真的在指方向，而不只是显示站名和距离。
@@ -141,6 +182,87 @@ func _arrow_in(label_text: String) -> String:
 	return ""
 
 
+## 车必须在画面里，而且要够大。
+##
+## 这条是被"看不到车"那句评审意见逼出来的，但量完发现车一直都在：
+## 世界 AABB 1.52×1.68×2.58m，投影 182×226px（屏宽的 14%、屏高的 31%），
+## 全速 15m/s 与静止完全一样（相机的 lerp 在 60FPS 下稳态滞后就是设计值 6.0m）。
+## 当初看不出来是因为**定妆照把玩家摆在了建筑内部**（见 _teleport），
+## 一面米色墙糊满画面，什么都看不见 —— 是量具的问题，不是车的问题。
+## 那条 0.6 的对白遮罩又叠了一层，把整个世界压成近黑（已改成 0.30）。
+## 这里把"车在屏内且够大"钉死，免得以后再被机位问题连累。
+func _check_bike_on_screen() -> void:
+	var cam: Camera3D = _world._player.get_node_or_null("Camera3D")
+	if cam == null:
+		_ck("车在屏内：拿到相机", false)
+		return
+	var meshes: Array = []
+	_collect_meshes(_world._player, meshes)
+	if meshes.is_empty():
+		_ck("车在屏内：玩家身上有网格", false)
+		return
+	var all := AABB()
+	var first := true
+	for m in meshes:
+		var mi: MeshInstance3D = m
+		var b: AABB = mi.global_transform * mi.get_aabb()
+		if first:
+			all = b
+			first = false
+		else:
+			all = all.merge(b)
+	var vs: Vector2 = cam.get_viewport().get_visible_rect().size
+	var minx := 1e9
+	var maxx := -1e9
+	var miny := 1e9
+	var maxy := -1e9
+	for i in range(8):
+		var p: Vector2 = cam.unproject_position(all.get_endpoint(i))
+		minx = min(minx, p.x)
+		maxx = max(maxx, p.x)
+		miny = min(miny, p.y)
+		maxy = max(maxy, p.y)
+	var bw := maxx - minx
+	var bh := maxy - miny
+	_ck("车整个在画面内（%.0f,%.0f)-(%.0f,%.0f / 屏 %s）" % [minx, miny, maxx, maxy, str(vs)],
+			minx >= 0.0 and miny >= 0.0 and maxx <= vs.x and maxy <= vs.y)
+	# 低于 100px 高就等于"看得见但认不出是辆车"，评审看到的就是一条黑线
+	_ck("车在画面里够大（%.0f×%.0fpx，至少要 100px 高）" % [bw, bh], bh >= 100.0)
+	_ck("车的画面位置（车心 %s，相机 %s，距离 %.2fm，俯角 %.1f°）" % [
+			str(all.get_center()), str(cam.global_position),
+			cam.global_position.distance_to(all.get_center()),
+			rad_to_deg(atan2(cam.global_position.y - all.get_center().y,
+					Vector2(cam.global_position.x - all.get_center().x,
+					cam.global_position.z - all.get_center().z).length()))],
+			true)
+
+
+func _collect_meshes(n: Node, out: Array) -> void:
+	for c in n.get_children():
+		if c is MeshInstance3D:
+			out.append(c)
+		_collect_meshes(c, out)
+
+
+## 拍到站的图之前，先证明这一站的车是**真能骑到的位置**上拍的。
+##
+## 站心离路 18m，边界力（SOFT_BOUND=12m）会把玩家推回来，所以玩家最近只能到
+## 站心 6m。摆位一旦比这更近，拍出来的就不是玩家会看到的画面 —— 而这正是当初
+## "到站看不见车、看不见路"的来源。这里把摆位钉死在真可达范围内。
+func _check_arrival_reachable(station_idx: int) -> void:
+	var p: Vector3 = _world._player.global_position
+	var st: Vector3 = _world._stations[station_idx].position
+	var road := _nearest_centerline(st)
+	var d_station := Vector2(p.x - st.x, p.z - st.z).length()
+	var d_road := Vector2(p.x - road.x, p.z - road.z).length()
+	_ck("到站机位是真可达的（离路 %.1fm ≤ 软边界 %.0fm）" % [d_road, _world.SOFT_BOUND],
+			d_road <= float(_world.SOFT_BOUND) + 0.01)
+	# 而且必须真的在判定半径内，否则提示圈根本没亮，那张图也不算数
+	_ck("到站机位确实触发了判定（站心距 %.1fm < 半径 %.0fm）" % [
+			d_station, _world.STATION_PASS_RADIUS],
+			d_station < float(_world.STATION_PASS_RADIUS))
+
+
 func _run() -> void:
 	print("=== 新玩家全流程定妆照 ===")
 	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
@@ -175,18 +297,56 @@ func _run() -> void:
 	await _snap("03_prologue_序章对白")
 	_world._dialogue_popup.visible = false
 	_gm.mark_prologue_done()
+	# 序章把玩家冻住了，而本脚本要拍的是"玩家已经在路上"的那些屏。
+	# 不放回来的话 Player3D._update_camera 整个不会跑，相机永远不跟传送走，
+	# 于是后面每一张站点的图都是"相机停在传送前"的样子。
+	_world._player.set_can_move(true)
+	_world._player.set_camera_locked(false)
 
 	# ---- 04 骑行中的 HUD ----
 	_teleport(0)
 	await create_timer(1.0).timeout
 	_check_next_target_arrow()
+	_check_arrival_reachable(0)
+	_check_bike_on_screen()
 	await _snap("04_ride_骑行中")
 
 	# ---- 05 靠近碎片驿站：地面提示 ----
 	_teleport(4)
 	await create_timer(1.0).timeout
 	_ck("碎片站 4 有打卡提示", _world._check_in_prompt.visible)
+	_check_arrival_reachable(4)
+	_check_bike_on_screen()
 	await _snap("05_prompt_打卡提示")
+
+	# 05c 贴到 1.2m：站点的投影被推到画面下半，提示文字最容易掉出屏外。
+	# 只拍可送达机位那张的话这一屏永远看不出来，而那恰恰是玩家最该读到按键提示的一刻。
+	# 所以这一张是**故意的**极端机位：玩家最近只能到 6m（离路 18m - 软边界 12m），
+	# 这里比那还近 4.8m，是压力测试不是玩家视角，别拿它当"到站长什么样"。
+	_world._player.position = _world._stations[4].position + Vector3(0, 1.0, 1.2)
+	_world._last_global_pos = _world._player.global_position
+	await create_timer(1.0).timeout
+	_ck("贴脸时提示圈还在", _world._check_in_prompt.visible)
+	await _snap("05c_prompt_贴脸")
+
+	# ---- 05d 回访：三处都要说出"还差几次" ----
+	# 完满评级要求每座碎片驿站去过 MAX_VISITS 次。可这一屏以前什么都不说：
+	# 顶栏在第一次拿到碎片之后就把"下一处"摘掉了，底栏的碎片格收过之后三次
+	# 长得一模一样，脚下提示圈还写着"歇一脚"。三处都不改的话，全游戏最强的
+	# 重玩钩子在画面上根本不存在。
+	_gm.collected[4] = 1
+	await create_timer(0.8).timeout
+	_ck("回访时顶栏说的是「再访 · 还差 2 次」",
+			str(_world._hud3d._next_label.text).contains(_loc.t("visits_left_n") % 2),
+			str(_world._hud3d._next_label.text))
+	var cp = _world._check_in_prompt
+	var tgt: Array = cp._prompt_target()
+	_ck("回访时脚下提示圈写的是还差几次",
+			not tgt.is_empty() and str(cp._label(tgt)).contains(
+					_loc.t("desktop_revisit_prompt") % 2),
+			"圈上写着：%s" % str(cp._label(tgt)))
+	await _snap("05d_revisit_回访提示")
+	_gm.collected[4] = 0
 
 	# ---- 05b 路过风景驿：浮一句它自己的话 ----
 	# 站 1 是非碎片、非铺子的普通驿，HUD 会在进圈那一帧浮出 road_data 里那行 text。
@@ -242,6 +402,50 @@ func _run() -> void:
 	await _snap("12_shop_驿铺")
 	_world._close_shop()
 
+	# ---- 12b/12c 正午 vs 黄昏：同一机位两张 ----
+	# 这一屏没法用别的办法验。光照全在环境层，headless 的 dummy renderer 拍不出
+	# 颜色；而 DayCycle 那几个黄昏常量是照着断言挑的、不是照着渲出来的图挑的 ——
+	# AGX 会把中间调提亮并去饱和，数字全对也完全可能渲成一片橙的糊。这条改动
+	# 动了太阳方向、环境光、雾、远景山线四样，只有看图能判它们凑在一起对不对。
+	#
+	# _odometer_units 是**累加器**（World3D 只在玩家位移时往上加），所以站着不动
+	# 把它摆到第三圈就成立，转场期间玩家没动它也不会被改回去。
+	_world._odometer_units = 3.0 * _world._total_arclen
+	# 机位必须是**真实跟随相机**（Player3D._update_camera 的第三人称机位）。
+	# 旧版把人按到离地 1m 处平视，拍出来是一堵草墙：车小到只剩一个红点，
+	# 地平线压在画面上沿，判不出黄昏到底把光打成了什么样——而这正是这一屏
+	# 唯一存在的理由。停到路面上、车头顺着路走，真相机会自己落到车后上方，
+	# 于是前景是路、中景是车、远景是山和天，三样都量得到。
+	var rd_dusk: Object = _world._road_builder.get_road_data()
+	var pts: Array = rd_dusk.points
+	var di: int = int(pts.size() * 0.18)
+	var p_on: Vector3 = pts[di]
+	var fwd: Vector3 = pts[(di + 1) % pts.size()] - pts[di - 1]
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	_world._player.position = p_on
+	_world._last_global_pos = _world._player.global_position
+	_world._has_last_pos = true
+	_world._player.look_at(p_on + fwd * 100.0, Vector3.UP)
+	_world._player.set_camera_locked(false)
+	# 相机是 lerp(0.12) 跟过去的，等它真的落位再拍，
+	# 不然拍到的是"相机还在半路上"的中间态。
+	await create_timer(1.5).timeout
+	# 这两张图的全部意义就是看光，所以车必须在画面里且够大，
+	# 否则"天变了没有"和"车去哪了"分不开。
+	_check_bike_on_screen()
+	# 正午那一张要和黄昏那张**同一个机位**，否则两帧之间混进了机位差，
+	# 看的人分不清哪些变化是天色给的、哪些是视角给的。
+	await _snap("12b_day_正午")
+	# 转场 9 秒（DayCycle.FADE_SEC），按墙钟等 —— 这台机器帧数不等于秒数
+	await create_timer(11.0).timeout
+	var dusk_t: float = float(_world._day_cycle.get_t())
+	_ck("骑满两圈之后天色真的走到黄昏（不是还在半路上）", dusk_t == 1.0,
+			"t=%f" % dusk_t)
+	# 太阳压到 9° 之后影子该拉得很长，而且方向和正午那档差了一截。
+	# 这一屏不校验数字（verify_day_cycle.gd 已经逐条量过了），只看整张图凑不凑。
+	await _snap("12c_dusk_黄昏")
+
 	# ---- 13 集齐合成 ----
 	_gm.seen_villain = 3
 	for i in _world._stations.size():
@@ -280,6 +484,45 @@ func _run() -> void:
 	# 缩略图按累计 delta 节流 0.12s，等墙钟不等帧
 	await create_timer(0.8).timeout
 	await _snap("16_postcard_back_背面写字")
+
+	# 这一屏的判据只有像素能量 —— "所见即导出"的意思是玩家认得出自己写的字，
+	# 而 verify_postcard_ending.gd 量的是控件尺寸，尺寸对了不代表里面真有内容
+	# （SubViewport 回读拿到空帧时预览就是一块纯色，尺寸一模一样）。
+	# 所以回读这一帧，在预览那一块上量"有没有墨"：深色像素占比 + 明暗跨度。
+	# 两个都量，因为两种失败长得不一样 —— 全是背景色是回读失败，有纹路但
+	# 明暗挤在一起是卡片上字太小、缩到读不出来。
+	var thumb: Control = endcard._back_thumb
+	var img: Image = root.get_texture().get_image()
+	var tx := int(thumb.global_position.x)
+	var ty := int(thumb.global_position.y)
+	var tw := int(thumb.size.x)
+	var th := int(thumb.size.y)
+	_ck("预览在这一屏真的摆得下（≥400px 宽）", tw >= 400,
+			"%.0fx%.0f @ (%.0f,%.0f)" % [tw, th, tx, ty])
+	var ink := 0
+	var lo := 1.0
+	var hi := 0.0
+	var n := 0
+	# 墨落在几条横带上：一张空卡是 0 条，写了字的卡至少是"抬头 + 正文 + 落款"
+	# 三条。只数总量的话，一道划痕或一个焦点环也能凑够。
+	var bands := {}
+	for y in range(ty, mini(ty + th, img.get_height())):
+		for x in range(tx, mini(tx + tw, img.get_width())):
+			var c := img.get_pixel(x, y)
+			var lum := c.get_luminance()
+			if lum < 0.45:
+				ink += 1
+				bands[(y - ty) / 24] = true
+			lo = minf(lo, lum)
+			hi = maxf(hi, lum)
+			n += 1
+	_ck("预览里有墨（不是一块纯色 = SubViewport 回读到空帧）",
+			n > 0 and float(ink) / float(n) > 0.004,
+			"%.2f%% 的像素暗于 0.45（%d/%d）" % [100.0 * float(ink) / float(n), ink, n])
+	_ck("墨铺在好几条横带上（不是一块噪声）", bands.size() >= 3,
+			"落在 %d 条 24px 横带上" % bands.size())
+	_ck("预览的明暗拉得开（字和纸分得开，不是一团糊）", hi - lo > 0.25,
+			"跨度 %.3f（%.3f~%.3f）" % [hi - lo, lo, hi])
 
 	await _free_scene(endcard)
 	_gm._clear_save()

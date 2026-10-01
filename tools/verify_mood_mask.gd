@@ -171,6 +171,13 @@ func _run() -> void:
 	_eq("旅币标签文字对得上", _hud._lvbi_label.text, _loc.t("lvbi_label", [int(_gm.lvbi)]))
 	_eq("心神标签文字对得上", _hud._mood_label.text, _loc.t("mood_label", [int(_gm.mood)]))
 
+	# ---- 2b. 三个音频开关在顶栏上必须彼此可分 ----
+	# BGM 和音效原来共用一个字形「♪」和同一句话「♪ 开」，两个按钮长得一模一样，
+	# 旁边还杵着一个同样显眼的全静音 🔊。玩家点第一个不知道静音的是音乐。
+	# 判据不是"文案不一样"——那本来就不一样，是"**首字符**不一样"，
+	# 因为顶栏上真正被一眼扫到的只有那个字形。
+	await _audit_audio_buttons()
+
 	# ---- 3. 骑行档收敛到目标值 × MOOD_REST_SCALE ----
 	await _settle()
 	_approx("遮罩收敛到骑行档", _mask_alpha(), _rest_target())
@@ -320,6 +327,51 @@ func _run() -> void:
 	_ck("退回后仍然可读", _mask_alpha() < 0.20, "got=%f" % _mask_alpha())
 
 	_finish(backup)
+
+
+## 三个音频开关在顶栏上必须彼此可分。
+##
+## 判据只看每行**第一个字形**（顶栏上被一眼扫到的就是它），不看整句：整句本来
+## 就不同（"♫ 开" vs "♪ 开"），可两个按钮在全都显示"开"时是逐字相同的，
+## 只比整句会在全开这一档放行。两种静音态都走一遍。
+func _audit_audio_buttons() -> void:
+	var hud = _world._hud3d
+	# --script 模式下 autoload 在编译期解析不到，只能运行时按名字取
+	var am: Node = root.get_node("AudioManager")
+	# 回到三档全开，这是两个按钮最像彼此的一档
+	am.set_muted(false)
+	am.set_bgm_muted(false)
+	am.set_sfx_muted(false)
+	hud._update_buttons()
+	var heads := {
+		"全静音": hud._mute_btn.text.substr(0, 1),
+		"BGM": hud._bgm_btn.text.substr(0, 1),
+		"音效": hud._sfx_btn.text.substr(0, 1),
+	}
+	var uniq := {}
+	for k in heads:
+		uniq[heads[k]] = true
+	_ck("三个音频开关的字形互不相同（全开档）", uniq.size() == 3,
+			"实际：%s" % str(heads))
+	_ck("BGM 与音效的 tooltip 也各说各的",
+			hud._bgm_btn.tooltip_text != hud._sfx_btn.tooltip_text,
+			"两者都是：%s" % hud._bgm_btn.tooltip_text)
+	_eq("BGM tooltip 就是那条文案", hud._bgm_btn.tooltip_text, _loc.t("bgm_mute"))
+	_eq("音效 tooltip 就是那条文案", hud._sfx_btn.tooltip_text, _loc.t("sfx_mute"))
+
+	# 关掉 BGM 之后，两个按钮的**字形**仍然要不同 —— 少一个「♫ 写成 ♪」的
+	# 笔误的话，玩家会以为点错了按钮
+	am.set_bgm_muted(true)
+	hud._update_buttons()
+	_ck("静音 BGM 之后两个按钮仍可分",
+			hud._bgm_btn.text.substr(0, 1) != hud._sfx_btn.text.substr(0, 1),
+			"bgm=%s sfx=%s" % [hud._bgm_btn.text, hud._sfx_btn.text])
+	_ck("静音 BGM 之后 BGM 那颗显示「关」",
+			hud._bgm_btn.text.contains(_loc.t("off")), hud._bgm_btn.text)
+	am.set_muted(false)
+	am.set_bgm_muted(false)
+	am.set_sfx_muted(false)
+	hud._update_buttons()
 
 
 func _finish(backup: String) -> void:

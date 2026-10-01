@@ -16,7 +16,8 @@ const SUCCESS := 0
 const CANCELLED := 1
 ## 必须按碎片槽位顺序（= RoadData.FRAGMENT_SLOT_STATION_IDX）跑。
 ## 驿站 4 是第 5 张碎片，打卡成功会触发 all_fragments_collected →
-## _on_all_collected()，2.5 秒后 go_to_end_card() 换场景并锁死相机。
+## _on_all_collected()。它现在只播动画不放人（2.5 秒后把相机和操作还回来），
+## 但仍会锁住玩家，所以 _test_station() 里要把 _all_done / 相机锁清干净。
 ## 把它排在第一个，后面 4 个驿站全部测不到（nearby=-1、玩家不能动）。
 const STATIONS := [7, 10, 13, 14, 4]
 ## 与 World3D 保持一致的三个常量（实例访问 const 不稳，这里直接复刻）
