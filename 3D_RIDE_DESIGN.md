@@ -1,5 +1,10 @@
 # 188号礼物 · 3D骑行方案
 
+> 本文是**当前实现**的说明书，不是当初的构想书。
+> 文中每一个参数都能在代码里逐字对上，`tools/verify_story.gd` 第 5 节
+> 会拿本文和代码对拍——改了代码不同步改这里（或反过来），回归会红。
+> 构想过程、放弃的方案与踩过的坑一律不写在这里，那些在 `CLAUDE.md` 的「已知陷阱」里。
+
 ## 为什么改3D
 
 2D俯视角的8字路径有几何硬伤：两圆切于一点，waypoint索引在切点处跳变，车经过驿站1/5时偏离路径。
@@ -7,169 +12,186 @@
 
 ## 路线来源与授权策略
 
-**本作路线是纯虚构的几何图案**，由 lemniscate 参数方程解析采样生成（见 `scripts/road_data.gd` 的 `LEMNISCATE_LOCAL`），经旋转 60°/缩放/平移后构造成 8 字环形。**不引用任何外部 SVG、GPS 轨迹或现实公路数据**，也不还原任何现实道路的走向。
+**本作路线是纯虚构的几何图案**，由 lemniscate 参数方程解析采样生成（见 `scripts/road_data.gd` 的 `LEMNISCATE_LOCAL`，49 点），经旋转 60°/缩放/平移后构造成 8 字环形。**不引用任何外部 SVG、GPS 轨迹或现实公路数据**，也不还原任何现实道路的走向。
 
-里程显示使用 `GameManager.TOTAL_ROUTE_KM = 188`，是创意数值，与几何尺度解耦（玩家骑行弧长按比例换算为该里程数）。
+驿站名全部是虚构雅称，不使用任何真实地理或官方驿驿品牌名称。
 
 本作为虚构叙事 Demo：路线形状、驿站名、场景布局均为艺术化创作，题材取自公有领域的东坡诗文，不声称代表任何现实旅游公路、官方驿站品牌或实际景区运营内容。
 
-5个游戏碎片驿站（虚构雅称）与曲线位置：
+## 「188」是编号不是里程
 
-- S1 云影台 / Cloudshadow Terrace — 云
-- S2 茶烟小筑 / Tea Smoke Cottage — 茶
-- S3 琴音林 / Zither Grove — 琴
-- S4 竹雨庭 / Bamboo Rain Courtyard — 竹
-- S5 禽语湖湾 / Birdsong Cove — 禽
+`GameManager.TOTAL_ROUTE_KM = 188` **只作旅币经济口径**（每骑过 1 整公里 +2 旅币），
+不出现在任何玩家可见的界面上。真实环路只有 1228.8m，按 15 m/s 满速折算约 2 km/s，
+顶栏挂着那个数玩家骑三十秒就能算出 7200 km/h，然后整个数字连同它承载的门槛一起变噪音。
+
+**顶栏走的是驿数口径**：`GameManager.get_seen_station_count()`，写「已过 n/16 驿」。
+已从 km 门迁走的：灯铺解锁（`shop_data.gd` 的 `seen_unlock = 6`）和
+`World3D.VILLAIN_SCENES` 三场郑铎戏（`seen = 4/8/12`）。
+回归：`verify_economy.gd` 的 `_check_km_offscreen()` 扫全部文案里的
+`km / 公里 / kilometer / kilometre / K0 / K188`。
 
 ## 坐标映射
 
-参数曲线局部坐标 → 3D世界坐标：
+参数曲线局部坐标 → 3D世界坐标（`road_data.gd`）：
 
-- `world_x = (canvas_x - 400) * scale`  （居中）
-- `world_z = (canvas_y - 714) * scale`  （居中）
+- `world_x = (px - 400) * 0.5`  （`CX = 400`，`SCALE = 0.5`）
+- `world_z = (py - 714) * 0.5`  （`CY = 714`）
 - `world_y = 地形高度`  （Y轴朝上）
-- `scale = 0.5`
+- 旋转 60° + 缩放 350 + 平移 (400, 800) 之后是画布坐标
 
 ## 技术架构
 
+`scenes/World3D.tscn` 实际节点（节选，完整树见场景文件）：
+
 ```text
-World3D.tscn (Node3D)
-├── DirectionalLight3D        # 太阳光
-├── WorldEnvironment          # 天空+雾
-├── Terrain (StaticBody3D)   # 低多边形地面
-├── RoadMesh (MeshInstance3D) # 由路网点生成的路面mesh
-├── Stations (Node3D)
-│   ├── Station1 ~ Station16  # 5个碎片驿站 + 11个装饰路标
+World3D (Node3D)
+├── WorldEnvironment            # 天空+雾（DayCycle 运行时注入真的 ProceduralSkyMaterial）
+├── DirectionalLight3D          # 太阳（DayCycle 改它的高度角/方位角/能量）
+├── FillLight3D                 # 补光
+├── TerrainBuilder              # 程序化地形
+├── RoadBuilder                 # 路面 mesh + 路面高度查询
+├── VegBuilder                  # 行道树/灌木的静态布点（编辑模式产物）
+├── GrassScatter                # 脚边草皮：MultiMesh 池 + 逐格流式
+├── TreeScatter                 # 行道树：按弧长等间距 + 每格一个 MultiMesh
 ├── Player3D (CharacterBody3D)
-│   ├── BikeModel (MeshInstance3D)  # 自行车模型
-│   ├── Camera3D (Camera3D)         # 第三人称跟随
-│   └── CollisionShape3D
-├── HUDLayer (CanvasLayer)    # HUD / FragmentBar / CheckInPopup
-└── JoystickLayer (CanvasLayer)  # 移动端摇杆
+│   ├── BikeCollision
+│   └── Camera3D                # 第三人称跟随
+├── HUDLayer
+│   ├── CheckInPopup
+│   ├── DialoguePopup
+│   ├── FragmentBarLayer / FragmentBar
+│   ├── JoystickLayer / VirtualJoystick
+│   ├── MiniGameLayer
+│   ├── HUD3D (TopBar / HelpOverlay)
+│   ├── MiniMap
+│   └── CheckInPrompt           # 屏幕空间提示圈 + 触屏「完成乐事」按钮
+└── OnboardingGuide / ShopPanel / PausePanel
 ```
 
-当前关键模块：
+`FarRidge` 与 `DayCycle` 是运行时挂上去的（见 `World3D._ready()`）。
 
-- `World3D.gd`：3D主世界、玩家、驿站、打卡、相机、边界、小地图连接
-- `TerrainBuilder.gd`：程序化3D地形
-- `RoadBuilder.gd`：道路mesh、中心线、路面高度查询
-- `VegBuilder.gd`：树、灌木、道路/驿站保护半径
-- `Player3D.gd`：骑行控制
-- `VirtualJoystick.gd`：移动端虚拟摇杆
-- `CheckInPrompt.gd`：屏幕空间打卡提示圈与触屏“完成乐事”按钮
-- `Localization.gd`：中英文案与语言持久化
+## 关键模块
+
+| 脚本 | 职责 |
+|---|---|
+| `GameManager.gd` | 存档（v3）、旅币经济、心神、驿数进度、结束条件的两个闩锁 |
+| `World3D.gd` | 3D主世界、打卡流程、相机过场、反派三场、边界、小地图连接 |
+| `Player3D.gd` | 骑行控制与相机跟随 |
+| `RoadBuilder.gd` | 路面mesh、中心线、`get_road_ribbon_height()` 三角形质心插值 |
+| `TerrainBuilder.gd` | 程序化3D地形与高度查询 |
+| `VegBuilder.gd` / `GrassScatter.gd` / `TreeScatter.gd` | 植被三层：静态布点 / 脚边草皮 / 行道树 |
+| `FarRidge.gd` | 远景山线（三层环形，纯几何零贴图，顶点色烘空气透视） |
+| `DayCycle.gd` | 骑满两圈后天色走到黄昏；太阳方向、光强、天空一起走 |
+| `CheckInPrompt.gd` | 屏幕空间打卡提示圈与触屏按钮 |
+| `Localization.gd` | 中英文案与语言持久化 |
+| `shop_data.gd` / `ShopPanel.gd` | 三铺数据与采购面板 |
+| `Postcard.gd` / `PostcardVariant.gd` / `EndCard.gd` | 明信片分级、导出 PNG、终局二选一 |
 
 ## 自行车控制方案
 
-**不用VehicleBody3D**（太重，需调参），改用 **CharacterBody3D + 路网跟随**：
+**不用 VehicleBody3D**（太重，需调参），改用 **CharacterBody3D 自由 3D 移动**：
 
 | 输入 | 行为 |
 |---|---|
-| W / 摇杆上 | 沿路网前进方向加速 |
-| S / 摇杆下 | 减速/倒退 |
-| A / 摇杆左 | 左转 |
+| W / 摇杆上 | 沿车头方向加速（`ACCEL = 8.0`，上限 `MAX_SPEED = 15.0` m/s） |
+| S / 摇杆下 | 减速 / 倒退（`REVERSE_SPEED = 5.0`） |
+| A / 摇杆左 | 左转（`TURN_SPEED = 1.8` rad/s） |
 | D / 摇杆右 | 右转 |
-| Space / Enter / 触屏“完成乐事” | 靠近驿站时打卡 |
+| Space / Enter / 触屏「完成乐事」 | 靠近驿站时打卡 |
 | Esc | 暂停 |
 | M | 全局静音 |
 
-实际实现：
+实际实现（`Player3D.gd`）：
 
-- 预计算路网所有点（49 点解析采样 → 48×20 = 960 点，RoadBuilder 再平滑重采样）
-- 玩家在路网上有 `_road_index`（浮点数）和 `_road_progress`
-- W加速 = `_road_speed` 增大
-- 每帧 `_road_index += _road_speed * delta`
-- 位置 = 路网点[int(_road_index)] 与下一点的lerp
-- 朝向 = look_at 下一个路网点
-- 相机 = 车后方偏移 + smooth follow
-
-## 路面Mesh生成
-
-用Godot的 `SurfaceTool` 或 `ImmediateMesh`：
-
-1. 取处理后的路网点（三次高斯平滑 + 0.5m 重采样）
-2. 每个点计算路宽方向（垂直于切线）
-3. 生成左右边带顶点
-4. 三角带连接相邻段
-5. 道路细节由程序化shader补充：颗粒、胎痕、路缘起灰、双黄虚线
-
-## 地形
-
-低多边形地形：
-
-- 一个大的 `PlaneMesh`（细分20×20）
-- 用 `FastNoiseLite` 生成高度噪声
-- 山体区域高度更高
-- 水边驿站区域高度更低，用于湖面/水岸关系
-
-## 驿站3D占位
-
-5个碎片驿站各用3D地标表现，走近时加载GLB：
-
-- S1 云影台：观景亭/台阶，表达雨后看云
-- S2 茶烟小筑：茶屋，表达客至煮茶
-- S3 琴音林：古林林地，表达风穿树叶如琴音
-- S4 竹雨庭：竹窗/水岸灯火，表达夜雨敲竹
-- S5 禽语湖湾：湖湾花房，表达飞鸟替湖回答
-
-另外11个装饰路标只补足8字路线与里程感，不承担核心收集目标。
+- 玩家**不**吸附在路网上。世界是自由 3D 的，路只是画在地面上的一片 mesh
+- 每帧 `position += forward * _speed * delta`，`forward = -basis.z`
+- 转向速率按速度缩放：`turn_factor = clamp(|speed| / 3.0, 0, 1)`，站着不动时转不动车
+- Y 由 `World3D._physics_process` 按地形高度设置，`Player3D` 不覆盖
+- 边界由 `World3D._apply_boundary_force()` 软回弹处理，不做硬 clamp
 
 ## 相机方案
 
-第三人称跟随（车后方斜上方）：
+第三人称跟随（车后方斜上方），`Player3D._update_camera()`：
 
 ```gdscript
-相机位置 = 车位置 + 车朝向的逆方向 * 8 + Vector3(0, 5, 0)
-相机look_at = 车位置 + 车朝向 * 3
-smooth = 0.15 # lerp因子
+var forward = -global_transform.basis.z
+var target_pos = global_position - forward * 6.0 + Vector3(0, 4.0, 0)
+_cam.global_position = _cam.global_position.lerp(target_pos, 0.12)
+_cam.look_at(global_position + forward * 3.0 + Vector3(0, 1.0, 0), Vector3.UP)
 ```
 
-## 复用与改造资产
+`set_camera_locked(true)` 期间相机冻结——打卡时的运镜由 `World3D._do_check_in()`
+用另一条 tween 接管（1.0s 移到站点旁的机位，再定格 1.5s）。
 
-| 2D模块 | 3D中复用/改造方式 |
-|---|---|
-| GameManager.gd | 保留状态机、碎片逻辑，增加3D里程/存档/场景切换 |
-| AudioManager.gd | 保留BGM+SFX，增加环境音与分别静音 |
-| HUD | 改造为HUD3D，显示里程、碎片、暂停、声音、帮助 |
-| FragmentBar | CanvasLayer直接挂到3D场景 |
-| CheckInPopup | 改造为3D驿站打卡弹窗 |
-| EndCard | 保留合成/导出逻辑，支持中英文与PNG下载 |
-| GiftBox.tscn | 标题页进入World3D，增加语言切换 |
-| 字体/音频 | 路径保留，字体子集化、音频OGG化 |
+## 路面Mesh生成
 
-## 开发排期
+`RoadBuilder.gd` 用 `SurfaceTool` 生成：
 
-| 步骤 | 产出 |
-|---|---|
-| 1. 写方案 | 本文档 |
-| 2. project.godot改3D | 渲染器Forward+，视口1280×720 |
-| 3. 构造路线数据 | `scripts/road_data.gd` — lemniscate 采样点 + 16 站点坐标 |
-| 4. World3D.tscn骨架 | 地形+光照+天空 |
-| 5. 路面mesh生成 | `scripts/RoadBuilder.gd` |
-| 6. Player3D | `scripts/Player3D.gd` — 路网跟随+相机 |
-| 7. 驿站占位 | 5个碎片地标 + 11个装饰路标 |
-| 8. HUD挂载 | HUD3D / FragmentBar / CheckInPopup |
-| 9. GiftBox跳转 | 标题页跳转World3D |
-| 10. 测试运行 | F5，车沿路面骑行；回归道路/植被/交叉点 |
+1. 取 lemniscate 采样点（49 点解析采样），重采样到约 0.5m
+2. 每个点计算路宽方向（垂直于切线）
+3. 生成左右边带顶点
+4. 三角带连接相邻段
+5. 路面细节由 `assets/shaders/asphalt.gdshader` 程序化补充：颗粒、胎痕、路缘起灰、潮斑、路肩泥土、双黄虚线
 
-## 后续验收重点
+**交叉点高度必须用 `RoadBuilder.get_road_ribbon_height(x, z)`**
+（三角形质心插值 + max 聚合），不能用 `get_road_height_at_xy`——后者会跳变 0.143m。
 
-- Web浏览器可打开并运行
-- 桌面Space可完成5个碎片打卡
-- 手机“完成乐事”按钮可完成5个碎片打卡
-- 明信片可导出PNG
+## 地形与植被
+
+- 地形：`TerrainBuilder.gd` + `assets/shaders/terrain_grass.gdshader`（低频色块 + 中频斑驳 + 高频麻点 + 随距离淡出的法线扰动）
+- 草皮：`GrassScatter.gd`，脚边同心环（桌面 200m / Web·移动端 100m），驻留期间零重建零隐藏
+- 行道树：`TreeScatter.gd`，沿中心线按弧长每 25m 一株，每格一个 MultiMesh，`visibility_range` 淡出
+- 三层的流式**共用同一张格子**：`CELL` 必须一致（`CLAUDE.md` 有专门的回归钉这条）
+- 远景：`FarRidge.gd` 三层环形山线（800/1350/1900m），材质必须 `disable_fog = true`
+  ——`LAYERS` 里的颜色是照着最终观感调的，场景雾再洗一次就是同一份雾算两次
+
+## 驿站与五件乐事
+
+16 座驿站中 5 座有碎片，对应《东坡赏心十六乐事》（公版诗词）里的第 1、2、12、13、16 件：
+
+| slot | 驿站 | English | 乐事 | 碎片 |
+|---|---|---|---|---|
+| 0 | 云影台 | Cloudshadow Terrace | 雨后台阶看云 | 云 |
+| 1 | 茶烟小筑 | Tea Smoke Cottage | 朋友来了先煮茶 | 茶 |
+| 2 | 琴音林 | Zither Grove | 把风声听成琴音 | 琴 |
+| 3 | 竹雨庭 | Bamboo Rain Courtyard | 夜雨敲竹 | 竹 |
+| 4 | 花房·禽语湖湾 | Birdsong Cove Flower House | 一只鸟替湖回答 | 禽 |
+
+在环上的下标：`road_data.FRAGMENT_SLOT_STATION_IDX = [7, 10, 13, 14, 4]`
+（`road_data.stations` 的数组下标，与曲线上的采样点无关）。
+
+另有 11 座非碎片驿站（`起程驿楼` / `东岭驿楼` / `南溪茶寮` / `右岭岭台` / `岭口凉亭` /
+`西湾神苑` / `灯影亭` / `北岭凉亭` / `左弯廊` / `西谷岭台` / `榕树下`），它们不承担收集目标，
+但每一座都有一句在**进圈那一帧**浮出来的话（`STATION_PASS_RADIUS = 15.0`，
+边沿触发，不是每帧判距离——否则停在圈里每秒重弹一次）。
+
+`驿铺 / 茶铺 / 灯铺` 三家开在其中三座上，价格与解锁条件全在 `shop_data.gd`。
+
+## 收集目标：集齐 ≠ 走完
+
+`MAX_VISITS_PER_STATION = 3`，五座碎片驿站**各**去过 3 次才算走完这一趟：
+
+- `all_fragments_collected`（各去过 1 次）只放动画不放人
+- `all_fragments_maxed_reached`（各刷满 3 次）才锁死并 `go_to_end_card()`
+
+顶栏 / 小地图 / 脚下提示圈这三处「下一处在哪」判据统一走
+`GameManager.fragment_station_needs_visit()`，三处只许调它，不许自己抄一遍。
+
+## 开发流程
+
+改动前先看 `CLAUDE.md` 的「提交规范」一节——每一条入口改动都指定了必须先跑的回归。
+`tools/` 下 30+ 条无头/带窗口回归覆盖路径形状、路面高度、植被、草皮、昼夜、
+经济、商店、结局、键盘通路与故事一致性。
+
+## 验收重点
+
+- 桌面 Space 可完成 5 个碎片驿站的首次打卡与回访
+- 手机「完成乐事」按钮可完成同样的流程
+- 纯键盘可从冷启动走到第一次踩上踏板（`verify_panel_keyboard.gd`，带窗口）
+- 明信片可导出 PNG，二选一的两种结局在**正面**上真的不同
 - 中英文切换后首页、HUD、暂停、打卡、结局文案正常
 - 8字交叉处无明显高度跳变或颠簸
 - 自行车无长时间穿模、陷路、浮空
 - 灌木或树木不生成在路面中央或核心驿站内部
-- 游戏内不展示现实16个官方驿站原名
-
-## 优势对比
-
-| | 2D原方案 | 3D骑行 |
-|---|---|---|
-| 路径 | 隐形waypoint，8字几何有bug | 贝塞尔lemniscate生成的路面mesh，所见即所行 |
-| 控制 | WASD抽象映射路径方向 | W加速/S刹车/A/D转向，直觉操作 |
-| 视觉 | draw_circle/draw_rect | 3D低多边形，沉浸感强 |
-| 路径问题 | 需数学修正waypoint | 路面即路径，交叉处需回归验证 |
-| 比赛 | 2D偏弱 | 3D世界构建更契合“世界构建”主题 |
+- 游戏内不展示现实道路的官方驿站原名
+- 顶栏不出现任何里程数字（P0-4）
