@@ -82,6 +82,33 @@ func setup(shop_name: String) -> void:
 	_refresh_lock()
 	_rebuild_body()
 	visible = true
+	_grab_first_focus()
+
+
+## 铺子一开就得有一件东西拿着焦点，否则 ui_up / ui_down / 回车全都没有起点
+## （`Viewport` 只把按键投给 key focus 的控件，视口里一个焦点都没有时它们
+## 谁也到不了——新手引导那一屏原来就是这么把键盘玩家卡在第一屏的）。
+## 停在第一件买得起的而不是关闭按钮：玩家推完序章进来，多半是来看能买什么；
+## 一件都买不起时自然落到关闭按钮上，键盘玩家至少有出路。
+func _grab_first_focus() -> void:
+	for c in _body.get_children():
+		var b := _focusable_in(c)
+		if b != null:
+			b.grab_focus()
+			return
+
+
+func _focusable_in(n: Node) -> Button:
+	if n is Button:
+		var btn := n as Button
+		# 买不了的不给焦点：对 disabled 控件 grab_focus() 是空操作，
+		# 停在这里等于又变成"视口里一个焦点都没有"
+		return null if btn.disabled else btn
+	for c in n.get_children():
+		var b := _focusable_in(c)
+		if b != null:
+			return b
+	return null
 
 
 ## 解锁门只看"路过多少座驿"，不再看里程。_km 只留在内部作旅币经济口径。
@@ -201,7 +228,11 @@ func _label(color: Color, size: int) -> Label:
 
 func _button() -> Button:
 	var btn := Button.new()
-	btn.focus_mode = Control.FOCUS_NONE
+	# 原来这里是 FOCUS_NONE，于是**全铺没有一个控件能被键盘选中**：键盘玩家
+	# 能用 ESC 关掉铺子，却一件也买不了，而面板上每一行都写着价钱和"买"——
+	# 一块看得见摸不着（键盘）的经济系统。整个核心循环对键盘玩家是断的，
+	# 而界面上没有任何一处提示这一点。
+	btn.focus_mode = Control.FOCUS_ALL
 	btn.add_theme_font_size_override("font_size", 15)
 	btn.add_theme_color_override("font_color", COL_GOLD)
 	btn.add_theme_color_override("font_hover_color", COL_TEXT)
@@ -212,6 +243,9 @@ func _button() -> Button:
 	btn.add_theme_stylebox_override("hover", _style(COL_BTN_HOVER, 4.0, m))
 	btn.add_theme_stylebox_override("pressed", _style(COL_BTN_PRESSED, 4.0, m))
 	btn.add_theme_stylebox_override("disabled", _style(COL_BTN_DISABLED, 4.0, m))
+	# 焦点框要看得见——引擎默认那圈描边在深色铺子里几乎看不见，
+	# 于是即使能选中，玩家也不知道自己现在停在第几件上
+	btn.add_theme_stylebox_override("focus", _style(COL_BTN_HOVER, 4.0, m))
 	return btn
 
 
@@ -275,6 +309,15 @@ func _refresh() -> void:
 			continue
 		btn.disabled = true
 		state_lbl.text = _buy_block_reason(g)
+	# 买完之后焦点还留在**刚刚买下的那件**上，而它已经 disabled 了：引擎不会
+	# 因为 disabled 就把焦点踢走，于是玩家按第二下空格什么都不会发生，
+	# 界面上也看不出区别（那件只是变灰了，而变灰正是"买到了"该有的反馈）。
+	# 所以焦点落在 <null> 或一个已经买不了的按钮上时都要挪走。只在这两种情况下
+	# 动：鼠标玩家点了哪儿都不该被拽。
+	if visible:
+		var fo: Control = get_viewport().gui_get_focus_owner()
+		if fo == null or (fo is Button and (fo as Button).disabled):
+			_grab_first_focus()
 
 
 ## 为什么买不了。不直接翻译 can_buy() 的布尔值，玩家得知道缺什么。

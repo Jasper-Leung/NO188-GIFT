@@ -54,7 +54,16 @@ enum State { GIFT_BOX, ROAMING, CHECK_IN, SYNTHESIZING, END_CARD }
 var headless_mode := false
 
 signal fragment_collected(index)
+## 五座碎片驿站**各**至少到访过一次（第一次集齐）。不是结束条件 ——
+## 之后每座还欠 MAX_VISITS_PER_STATION-1 次回访，那才是全游戏的重玩钩子。
 signal all_fragments_collected()
+## 五座碎片驿站各刷满 MAX_VISITS_PER_STATION 次。**这才是"这一趟走完了"。**
+##
+## 原来没有这个信号，World3D 直接拿 all_fragments_collected 当结束条件 ——
+## 于是顶栏一路写着「再访 · 还差 N 次」而游戏在第一次集齐时就把玩家锁死
+## 2.5 秒弹去结算页。那个承诺从第一屏起就兑现不了。all_fragments_maxed()
+## 这个判据一直写在那里，却没有任何地方调用过。
+signal all_fragments_maxed_reached()
 signal state_changed(new_state)
 signal lvbi_changed(amount: int, total: int)
 signal mood_changed(value: int)
@@ -62,6 +71,11 @@ signal item_purchased(item_id: String)
 
 ## station_idx (int) -> 累计打卡次数 (int，0=从未到访)
 var collected: Dictionary = _new_collected()
+## 两个"翻转已发过"的闩锁，只活在本次会话里，不落盘。
+## 读档之后要按存档现状补齐 —— 否则一个已经五站全收的存档，
+## 下一次回访打卡会重发一次 all_fragments_collected，把合成动画重放一遍。
+var _collected_fired := false
+var _maxed_fired := false
 var current_state = State.GIFT_BOX
 ## 里程**只作经济口径**，不再出现在任何玩家可见的界面上（顶栏改挂驿数）。
 ## 铺子解锁和郑铎三场原来都挂在这上面，见 shop_data.gd / World3D.VILLAIN_SCENES。
@@ -147,6 +161,29 @@ func _setup_input_map():
 	# 保存:绑定 Ctrl+S(用带修饰键的注册,避免按 S 时误触发)
 	_add_action_with_modifier("editor_save", KEY_S, true, false, false)
 	_add_action("editor_exit", [KEY_ESCAPE])
+	_bind_ui_accept_to_physical()
+
+
+## 给引擎内建的 `ui_accept` / `ui_select` 补一份 **physical_keycode** 绑定。
+##
+## 为什么要补：全工程每一个按钮——操作说明的「开始骑行」、驿铺的每一件、
+## 标题页的「开始」、结算页的「导出」——都靠 `ui_accept` 触发，而内建动作
+## 是按 `keycode` 匹配的。本项目 InputMap 当年全用 physical_keycode，
+## 正因为 Web 导出下 `keycode` 可能填不上（见 CLAUDE.md 已知陷阱）——
+## 于是同一个陷阱搬了个家：桌面端好好的，Web 上**一个按钮都按不动**，
+## 而键盘玩家除了按鼠标没有别的出路（实测：`verify_panel_keyboard.gd` 第 3 节，
+## 焦点确实落在「买」上，按空格 8 秒纹丝不动）。
+##
+## 补在这里而不是给每个面板加兜底：一个键位表漏一处就是一处新的死路，
+## 而这里是唯一的出处。内建的 keycode 绑定保留，所以桌面端行为不变。
+func _bind_ui_accept_to_physical() -> void:
+	for action in ["ui_accept", "ui_select"]:
+		if not InputMap.has_action(action):
+			InputMap.add_action(action)
+		for key in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+			var ev := InputEventKey.new()
+			ev.physical_keycode = key
+			InputMap.action_add_event(action, ev)
 
 
 ## 编辑模式触发条件(任一满足):
@@ -183,8 +220,17 @@ func check_in(station_index):
 		cost_mood(1)   # 深度余响的代价：心神 -1
 		fragment_collected.emit(station_index)
 	_save_game()
-	if _all_collected():
+	# 这两个都是**状态翻转**事件，不是"当前状态"。原来只有 all_fragments_collected
+	# 且没有翻转检测：五站各收过第一次之后，每一次回访打卡都会再发一遍。
+	# 那时无害 —— 第一轮就把整趟锁死、弹去结算页了，不会有第二次。
+	# 现在结束条件改成 all_fragments_maxed()，回访变成正常玩法，
+	# 缺了这道检测就变成"每回访一次重放合成动画并把玩家弹去结算页"。
+	if _all_collected() and not _collected_fired:
+		_collected_fired = true
 		all_fragments_collected.emit()
+	if all_fragments_maxed() and not _maxed_fired:
+		_maxed_fired = true
+		all_fragments_maxed_reached.emit()
 
 
 func is_collected(station_idx: int) -> bool:
@@ -226,6 +272,38 @@ func is_fragment_collected(slot_idx: int) -> bool:
 ## 某个驿站已达最大打卡次数
 func is_station_exhausted(station_idx: int) -> bool:
 	return collected.get(station_idx, 0) >= MAX_VISITS_PER_STATION
+
+
+## 这座碎片驿站还欠一次到访吗？
+##
+## 完满评级要求五座碎片驿站各去过 MAX_VISITS_PER_STATION 次，所以"还没收"从来
+## 不是目标的全集：第一次到访之后这一站还剩两次。可这三处 UI 原来一律按
+## `not station_has_fragment(i) or is_collected(i)` 跳过它，于是最强的重玩钩子
+## 在玩法里既不主动说、也不给导航 —— 而回访提示还写着"歇一脚"，等于在劝退。
+##
+## 顶栏 / 小地图 / 脚下提示圈三处都调这一个函数。它们是本项目里唯三会告诉
+## 玩家"下一处在哪"的地方，任何一处自己抄一遍判据都会让玩家看到三块互相
+## 打架的指示牌（见 CLAUDE.md 的已知陷阱）。
+func fragment_station_needs_visit(station_idx: int) -> bool:
+	if not RoadData.FRAGMENT_SLOT_STATION_IDX.has(station_idx):
+		return false
+	return collected.get(station_idx, 0) < MAX_VISITS_PER_STATION
+
+
+## 五座碎片驿站是不是都刷满了。全满之后"下一处"才真的没有目标。
+func all_fragments_maxed() -> bool:
+	for st_idx in RoadData.FRAGMENT_SLOT_STATION_IDX:
+		if collected.get(st_idx, 0) < MAX_VISITS_PER_STATION:
+			return false
+	return true
+
+
+## 某个 slot（0..4）还差几次到访才满格。已满返回 0。
+func fragment_slot_visits_left(slot_idx: int) -> int:
+	if slot_idx < 0 or slot_idx >= RoadData.FRAGMENT_SLOT_STATION_IDX.size():
+		return 0
+	var cnt: int = collected.get(RoadData.FRAGMENT_SLOT_STATION_IDX[slot_idx], 0)
+	return maxi(MAX_VISITS_PER_STATION - cnt, 0)
 
 
 ## 获取某驿站当前打卡次数
@@ -398,6 +476,8 @@ func set_state(new_state):
 
 func reset():
 	collected = _new_collected()
+	_collected_fired = false
+	_maxed_fired = false
 	current_state = State.GIFT_BOX
 	progress_km = 0.0
 	onboarding_shown = false
@@ -466,6 +546,11 @@ func _load_save() -> void:
 		seen_villain = maxi(0, int(blob.get("seen_villain", 0)))
 		prologue_done = blob.get("prologue_done", false) == true
 		ending_id = str(blob.get("ending_id", ""))
+	# 必须在 collected 载入**之后**再对齐：这两个事件是在存档写下的那一刻
+	# 就已经发过了，读档回来它们不该再发一遍 —— 否则一个五站全收的存档，
+	# 第一次回访打卡就会重放合成动画、把玩家弹去结算页。
+	_collected_fired = _all_collected()
+	_maxed_fired = all_fragments_maxed()
 
 
 func _clear_save() -> void:

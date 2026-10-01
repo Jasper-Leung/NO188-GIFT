@@ -48,6 +48,11 @@ const MASK_FADE_SPEED := 3.0                 # 每帧逼近系数，约 1 秒到
 ## 又不至于挡住路。买灯笼/香囊依然只影响 get_visibility_factor()（视野半径），
 ## 这一点不变：雾是叙事，视野才是可以花钱解的。
 const MOOD_REST_SCALE := 0.30
+
+## 每座碎片驿站最多打卡几次 —— 满格是明信片的完满评级。
+## 从 GameManager 抄一份常量不如直接问它，静态 const 也拿不到 autoload，
+## 所以这里显式对齐：verify_minimap.gd 会断言这两个数一致。
+const MAX_VISITS_PER_STATION := 3
 ## 进场比退场快：叙事档冲上去要跟手（对白一开就该浓），退场要慢（人物情绪
 ## 慢慢散开），一快一慢用同一个系数做的话两头都不对。
 const MASK_PULSE_IN := 6.0
@@ -94,13 +99,15 @@ func setup(rd: RoadData, p: CharacterBody3D) -> void:
 
 
 func _next_fragment_target() -> Dictionary:
-	## 最近的、还没收的碎片驿站。返回 {} 表示五件都齐了。
+	## 最近的、还欠一次到访的碎片驿站。返回 {} 表示五座都刷满了。
+	## 判据在 GameManager.fragment_station_needs_visit()，和小地图、脚下提示圈共用
+	## 同一个函数 —— 第一次拿到碎片之后这一站还剩两次，所以"已收"不等于"不用再去"。
 	if _road_data == null or _player == null:
 		return {}
 	var best := {}
 	var best_d := INF
 	for i in range(_road_data.stations.size()):
-		if not _road_data.station_has_fragment(i) or GameManager.is_collected(i):
+		if not GameManager.fragment_station_needs_visit(i):
 			continue
 		var d: float = _player.global_position.distance_to(
 				_road_data.get_station_world_pos(i))
@@ -221,11 +228,18 @@ func _update_next_label() -> void:
 		return
 	var idx: int = t["idx"]
 	# 站名走 road_data.station_display_name()，和 World3D._station_name() 同一套口径
-	_next_label.text = Localization.t("hud_next_target",
-			[_road_data.station_display_name(idx),
-			_arrow_glyph(_player.global_position, _player_forward(),
-			_road_data.get_station_world_pos(idx)),
-			int(t["dist"])])
+	var arrow := _arrow_glyph(_player.global_position, _player_forward(),
+			_road_data.get_station_world_pos(idx))
+	# 五件都收齐之后，"下一处"指的是回访而不是新碎片，文案必须跟着换 ——
+	# 还写"下一处 · 站名 · 距离"的话，玩家会以为这一站里还压着一块没捡的碎片。
+	if GameManager.is_collected(idx):
+		_next_label.text = Localization.t("hud_revisit_target",
+				[_road_data.station_display_name(idx), arrow,
+				Localization.t("visits_left_n", [
+					MAX_VISITS_PER_STATION - GameManager.get_station_count(idx)])])
+	else:
+		_next_label.text = Localization.t("hud_next_target",
+				[_road_data.station_display_name(idx), arrow, int(t["dist"])])
 
 
 ## 车身朝向。Godot 里 -Z 是正前方。
@@ -269,12 +283,28 @@ func _on_sfx_btn_pressed() -> void:
 	_update_buttons()
 
 
+## 三个音频开关的按钮文案。三档静音里 BGM 和音效原来共用一个字形「♪」和
+## 同一句话「♪ 开」，两个按钮在顶栏上长得一模一样 —— 玩家点第一个不知道
+## 静音的是音乐，点第二个也不知道，旁边还有一个全静音的 🔊 同样显眼。
+## 现在字形分家（♫ 音乐 / ♪ 音效 / 🔊 全部），字形之外再加一个 tooltip，
+## 因为"点开之前"玩家得先看得懂那是什么。
+const GLYPH_MUTE_ALL_ON := "🔊"
+const GLYPH_MUTE_ALL_OFF := "🔇"
+const GLYPH_BGM := "♫"
+const GLYPH_SFX := "♪"
+
+
 func _update_buttons() -> void:
-	_mute_btn.text = "🔇" if AudioManager.is_muted() else "🔊"
 	var on = Localization.t("on")
 	var off = Localization.t("off")
-	_bgm_btn.text = "♪ %s" % (off if AudioManager.is_bgm_muted() else on)
-	_sfx_btn.text = "♪ %s" % (off if AudioManager.is_sfx_muted() else on)
+	var bgm_off := AudioManager.is_bgm_muted()
+	var sfx_off := AudioManager.is_sfx_muted()
+	_mute_btn.text = GLYPH_MUTE_ALL_OFF if AudioManager.is_muted() else GLYPH_MUTE_ALL_ON
+	_mute_btn.tooltip_text = Localization.t("mute")
+	_bgm_btn.text = "%s %s" % [GLYPH_BGM, off if bgm_off else on]
+	_bgm_btn.tooltip_text = Localization.t("bgm_mute")
+	_sfx_btn.text = "%s %s" % [GLYPH_SFX, off if sfx_off else on]
+	_sfx_btn.tooltip_text = Localization.t("sfx_mute")
 
 
 func _apply_language() -> void:

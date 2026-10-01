@@ -8,6 +8,8 @@ const CANCELLED := 1
 const SEQUENCE_LEN := 4
 const NOTE_COUNT := 4
 const SHOW_DELAY := 0.7
+## 示范阶段两声之间的空档。原来这个 0.2 是散在协程末尾的一个字面量。
+const SHOW_GAP := 0.2
 const INPUT_TIMEOUT := 2.5
 
 enum { STATE_SHOW, STATE_INPUT, STATE_DONE }
@@ -59,7 +61,9 @@ func _process(delta: float) -> void:
 		STATE_SHOW:
 			_note_show_timer -= delta
 			if _note_show_timer <= 0.0:
-				_show_next_note()
+				_advance_show()
+			else:
+				queue_redraw()
 		STATE_INPUT:
 			_input_timer -= delta
 			if _input_timer <= 0.0:
@@ -68,7 +72,26 @@ func _process(delta: float) -> void:
 				queue_free()
 			queue_redraw()
 
-func _show_next_note() -> void:
+## 示范阶段只有这一个时钟。
+##
+## 原来这里是两套：`_show_next_note()` 既设了 `_note_show_timer = SHOW_DELAY`，
+## 又 `await get_tree().create_timer(SHOW_DELAY).timeout` 然后自己把灯灭掉、
+## `_seq_index += 1`——而 `_process` 那边还在每帧把同一个计时器往下减，减到 0
+## 就再调一次 `_show_next_note()`。两套时钟抢同一个 `_seq_index`。
+##
+## 本机 280+ FPS 下协程稳定抢先，量出来是干净的 0.7s 节拍（见
+## .review/probe_zither.gd 的 0.68/0.21），所以**看不出问题**；帧率一低
+## （Web 导出正是这个场景）就可能两边同时到，于是同一个音播两遍、
+## `_seq_index` 一次跳两格——玩家听到的序列和屏上写的「第 n/4 个」对不上，
+## 照着弹必然错。这类"只在本机不复现"的竞态，改法是消灭竞态而不是加延时。
+func _advance_show() -> void:
+	if _active_note >= 0:
+		# 刚才那声弹完了：灭灯、记进度，再留一小段空档
+		_active_note = -1
+		_seq_index += 1
+		_note_show_timer = SHOW_GAP
+		queue_redraw()
+		return
 	if _seq_index >= _sequence.size():
 		_state = STATE_INPUT
 		_input_timer = INPUT_TIMEOUT
@@ -76,17 +99,11 @@ func _show_next_note() -> void:
 		return
 	_active_note = _sequence[_seq_index]
 	_ring[_active_note] = 1.0
-	_note_show_timer = SHOW_DELAY
 	# 示范阶段这声比玩家敲的那几声更关键：整个小游戏就是"先听一段、再照着弹"，
 	# 静音的时候玩家只能死盯高亮的那一格记住顺序。
 	AudioManager.play_sfx("zither_%d" % (_active_note + 1))
+	_note_show_timer = SHOW_DELAY
 	queue_redraw()
-	await get_tree().create_timer(SHOW_DELAY).timeout
-	_active_note = -1
-	_seq_index += 1
-	_note_show_timer = 0.2
-	if _seq_index < _sequence.size():
-		queue_redraw()
 
 func _draw() -> void:
 	var w := size.x

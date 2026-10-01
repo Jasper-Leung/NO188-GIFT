@@ -59,6 +59,10 @@ var _cam_look_at_active: bool = false
 var _paused: bool = false
 var _total_arclen: float = 1.0
 var _odometer_units: float = 0.0
+## 远景山线与昼夜切换。环路只有 1228.8m、满速一圈 82 秒，不换天色的话一趟
+## 十分钟就是七遍同一片地 —— 详见 DayCycle.gd。
+var _ridge: FarRidge = null
+var _day_cycle: Node3D = null
 var _road_points_2d: PackedVector2Array = []
 var _boundary_intensity: float = 0.0
 var _station_mesh_pending: Array = []
@@ -175,9 +179,13 @@ func _ready() -> void:
 	_setup_stations()
 	_build_bike()
 	_init_progress_arclen()
-	add_child(FarRidge.new())
+	_ridge = FarRidge.new()
+	_ridge.name = "FarRidge"
+	add_child(_ridge)
+	_setup_day_cycle()
 
 	GameManager.all_fragments_collected.connect(_on_all_collected)
+	GameManager.all_fragments_maxed_reached.connect(_on_all_maxed)
 	Localization.language_changed.connect(_apply_language)
 	_joystick.joystick_input.connect(_on_joystick_input)
 	_check_in_prompt.setup(self)
@@ -341,6 +349,27 @@ func _get_terrain_height(wx: float, wz: float) -> float:
 
 func _init_progress_arclen() -> void:
 	_total_arclen = _road_builder.get_road_data().total_arclength()
+
+
+## 昼夜切换的接线。灯和 Environment 都是 World3D.tscn 里的既有节点，
+## DayCycle 只是按里程去改它们 —— 不新建场景，所以导出/存档都不受影响。
+func _setup_day_cycle() -> void:
+	_day_cycle = load("res://scripts/DayCycle.gd").new()
+	_day_cycle.name = "DayCycle"
+	add_child(_day_cycle)
+	_day_cycle.setup(
+		get_node_or_null("DirectionalLight3D") as DirectionalLight3D,
+		get_node_or_null("FillLight3D") as DirectionalLight3D,
+		get_node_or_null("WorldEnvironment") as WorldEnvironment,
+		_ridge)
+	_day_cycle.dusk_began.connect(_on_dusk_began)
+
+
+func _on_dusk_began() -> void:
+	# 不说话的话玩家只会以为显卡掉了。走驿站路过那一行（同一条浮出/收走的通道），
+	# 免得再造一套一次性提示。
+	if _hud3d != null:
+		_hud3d.show_pass_line(Localization.t("dusk_began"))
 
 
 func _setup_stations() -> void:
@@ -601,6 +630,10 @@ func _physics_process(_delta: float) -> void:
 		var km := minf(_odometer_units / _total_arclen * GameManager.TOTAL_ROUTE_KM, GameManager.TOTAL_ROUTE_KM)
 		GameManager.set_progress_km(km)
 		GameManager.earn_km(km)
+		# 骑满两圈之后天色转成黄昏。里程表是按前进量累的，所以绕 8 字交叉点
+		# 或者回头路都照算，不靠"我在第几个点上"这种会漂的判据。
+		if _day_cycle != null:
+			_day_cycle.set_laps(_odometer_units / _total_arclen, _delta)
 
 	# 2. 软边界回弹（F-07）
 	_apply_boundary_force(_delta)
@@ -646,10 +679,16 @@ func _physics_process(_delta: float) -> void:
 	# 打卡流程 / 小游戏进行中一律不响应 interact。
 	# 小游戏的按键不会被 set_input_as_handled() 从 Input 单例里抹掉，
 	# 所以这里除了 _check_in_in_progress 还要显式挡一次小游戏运行态。
-	# 打卡流程 / 小游戏进行中一律不响应 interact。
-	# 小游戏的按键不会被 set_input_as_handled() 从 Input 单例里抹掉，
-	# 所以这里除了 _check_in_in_progress 还要显式挡一次小游戏运行态。
-	if _check_in_in_progress or _all_done or _mini_game_state == MG_RUNNING:
+	#
+	# 郑铎戏也在这张单子里：它和打卡是同一类状态（一段接管了空格的过场），
+	# 而这一格原来漏了它，于是脚下的圈照画 —— 圈上写着「空格 · 完成乐事」，
+	# 玩家按下去推进的却是对白，`_on_interact_blocked()` 还顺手把圈变灰成
+	# 「这里现在进不去」。同一个键在同一帧里干了两件互相拆台的事，
+	# 而圈和那句话一起把玩家指向一个这一趟按不出来的交互。
+	# 清成 -1 就一起收掉：`_prompt_target()` 返回空（圈不画），
+	# `_interact_blocked_reason()` 也跟着返回空串（不冒那句话）。
+	if _check_in_in_progress or _all_done or _mini_game_state == MG_RUNNING \
+			or _villain_playing:
 		_nearby_station_idx = -1
 		_nearby_shop_idx = -1
 		return
@@ -1044,11 +1083,37 @@ func _on_station_check_in(station_idx: int) -> void:
 		_do_check_in(station_idx)
 
 
+## 第一次集齐五块碎片。**不是结束** —— 顶栏、脚下的圈、小地图此刻都已经
+## 切到「再访 · 还差 2 次」，导航重新指向还欠到访的驿站，玩家当然可以继续骑。
+## 这里只放一小段合成动画 + 一句话，把"礼物成形了，但乐事还能再收"讲清楚。
 func _on_all_collected() -> void:
-	_all_done = true
 	_player.set_can_move(false)
 	_player.set_camera_locked(true)
 	_collecting_label.text = Localization.t("collecting_message")
+	_collecting_label.visible = true
+	AudioManager.play_sfx("synthesis")
+	_spawn_synthesis_animation()
+	await get_tree().create_timer(2.5, false).timeout
+	_collecting_label.visible = false
+	# 收尾：把操纵权和相机还回去，并给一段静默期 ——
+	# 玩家手上多半还按着空格，闩锁不在这一刻放下就会立刻再触发一轮打卡。
+	_player.set_camera_locked(false)
+	_player.set_can_move(true)
+	_interact_cooldown = INTERACT_COOLDOWN_SEC
+	_hud3d.show_pass_line(Localization.t("revisit_available"))
+
+
+## 五座碎片驿站各刷满 —— **这一趟到此为止**。
+##
+## 原来这个函数是接在 all_fragments_collected（五站各收过**一次**）上的，
+## 于是玩家在第一次集齐的那一刻就被锁死 2.5 秒弹去结算页，
+## 而顶栏 / 脚下提示圈 / 小地图从那一刻之前就一直在说「再访 · 还差 N 次」。
+## 一个从首屏起就兑现不了的承诺，加上一个谁也走不到的"完满"评级。
+func _on_all_maxed() -> void:
+	_all_done = true
+	_player.set_can_move(false)
+	_player.set_camera_locked(true)
+	_collecting_label.text = Localization.t("synthesis_done_message")
 	_collecting_label.visible = true
 	AudioManager.play_sfx("synthesis")
 	if _env_audio != null:
@@ -1060,6 +1125,14 @@ func _on_all_collected() -> void:
 
 
 func _spawn_synthesis_animation() -> void:
+	# 结束条件从"五站各收过一次"改成"五站各刷满三次"之后，这函数一趟里会被调用
+	# 两次（第一次集齐一次、走满一次）。而 FragmentFlying 设的是 auto_free_on_complete
+	# = false，播完也不会自己走 —— 第二层叠在第一层上就是十块碎片卡在屏中央。
+	# 任何一条分支在 await 之前都要先把自己留下的节点收干净，理由同
+	# CLAUDE.md 里那条"提前 return 的分支必须清自己的闩锁"。
+	for old in get_children():
+		if old.name == "SynthesisLayer":
+			old.queue_free()
 	var layer = CanvasLayer.new()
 	layer.name = "SynthesisLayer"
 	add_child(layer)

@@ -4,6 +4,12 @@ extends Control
 ## 点击"开始骑行"关闭，玩家移动解禁
 
 var _is_touch: bool = false
+var _start_btn: Button = null
+## 已经在收尾了就别再来一次。按钮吃下空格时不会再冒出第二次 `_on_start_pressed`，
+## 而这一层是为了挡住"淡出那 0.3 秒里又被触发一次"——收两次的唯一区别就是
+## 多发一次 `dismissed`，那会顶掉序章那一轮对白（见 CLAUDE.md
+## 「一个 await 挂死了不会自己报错」）。
+var _dismissing: bool = false
 
 signal dismissed
 
@@ -116,6 +122,16 @@ func _build_ui() -> void:
 	start_btn.add_theme_font_size_override("font_size", _font_size(22, 20))
 	start_btn.pressed.connect(_on_start_pressed)
 	vbox.add_child(start_btn)
+	_start_btn = start_btn
+	# 这一屏的键盘玩家能不能走出去，全看这一行。
+	#
+	# 面板上唯一的出口是一个 Button，而全工程没有第二处面板忘了焦点：
+	# GiftBox 抓 `_start_btn`、EndCard 抓 `_export_btn`、小游戏抓自己，
+	# 只有这里谁都没抓——于是 `gui_get_focus_owner()` 一直是 <null>，
+	# 按空格/回车没有接收者，ESC 也没有（面板没接任何键），
+	# 而 `_play_prologue()` 是 `await _onboarding.dismissed`：
+	# 键盘玩家卡死在**第一屏**，连序章都还没开始。
+	_start_btn.grab_focus()
 
 	var hint_text = Localization.t("touch_hint") if _is_touch else Localization.t("desktop_hint")
 	var hint = _make_label(hint_text, _font_size(12, 11), Color(0.45, 0.45, 0.45))
@@ -219,7 +235,23 @@ func _refresh_ui() -> void:
 	_build_ui()
 
 
+## 键盘玩家能不能走出去，全看 `_build_ui()` 里那行 `grab_focus()`。
+##
+## 别想着在这里补一个 `_gui_input` 兜底：写在那儿是收不到按键的——`Viewport`
+## 只把按键投给 key focus 的控件，抓焦点的是按钮，于是一个拿不到焦点的
+## Control 连空格都收不到（实测：不抓焦点时推 8 秒空格面板纹丝不动，
+## 把鼠标悬停到它身上也一样）。`_unhandled_input` 倒是收得到，但它跟按钮走的
+## 是同一件事（`ui_accept`），两份机制只会有一个真的跑到——所以物理键那一半
+## 补在唯一的出处 `GameManager._bind_ui_accept_to_physical()`，
+## 全工程的按钮（标题页、驿铺、结算页）一起受益。
 func _on_start_pressed() -> void:
+	_start_ride()
+
+
+func _start_ride() -> void:
+	if _dismissing:
+		return
+	_dismissing = true
 	var tw = create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.3)
 	await tw.finished

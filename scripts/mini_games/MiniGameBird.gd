@@ -1,12 +1,20 @@
 extends Control
-## 禽语湖湾(4) 小游戏：观察4只鸟的剪影后，从4选项中选出第N只
+## 禽语湖湾(4) 小游戏：看清一只鸟的剪影，再从4只里把它认出来
 
 var _world_ref: Node = null
 
 const SUCCESS := 0
 const CANCELLED := 1
 const BIRD_COUNT := 4
-const SHOW_DURATION := 0.8
+## 展示一只鸟要多久。原来是 0.8 秒——那是"看清 → 记住 → 再回头扫四个选项"
+## 这一串动作根本做不完的长度：阶段切换没有任何提示（没有响声、没有位移，
+## 只有画面整个换掉），于是玩家往往还盯着那只鸟，屏幕已经变成四个按钮，
+## 于是重新去看一眼被换掉的画面 —— 于是忘了。
+##
+## 也不加"点一下继续"：那就把记忆测试变成了走过场。四只鸟的剪影现在是四份
+## 真的不同（见 _draw_bird_silhouette），1.6 秒认一个形状够用，而下面那条
+## 收缩的横带是玩家唯一的时间参照，说多少就是多少。
+const SHOW_DURATION := 1.6
 const CHOICE_COUNT := 4
 
 enum { STATE_SHOW, STATE_CHOICE }
@@ -17,7 +25,6 @@ var _bird_index: int = 0
 var _seen_bird: int = -1
 var _choice_buttons: Array[Rect2] = []
 var _correct_choice: int = 0
-var _bird_silhouettes: Array = []   # [bird_idx, ...] 打乱顺序
 var _choice_options: Array[int] = []  # 选项对应的真实 bird_idx
 
 const BIRD_COLS: Array[Color] = [
@@ -35,7 +42,6 @@ const CHOICE_KEYS: Array[int] = [KEY_1, KEY_2, KEY_3, KEY_4]
 func _ready() -> void:
 	# 随机选一只要记住的鸟
 	_seen_bird = randi() % BIRD_COUNT
-	_bird_silhouettes = [_seen_bird]
 	_build_options()
 	_show_timer = SHOW_DURATION
 	_state = STATE_SHOW
@@ -76,6 +82,15 @@ func _draw() -> void:
 		STATE_CHOICE:
 			_draw_choice_phase(w, h)
 
+## 展示期还剩多少，0..1。**画出来的那条横带用的就是这个值**，
+## 单独抽出来是为了让 verify_mini_game.gd 能在无头下量它：原来那个倒计时是
+## `max(1, int(_show_timer) + 1)`，在 0.8 秒的窗口里恒等于 1，而 draw_* 在
+## headless 下一笔都不落盘——所以只要读数是画出来的，任何断言都抓不到它钉死。
+## 抽成函数之后，"读数随时间真的在变"就成了可以断言的东西。
+func countdown_fraction() -> float:
+	return clampf(_show_timer / maxf(SHOW_DURATION, 0.001), 0.0, 1.0)
+
+
 func _draw_show_phase(w: float, h: float) -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.08),
 		Localization.t("mg_bird_title"), HORIZONTAL_ALIGNMENT_CENTER, w, 30, Color.WHITE)
@@ -85,13 +100,21 @@ func _draw_show_phase(w: float, h: float) -> void:
 	# 鸟的剪影
 	var ctr := Vector2(w * 0.5, h * 0.45)
 	var sc := minf(w, h) / 280.0
-	var col := BIRD_COLS[_seen_bird]
-	_draw_bird_silhouette(ctr, col, sc)
+	_draw_bird_silhouette(_seen_bird, ctr, sc)
 
-	# 倒计时
-	draw_string(ThemeDB.fallback_font, Vector2(w * 0.5 - 20, h * 0.78),
-		"%d" % max(1, int(_show_timer) + 1),
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 52, Color(1, 0.8, 0.4))
+	# 这条横带就是全部的"还剩多久"。原来这里画的是一个整数倒计时
+	# `max(1, int(_show_timer) + 1)`，而 SHOW_DURATION 只有 0.8 秒 ——
+	# int(0.8) 到 int(0.0) 一直是 0，+1 之后恒为 1。那个"1"从头到尾没动过，
+	# 于是它不是倒计时，是**一个宣称自己在倒、其实钉死的数字**：玩家会一直
+	# 等那个 1 变成 0，而它永远不会。0.8 秒也撑不起秒级的整数倒计时，
+	# 所以改成一条按真实剩余时间收缩的横带——说多少就是多少。
+	var bar_w := w * 0.4
+	var bar_h := 10.0
+	var bar_x := w * 0.5 - bar_w * 0.5
+	var bar_y := h * 0.78
+	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(1, 1, 1, 0.16), true)
+	draw_rect(Rect2(bar_x, bar_y, bar_w * countdown_fraction(), bar_h),
+			Color(1, 0.8, 0.4, 0.9), true)
 
 func _draw_choice_phase(w: float, h: float) -> void:
 	var sc := minf(w, h) / 280.0
@@ -116,33 +139,107 @@ func _draw_choice_phase(w: float, h: float) -> void:
 		draw_rect(r, Color(0.15, 0.15, 0.2), true)
 		draw_rect(r, Color(0.7, 0.7, 0.7), false, 2)
 		var bird_idx: int = _choice_options[i]
-		var col: Color = BIRD_COLS[bird_idx]
-		_draw_bird_silhouette(Vector2(bx + btn_w * 0.5, by + btn_h * 0.25), col, sc * 0.7)
+		# 0.38 不是随手挑的：选项格是 btn_h*0.5 高，白鹭那一只是竖着长出来
+		# 最高的，再大一点就顶出格子压到下面的名字上；燕子是最宽的，再大
+		# 一点就压到旁边的格子。中心抬到 0.22 是给下面那行名字让出位置。
+		_draw_bird_silhouette(bird_idx, Vector2(bx + btn_w * 0.5, by + btn_h * 0.22), sc * 0.38)
 		draw_string(ThemeDB.fallback_font, Vector2(bx, by + btn_h * 0.46),
 			Localization.t("mg_bird_%d" % bird_idx), HORIZONTAL_ALIGNMENT_CENTER, btn_w, 20, Color(0.9, 0.9, 0.9))
 		# 键位角标：键盘玩家看不见鼠标在哪，角标是「哪个键选这只」的唯一线索。
 		draw_string(ThemeDB.fallback_font, Vector2(bx + 8.0, by + 24.0),
 			str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.75))
 
-func _draw_bird_silhouette(c: Vector2, col: Color, sc: float) -> void:
-	# 头
-	draw_circle(c + Vector2(20 * sc, -10 * sc), 14 * sc, col)
-	# 身体
-	draw_circle(c, 22 * sc, col)
-	# 翅膀
-	var wing_pts := PackedVector2Array([
-		c + Vector2(-5 * sc, -5 * sc),
-		c + Vector2(-35 * sc, -25 * sc),
-		c + Vector2(-20 * sc, 5 * sc),
-	])
-	draw_colored_polygon(wing_pts, Color(col.r * 0.8, col.g * 0.8, col.b * 0.8))
-	# 尾
-	var tail_pts := PackedVector2Array([
-		c + Vector2(-18 * sc, 5 * sc),
-		c + Vector2(-38 * sc, 0),
-		c + Vector2(-38 * sc, 15 * sc),
-	])
-	draw_colored_polygon(tail_pts, Color(col.r * 0.8, col.g * 0.8, col.b * 0.8))
+## 四只鸟必须是**四个形状**，不能是同一个形状刷四种颜色。
+##
+## 原来四只鸟的头/身/翼/尾是同一套坐标，唯一的区别是填充色——于是这个
+## "记住哪一只"的游戏考的是"记住一个色号"，而且那个色号只闪 SHOW_DURATION 秒。
+##
+## 所以形状搬进这张表：**颜色不在表里**，表里只有几何。画的时候按表遍历，
+## 回归的时候也按表遍历，于是"四只鸟真的长得不一样"这件事从"看图才知道"
+## 变成能断言的。坐标是"sc=1 时"的本地像素，由 _poly/_oval 统一乘一次。
+##   ["o", cx, cy, rx, ry]           椭圆（主色）
+##   ["c", cx, cy, r]                圆（主色）
+##   ["p", x1,y1, x2,y2, …]          多边形（主色）
+##   ["q", x1,y1, x2,y2, …]          多边形（暗一档）
+##   ["l", x1,y1, x2,y2, w]          线（暗一档）
+##   ["L", x1,y1, x2,y2, …, w]       折线（主色）
+const BIRD_SHAPES: Array = [
+	[  # 麻雀：矮、圆、尾短 —— 一团紧凑的球
+		["o", 0, 0, 22.0, 18.0],
+		["c", 15, -12, 12.0],
+		["q", 26, -13, 39, -9, 26, -7],
+		["q", -19, 6, -37, 1, -37, 15],
+		["l", -4, 22, -9, 33, 2.0],
+		["l", 10, 22, 8, 33, 2.0],
+	],
+	[  # 燕子：后掠长翼 + 深叉尾 —— 横着的一个叉
+		["o", 0, 2, 21.0, 10.0],
+		["c", 14, -7, 9.0],
+		["q", 5, -2, -17, -27, -31, -20, -13, 2],
+		["q", 26, -8, 41, -4, 26, -3],
+		["q", -16, 4, -54, 17, -30, 12],
+		["q", -16, 2, -54, -9, -30, 0],
+	],
+	[  # 白鹭：长颈 + 长腿 —— 竖着的一条。
+		# 尺寸是压过的：第一版按"真比例"画，84px 高的身子在 144px 的选项格
+		# 里顶出上沿、压到下面的名字上，而另外三只只有 45px 高，一眼看过去
+		# 就是"一只巨大的加三只小的"——那是尺寸在认人，不是形状在认人。
+		["o", 0, 8, 15.0, 18.0],
+		["L", 2, -4, 12, -20, 8, -32, 15, -42, 6.0],
+		["c", 15, -44, 6.0],
+		["q", 21, -46, 38, -42, 21, -40],
+		["q", -13, 2, -31, -4, -13, 13],
+		["l", -4, 24, -6, 38, 2.5],
+		["l", 7, 24, 9, 38, 2.5],
+	],
+	[  # 乌鸦：厚重、低头、钝喙 —— 一坨
+		["o", -2, 8, 27.0, 21.0],
+		["c", 19, -6, 14.0],
+		["q", 31, -10, 51, -3, 31, 2],
+		["q", -26, 8, -45, 1, -45, 23],
+		["l", -9, 29, -11, 37, 2.0],
+		["l", 10, 29, 10, 37, 2.0],
+	],
+]
+
+func _draw_bird_silhouette(bird_idx: int, c: Vector2, sc: float) -> void:
+	var col: Color = BIRD_COLS[bird_idx]
+	var shade := Color(col.r * 0.74, col.g * 0.74, col.b * 0.74)
+	for prim in BIRD_SHAPES[bird_idx]:
+		var a: Array = prim
+		match a[0]:
+			"o": draw_colored_polygon(_oval(c + Vector2(a[1], a[2]) * sc, sc, a[3], a[4]), col)
+			"c": draw_circle(c + Vector2(a[1], a[2]) * sc, a[3] * sc, col)
+			"p": draw_colored_polygon(_poly(c, sc, a.slice(1)), col)
+			"q": draw_colored_polygon(_poly(c, sc, a.slice(1)), shade)
+			"l": draw_line(c + Vector2(a[1], a[2]) * sc, c + Vector2(a[3], a[4]) * sc,
+					shade, a[5] * sc)
+			"L": draw_polyline(_poly(c, sc, a.slice(1, a.size() - 1)), col,
+					a[a.size() - 1] * sc, true)
+
+## 表本身的文字签名。只包含几何、不包含颜色，所以"四份签名两两不同"就等于
+## "四只鸟真的长得不一样"——而这正是 draw_* 画出来之后无头下量不到的那件事。
+func silhouette_signature(bird_idx: int) -> String:
+	return str(BIRD_SHAPES[bird_idx])
+
+## 本地坐标 → 屏幕。表里那些字面量全是"sc=1 时"的像素，统一在这里乘一次，
+## 免得每处都得记得写 * sc（漏一处就是一只大一倍的鸟）。
+## flat 是**成对的标量**（26, -13, 39, …），不是 Vector2 数组——
+## GDScript 的 Vector2 **没有**单参数构造，写成 `Vector2(p)` 会抛
+## "Nonexistent 'Vector2' constructor"，而这一行只在真的画到多边形时才跑到，
+## headless 根本不调 _draw，于是无头回归全绿、实机一进选项页就满屏红字。
+func _poly(c: Vector2, sc: float, flat: Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in range(0, flat.size(), 2):
+		out.append(c + Vector2(flat[i], flat[i + 1]) * sc)
+	return out
+
+func _oval(c: Vector2, sc: float, rx: float, ry: float) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in range(28):
+		var a: float = TAU * float(i) / 28.0
+		out.append(c + Vector2(cos(a) * rx, sin(a) * ry) * sc)
+	return out
 
 func _gui_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):

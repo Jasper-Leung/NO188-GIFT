@@ -17,6 +17,13 @@ const TEA_COL = Color("8FB35A")
 const QIN_COL = Color("C9A26B")
 const BAMBOO_COL = Color("6E9C6B")
 const BIRD_COL = Color("E8A04F")
+
+## 五件碎片的颜色，顺序必须死扣 `fragment_%d`：0 云 / 1 茶 / 2 琴 / 3 竹 / 4 禽。
+## 画区一律按下标取色，不许再往布局表里手抄一份 —— 上一版正是布局表里
+## 手抄的那份整体错位一格，标签对而颜色和图标属于下一件。两个表彼此自洽，
+## 缩略图一眼扫过去完全正常，可玩家存走的那张 PNG 一样是错的。
+const FRAGMENT_COLS: Array = [CLOUD_COL, TEA_COL, QIN_COL, BAMBOO_COL, BIRD_COL]
+
 const LAND_COL = Color("F4F2EA")
 const INK_COL = Color("4A3520")
 const ACCENT_COL = Color("C9A26B")
@@ -42,25 +49,23 @@ var _fiber: bool = false           # 宣纸纤维
 var _has_wax: bool = false         # 蜡封
 var _has_env: bool = false         # 信封
 
-## [slot_idx, color, is_extra_placeholder]
-## slot_idx=-1 表示占位灰块；slot_idx>=0 表示真实碎片
+## [slot_idx, is_placeholder]
+## slot_idx=-1 表示占位灰块；slot_idx>=0 表示真实碎片，颜色走 FRAGMENT_COLS[slot_idx]
 const VARIANT_LAYOUTS: Array = [
 	# 0 初旅
-	[[0, TEA_COL, false], [-1, Color.GRAY, true], [-1, Color.GRAY, true], [-1, Color.GRAY, true]],
+	[[0, false], [-1, true], [-1, true], [-1, true]],
 	# 1 探索者
-	[[0, TEA_COL, false], [1, QIN_COL, false], [-1, Color.GRAY, true], [-1, Color.GRAY, true]],
+	[[0, false], [1, false], [-1, true], [-1, true]],
 	# 2 朝圣者
-	[[0, TEA_COL, false], [1, QIN_COL, false], [2, BAMBOO_COL, false], [-1, Color.GRAY, true]],
+	[[0, false], [1, false], [2, false], [-1, true]],
 	# 3 大师
 	# 第 5 格必须是占位：集了 4 块碎片就走的「未竟」，正面得看得出还缺一件，
 	# 只画 4 格的话缺的那件无处体现，未竟和满配的区别就只剩背面留白。
-	[[0, TEA_COL, false], [1, QIN_COL, false], [2, BAMBOO_COL, false],
-	 [3, BIRD_COL, false], [-1, Color.GRAY, true]],
+	[[0, false], [1, false], [2, false], [3, false], [-1, true]],
 	# 4 完满
 	# 第 5 格必须是 false：它是真碎片（禽），标记成占位会画成灰底「?」——
 	# 玩家集齐五件却看到一格问号，正好戳破「无价」那层承诺。
-	[[0, TEA_COL, false], [1, QIN_COL, false], [2, BAMBOO_COL, false],
-	 [3, BIRD_COL, false], [4, BIRD_COL, false]],
+	[[0, false], [1, false], [2, false], [3, false], [4, false]],
 ]
 
 
@@ -137,8 +142,8 @@ func _draw() -> void:
 	for i in range(sect_count):
 		var entry: Array = layout[i]
 		var slot_idx: int = entry[0]
-		var base_col: Color = entry[1]
-		var is_placeholder: bool = entry[2]
+		var is_placeholder: bool = entry[1]
+		var base_col: Color = Color.GRAY if is_placeholder else FRAGMENT_COLS[slot_idx]
 		var rx: float = i * sect_w
 		var shimmer: float = sin(_t * 1.5 + i * 1.2) * 0.04
 		var fill_col: Color = base_col.darkened(0.18 + shimmer) if not is_placeholder else Color.GRAY.darkened(0.3)
@@ -148,12 +153,7 @@ func _draw() -> void:
 		var sc: float = min(sect_w, sect_h) / 180.0
 		if not is_placeholder and slot_idx >= 0:
 			var icon_col: Color = base_col.lightened(0.25)
-			match slot_idx:
-				0: _draw_teacup(ctr, icon_col, 1.0, sc)
-				1: _draw_guqin(ctr, icon_col, 1.0, sc)
-				2: _draw_bamboo(ctr, icon_col, 1.0, sc)
-				3: _draw_bird(ctr, icon_col, 1.0, sc)
-				4: _draw_bird(ctr, icon_col, 1.0, sc)  # 完满第5个也是鸟
+			_draw_fragment_icon(slot_idx, ctr, icon_col, 1.0, sc)
 			var label_key: String = "fragment_%d" % slot_idx
 			draw_string(ThemeDB.fallback_font, Vector2(rx + sect_w * 0.5 - 14, sect_y + sect_h - 14),
 				Localization.t(label_key), HORIZONTAL_ALIGNMENT_CENTER, -1, 28, _ink)
@@ -310,6 +310,33 @@ func _draw_floating_leaves(w: float, h: float) -> void:
 
 
 # --- 碎片图标（与 FragmentBar 同源，加了 scale 参数适配大画区）---
+
+## 碎片下标 → 图标的唯一出口。颜色走 FRAGMENT_COLS[slot_idx]、标签走
+## fragment_%d，三者必须同序；上一版颜色表和这里的 match 各错位一格而
+## 标签是对的，所以每处单看都成立、合起来全错。把 dispatch 收成一个函数
+## 就是为了让「slot 0 是云」这件事只写一次。
+func _draw_fragment_icon(slot_idx: int, c: Vector2, col: Color, a: float, sc: float) -> void:
+	match slot_idx:
+		0: _draw_cloud(c, col, a, sc)
+		1: _draw_teacup(c, col, a, sc)
+		2: _draw_guqin(c, col, a, sc)
+		3: _draw_bamboo(c, col, a, sc)
+		4: _draw_bird(c, col, a, sc)
+
+
+## 云：三团叠起来的絮。形状取自 FragmentIcon._draw_cloud（画区这套按 sc 放大）。
+## B0C4DE 是五色里最淡的一个，图标又比底板只亮 0.25，光靠实心团子读不出来 ——
+## 所以三团各压一道白色高光，跟另外几个线描图标的高光笔触一致。
+func _draw_cloud(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
+	var r = 10.0 * sc
+	draw_circle(c + Vector2(-10 * sc, 3 * sc), r, Color(col.r, col.g, col.b, a))
+	draw_circle(c + Vector2(0, -5 * sc), r + 3 * sc, Color(col.r, col.g, col.b, a))
+	draw_circle(c + Vector2(10 * sc, 3 * sc), r, Color(col.r, col.g, col.b, a))
+	var hi := Color(1, 1, 1, a * 0.75)
+	draw_arc(c + Vector2(0, -5 * sc), r + 3 * sc, PI * 0.10, PI * 0.90, 20, hi, 2.0 * sc)
+	draw_arc(c + Vector2(-10 * sc, 3 * sc), r, PI * 0.18, PI * 0.62, 12, hi, 1.8 * sc)
+	draw_arc(c + Vector2(10 * sc, 3 * sc), r, PI * 0.38, PI * 0.82, 12, hi, 1.8 * sc)
+
 
 func _draw_teacup(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
 	var r = 22.0 * sc

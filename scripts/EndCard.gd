@@ -575,7 +575,9 @@ func _show_back_editor() -> void:
 	_back_text_edit.add_theme_font_size_override("font_size", 20)
 	_back_text_edit.add_theme_color_override("background_color", Color(0.16, 0.15, 0.14, 1.0))
 	_back_text_edit.add_theme_color_override("font_color", Color(0.95, 0.93, 0.88))
-	_place_top_wide(vw, _back_text_edit, h * 0.24, h * 0.32, minf(vw * 0.7, 700.0))
+	# 输入框原来占 h*0.32（720p 上 230px，约十一行）。200 字的上限用不满这个高度，
+	# 而多出来的每一行都是从底下那张预览的份额里扣的 —— 见 `_add_back_thumb`。
+	_place_top_wide(vw, _back_text_edit, h * 0.22, h * 0.24, minf(vw * 0.7, 700.0))
 	# 先塞默认文案再接信号：玩家拿到的是「可以改的定稿」，
 	# 而不是空框加一句占位提示。顺序反过来会先触发一次 text_changed，
 	# 把刚赋进去的值原样读回 _back_text（无害，但没必要）。
@@ -583,17 +585,27 @@ func _show_back_editor() -> void:
 	_back_text_edit.text_changed.connect(_on_back_text_changed)
 	_back_editor.add_child(_back_text_edit)
 
+	# 两个按钮**并排**摆，不是叠着摆。
+	# 叠着的时候每个按钮各吃 56/44 的行高，两行就是 100px 上下，全从底下那张
+	# 预览的份额里扣：720p 上预览只剩一百五十几像素、宽 200 —— 一张 200px 宽的
+	# 卡上写满字之后每行只剩七来个像素，根本读不出自己写了什么，"所见即导出"
+	# 就成了一句空话。并排放省下的那一行才是给预览的。
+	var bw := minf(vw * 0.22, 280.0)
+	var bgap := 24.0
+	var bx := (vw - bw * 2.0 - bgap) * 0.5
+	var by := h * THUMB_BTN_Y_FRAC
+
 	# 确认按钮
 	_back_confirm_btn = Button.new()
 	_back_confirm_btn.text = Localization.t("back_confirm")
-	_place_top_wide(vw, _back_confirm_btn, h * 0.62, 56.0, 220.0)
+	_place_fixed(_back_confirm_btn, bx, by, bw, THUMB_BTN_H)
 	_back_confirm_btn.pressed.connect(_on_back_confirmed)
 	_back_editor.add_child(_back_confirm_btn)
 
 	# 跳过按钮
 	_back_skip_btn = Button.new()
 	_back_skip_btn.text = Localization.t("back_skip")
-	_place_top_wide(vw, _back_skip_btn, h * 0.72, 44.0, 220.0)
+	_place_fixed(_back_skip_btn, bx + bw + bgap, by, bw, THUMB_BTN_H)
 	_back_skip_btn.pressed.connect(_on_back_confirmed)
 	_back_editor.add_child(_back_skip_btn)
 
@@ -606,15 +618,28 @@ func _show_back_editor() -> void:
 ## 不知道自己写的东西印在卡上是什么样。缩略图用的是导出同一个 SubViewport 的纹理，
 ## 所以它不是示意图——所见即导出的那张背面。
 ##
-## 贴着底边摆而不是按屏高取比例：这一屏的元素全是 h 的分数（标题 0.14、输入框
-## 0.24、两个按钮 0.62 / 0.72），按比例放缩略图在 720p 上会正好顶出屏外。
-## 按钮下沿在 h*0.72+44，往下到屏底只剩一百五十几像素，宽度按这个反推。
+## 尺寸是**从"按钮下沿到屏底"那段空当反推的**，不是拍一个常数。
+## 这一屏的元素全是 h 的分数，屏越矮留给预览的就越少；而预览的价值全在字大不
+## 大（"所见即导出"这句话的意思是玩家认得出自己写的字），一旦为了塞下去把它
+## 缩回 200px 宽，它就退化成一张分不出内容的色块，那不如没有。按宽度算一遍、
+## 按高度算一遍，取小的那个，两头都不越界。
+##
+## 常量放在 `_show_back_editor()` 摆按钮的地方也要用，所以是文件级的：
+## 预览的高度就是从按钮的下沿量上去的，两边各写一份必然会漂。
+const THUMB_BTN_Y_FRAC := 0.50
+const THUMB_BTN_H := 56.0
+
 func _add_back_thumb(vw: float, h: float) -> void:
-	var tw := minf(vw * 0.17, 200.0)
-	var th := tw * 9.0 / 16.0
 	var pad := 14.0
 	var cap_h := 20.0
 	var gap := 5.0
+	var breath := 10.0
+	# 高度这一侧是硬的：预览 + 说明行必须整块落在按钮下沿以下
+	var avail := h - (h * THUMB_BTN_Y_FRAC + THUMB_BTN_H) - breath - pad - gap - cap_h
+	# 宽度这一侧只是别在超宽屏上糊成一片
+	var by_w := minf(vw * 0.36, 460.0)
+	var th := minf(by_w * 9.0 / 16.0, maxf(avail, 60.0))
+	var tw := th * 16.0 / 9.0
 	var thumb_y := h - pad - th
 	var side := maxf((vw - tw) * 0.5, 0.0)
 
@@ -889,7 +914,13 @@ func _export_two_images_web(img_front: Image, img_back: Image) -> void:
 
 func _on_share_pressed() -> void:
 	# 复制分享文案到剪贴板
-	var share_text = Localization.t("share_text_en" if Localization.is_english() else "share_text_zh")
+	# 一个 key，中英各存一份。写成 `share_text_zh` / `share_text_en` 两个 key 的做法
+	# 看着更直白，实际是在表里埋一个陷阱：两份表各存各的，于是中文表里没有
+	# `share_text_en`、英文表里躺着一份没人读的 `share_text_zh`，两边的 key 集合
+	# 永远对不上（`verify_story.gd` 第 1 节量的就是这个）。而 `t()` 查不到 key 时
+	# 返回 key 自己，不报错——真有人把这里"简化"成 t("share_text") 之外的写法时，
+	# 屏幕上出现的就是 "share_text_en" 这五个字母。
+	var share_text = Localization.t("share_text")
 	DisplayServer.clipboard_set(share_text)
 	_share_btn.text = Localization.t("copied")
 	await get_tree().create_timer(1.5, false).timeout

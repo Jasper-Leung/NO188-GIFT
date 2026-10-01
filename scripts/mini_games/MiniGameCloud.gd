@@ -33,6 +33,17 @@ var _followed_length := 0.0
 var _key_cursor := Vector2.ZERO
 var _key_down := false
 var _brush_last_ms := -9999
+## 下一个**还没记过分**的段序号。
+##
+## 原来 _update_draw 每调一次就记 `段长 * 0.1`，而它不记得哪几段已经记过。
+## 于是"按住空格在原地左右晃"就能对同一段反复计分——实测在第 0 段中点
+## 来回晃 60 次，完成度就冲到 78.1%，越过 75% 的及格线：这是一个"描边"
+## 游戏，却不描边也能赢。（更早一版修的是"光标停着不动也涨"，那个是
+## 挂在 _process 上按帧累加的锅，晃一晃就绕过去了。）
+##
+## 只认"下一段"就够了，不必再开一个 claimed 数组：顺序推进天然保证每段
+## 至多记一次，而且描边本来就是一个顺序动作。
+var _next_seg := 0
 
 func _ready() -> void:
 	_build_path_world()
@@ -192,16 +203,29 @@ func _update_draw(pos: Vector2) -> void:
 			min_dist = d
 			seg_idx = i
 
-	if min_dist < PATH_TOLERANCE:
-		_followed_length += _path_world[seg_idx].distance_to(_path_world[seg_idx + 1]) * 0.1
-		_drawn_ratio = clampf(_followed_length / _total_path_length, 0.0, 1.0)
-		# 笔触音挂在这里：鼠标拖和键盘挪都只在这一条路上汇合，别在两处各放一个。
-		# 鼠标拖是每帧调一次，不节流就是一叠糊在一起的噪声。
-		var now := Time.get_ticks_msec()
-		if now - _brush_last_ms >= 300:
-			_brush_last_ms = now
-			AudioManager.play_sfx("cloud_brush")
-		queue_redraw()
+	if min_dist >= PATH_TOLERANCE:
+		return
+	# 只认"还没记过分"的段，顺序推进。同一段晃一百次也只记一次，所以那个
+	# * 0.1 的按帧分摊（鼠标拖动按帧记、键盘每按一次方向键记一次，两种频率
+	# 都不对）一并去掉了。
+	#
+	# 允许**跳过**中间几段并把它们一起记上：鼠标甩得够快时 _gui_input 只送来
+	# 终点那一帧，nearest 会直接落到后面两段，只认"下一段"的话 _next_seg 就
+	# 卡死在没描到的那一段上，后面整条云再也描不完。往后跳不往前退，所以
+	# 跳过也不给刷分的机会——想往前补就得真的把光标挪回去。
+	if seg_idx < _next_seg:
+		return  # POSITIVE_CONTROL
+	for i in range(_next_seg, seg_idx + 1):
+		_followed_length += _path_world[i].distance_to(_path_world[i + 1])
+	_next_seg = seg_idx + 1
+	_drawn_ratio = clampf(_followed_length / _total_path_length, 0.0, 1.0)
+	# 笔触音挂在这里：鼠标拖和键盘挪都只在这一条路上汇合，别在两处各放一个。
+	# 鼠标拖是每帧调一次，不节流就是一叠糊在一起的噪声。
+	var now := Time.get_ticks_msec()
+	if now - _brush_last_ms >= 300:
+		_brush_last_ms = now
+		AudioManager.play_sfx("cloud_brush")
+	queue_redraw()
 
 func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 	var ap := p - a

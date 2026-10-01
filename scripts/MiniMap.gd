@@ -76,14 +76,16 @@ func _draw_road_line(pts: Array) -> void:
 
 ## 最近的、还没收的碎片站；全齐了返回 -1。
 ##
-## 必须和 HUD3D._next_fragment_target() 用**同一条规则**（最近的未收站）。
-## 这两处一旦分家，就会出现刚修掉过的那类事故：顶栏说"下一处 358m"、小地图
-## 却高亮着另一颗——玩家信谁都会骑错，而且没有任何一处会告诉他错了。
+## 必须和 HUD3D._next_fragment_target() 用**同一条规则**（最近的、还欠一次
+## 到访的碎片站）。这两处一旦分家，就会出现刚修掉过的那类事故：顶栏说
+## "下一处 358m"、小地图却高亮着另一颗——玩家信谁都会骑错，而且没有任何
+## 一处会告诉他错了。判据本身在 GameManager.fragment_station_needs_visit()，
+## 这里连"是不是碎片站"那一半都一起问，免得三处各抄一半又分家。
 func _next_frag_idx() -> int:
 	var best := -1
 	var best_d := INF
 	for i in range(road_data.stations.size()):
-		if not road_data.station_has_fragment(i) or GameManager.is_collected(i):
+		if not GameManager.fragment_station_needs_visit(i):
 			continue
 		var d: float = player.global_position.distance_to(road_data.get_station_world_pos(i))
 		if d < best_d:
@@ -109,9 +111,12 @@ func _draw() -> void:
 	for branch in road_data.branch_points:
 		_draw_road_line(branch)
 
-	# 未收的碎片站要读起来像"目标"，不像"被灰掉的一档"。
+	# 还欠到访的碎片站要读起来像"目标"，不像"被灰掉的一档"。
 	# 旧画法是深灰圆点 + 一圈细线，在深色底上几乎看不见——玩家盯小地图盯半天
 	# 也找不到还剩几块，而顶栏明明写着"下一处 358m"。改成实心金点 + 呼吸光晕。
+	#
+	# 「已经收过」不再等于「不用再去」：完满评级要每站三次，所以收过的那几座
+	# 在刷满之前仍然画成目标，只是外面套一圈进度弧，读得出还差几次。
 	var pulse: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.001 * TAU * PULSE_HZ)
 	var next_idx := _next_frag_idx()
 
@@ -119,19 +124,25 @@ func _draw() -> void:
 		var spos = _w2m(road_data.get_station_world_pos(i))
 		var col: Color = road_data.stations[i]["color"]
 		var has_frag = road_data.station_has_fragment(i)
-		var collected = GameManager.is_collected(i)
 		if not has_frag:
 			draw_circle(spos, 3, Color(0.5, 0.5, 0.45, 0.7))
-		elif collected:
-			# 收过的保留驿站本色 + 白边：是"去过的地方"，不该和目标抢注意力。
-			draw_circle(spos, 4.5, col)
-			draw_circle(spos, 4.5, Color(1, 1, 1, 0.55), false, 1.2)
-		else:
+		elif GameManager.fragment_station_needs_visit(i):
 			draw_circle(spos, 6.0 + pulse * 2.0, Color(FRAG_GOLD, 0.10 + pulse * 0.14))
 			draw_circle(spos, 4.0, FRAG_GOLD)
 			draw_circle(spos, 4.0, Color(0.12, 0.10, 0.06, 0.9), false, 1.0)
+			# 已经到访过的，外圈再画一段进度弧：整圈 = MAX_VISITS 次
+			if GameManager.is_collected(i):
+				var done: int = GameManager.get_station_count(i)
+				if done > 0 and done < int(GameManager.MAX_VISITS_PER_STATION):
+					draw_arc(spos, 8.0, -PI * 0.5,
+							-PI * 0.5 + TAU * float(done) / float(GameManager.MAX_VISITS_PER_STATION),
+							20, Color(1, 1, 1, 0.85), 2.0)
 			if i == next_idx:
 				draw_arc(spos, 9.0 + pulse * 1.5, 0.0, TAU, 28, NEXT_RING, 1.6)
+		else:
+			# 刷满了：保留驿站本色 + 白边，是"去过的地方"，不该再和目标抢注意力。
+			draw_circle(spos, 4.5, col)
+			draw_circle(spos, 4.5, Color(1, 1, 1, 0.55), false, 1.2)
 
 	var ppos = _w2m(player.position)
 	var ry = player.rotation.y

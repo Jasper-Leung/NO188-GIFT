@@ -95,18 +95,24 @@ func _col(target: Array) -> Color:
 	return COL_SHOP if bool(target[2]) else COL_GOLD
 
 
-## 提示语要说实话。
+## 提示语要说实话，而且要**跟得上顶栏**。
 ##
-## 碎片驿站最多能打 3 次卡（GameManager.MAX_VISITS_PER_STATION），但顶栏的
-## 「下一处」用的是 is_collected，第一次到访之后就把这站从目标里摘掉了。
-## 所以回访时圈还在、顶栏却说下一块碎片在几百米外——文案如果还写"完成乐事"，
-## 就是明着骗玩家按一个拿不到碎片的键。回访改成"歇一脚"，
-## 和 World3D._do_check_in 里回访只给旅币不给碎片的行为对齐。
+## 碎片驿站最多能打 3 次卡（GameManager.MAX_VISITS_PER_STATION），而顶栏的
+## 「下一处」用的是 fragment_station_needs_visit()，第一次到访之后这站还剩两次。
+## 所以三件事必须同时成立：
+##   1. 回访时不能再说"完成乐事"——回访只给旅币不给碎片，说了就是骗玩家。
+##   2. 但也不能一直说"歇一脚"——第三次到访是明信片完满评级的最后一格，
+##      而完满是全游戏最强的重玩钩子。对着它说"歇一脚"等于在劝退。
+##   3. 差几次要写出来，圈就画在驿站上，玩家没有理由再去顶栏对一次账。
 func _label(target: Array) -> String:
 	if bool(target[2]):
 		return Localization.t("touch_shop_prompt") if _is_touch else Localization.t("desktop_shop_prompt")
-	if GameManager.is_collected(int(target[0])):
-		return Localization.t("touch_revisit_button") if _is_touch else Localization.t("desktop_revisit_prompt")
+	var st: int = int(target[0])
+	if GameManager.is_collected(st):
+		if _is_touch:
+			return Localization.t("touch_revisit_button")
+		var left: int = GameManager.MAX_VISITS_PER_STATION - GameManager.get_station_count(st)
+		return Localization.t("desktop_revisit_prompt") % left
 	return Localization.t("touch_checkin_prompt") if _is_touch else Localization.t("desktop_checkin_prompt")
 
 
@@ -149,7 +155,14 @@ func _draw() -> void:
 	if blocked:
 		fs += 3
 	var text_w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs).x
-	var text_pos := screen + Vector2(-text_w * 0.5, r + 32)
+	var text_pos := _label_pos(screen, r, text_w, fs)
+	# 底板：贴着驿站时这句会翻到圈的上方，而圈上方正是底栏碎片格和驿站的木架 ——
+	# 全屏最忙的一块。描边在这里救不回来（底板压不住底下的花纹），所以铺一层
+	# 半透明深色，和 HUD 浮出来的那行驿站的话用同一块底板。
+	var pad := 8.0
+	var plate := Rect2(text_pos.x - pad, text_pos.y - float(fs) - pad * 0.6,
+		text_w + pad * 2.0, float(fs) + pad * 1.2)
+	draw_rect(plate, Color(0.06, 0.05, 0.07, 0.72))
 	# 描边：提示文字直接画在浅蓝天空上时，浅色描边是唯一能让它读出来的办法
 	# （米金 0.96/0.78/0.49 压在浅蓝上对比度约 1.6:1，远低于可读线）。
 	draw_string(font, text_pos + Vector2(1, 0), label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs, Color(0.06, 0.07, 0.10, 0.75))
@@ -157,6 +170,21 @@ func _draw() -> void:
 	draw_string(font, text_pos + Vector2(0, 1), label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs, Color(0.06, 0.07, 0.10, 0.75))
 	draw_string(font, text_pos + Vector2(0, -1), label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs, Color(0.06, 0.07, 0.10, 0.75))
 	draw_string(font, text_pos, label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs, Color(col, 0.85 + intensity * 0.15))
+
+
+## 提示文字该画在哪（返回 draw_string 的基线左端点）。
+##
+## 圈下方那一行是它平时的位置，可玩家越骑越近，站点的投影就越往画面下方跑 ——
+## 贴着站停下时 `screen.y` 已经逼近屏底，文字整个掉到屏外，而那恰恰是玩家
+## 最该读到"空格 · 完成乐事"的一刻。所以这里先把文字收进屏内：下方放得下
+## 就放下方（保持平时的观感），放不下就翻到圈的上方。横向也收，驿站压在
+## 画面最左/最右时整行同样会走丢。
+func _label_pos(screen: Vector2, r: float, text_w: float, fs: int) -> Vector2:
+	var below := screen.y + r + 32.0
+	var y := below if below + float(fs) <= size.y - 4.0 else screen.y - r - 8.0
+	y = clampf(y, float(fs) + 4.0, size.y - 4.0)
+	var x := clampf(screen.x - text_w * 0.5, 4.0, maxf(size.x - text_w - 4.0, 4.0))
+	return Vector2(x, y)
 
 
 func _update_button() -> void:

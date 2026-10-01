@@ -16,6 +16,15 @@ extends Control
 
 var _lines: Array = []
 
+## 整屏压暗层的不透明度。
+##
+## 原来这里是 0.6。面板本身已经是 0.95 不透明（见 _build_ui 里的 style），
+## 压暗层一点可读性都没换到，代价是**每读一句台词，3D 世界就被挖掉 60%**——
+## 而这个游戏卖的就是那条 8 字环路。实测把天空从 (160,167,194) 压到 (36,46,43)：
+## 玩家在三句序章、每座驿站的整段对白、三场反派戏里，看到的都是一片近黑。
+## 对白是这条路线上最频繁的一屏，所以它是"世界看不见"的第一嫌疑人。
+const SCRIM_ALPHA := 0.30
+
 signal dialogue_done(result: Dictionary)
 
 ## 有一轮 setup()→await dialogue_done 还没收到过信号。
@@ -81,7 +90,7 @@ func _build_ui() -> void:
 	var overlay := ColorRect.new()
 	overlay.name = "Overlay"
 	_stretch_full(overlay)
-	overlay.color = Color(0.0, 0.0, 0.0, 0.6)
+	overlay.color = Color(0.0, 0.0, 0.0, SCRIM_ALPHA)
 	overlay.mouse_filter = MOUSE_FILTER_STOP
 	add_child(overlay)
 

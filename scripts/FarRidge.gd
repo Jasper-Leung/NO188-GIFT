@@ -18,10 +18,17 @@ const BASE_Y := -70.0
 ## 颜色是**反着调的**，别照着天空去挑：场景走的是 AGX 色调映射，中间调会被
 ## 显著提亮并去饱和。按"看起来该是深青灰"去填色（0.3 左右）渲出来是一线白。
 ## 调映射前给的是下面这几个很暗的值，渲出来才落到想要的空气透视梯度上。
+##
+## 三层的跨度要**压住**（2026-10-01 看 road_eye / hilltop 两张量出来的）：
+## 原来的近/中/远是 0.13 / 0.30 / 0.52，AGX 之后中远两层一起被推到接近白，
+## 于是三层里只有近层那条暗绿读得出来，另两层糊成一道白痕贴在天上——
+## "三层纵深"在图上根本不存在，horizon 看着是三条平色带而不是山。
+## 现在近层抬一点（别贴成一条纯暗的墙）、中远两层压下来（别顶到白），
+## 梯度收窄但三层各自站得住。
 const LAYERS := [
-	{"r": 800.0, "lo": 60.0, "hi": 130.0, "col": Color(0.13, 0.20, 0.17), "seed": 3.0},
-	{"r": 1350.0, "lo": 130.0, "hi": 260.0, "col": Color(0.30, 0.42, 0.46), "seed": 11.0},
-	{"r": 1900.0, "lo": 220.0, "hi": 400.0, "col": Color(0.52, 0.64, 0.74), "seed": 23.0},
+	{"r": 800.0, "lo": 60.0, "hi": 130.0, "col": Color(0.17, 0.25, 0.21), "seed": 3.0},
+	{"r": 1350.0, "lo": 130.0, "hi": 260.0, "col": Color(0.27, 0.36, 0.40), "seed": 11.0},
+	{"r": 1900.0, "lo": 220.0, "hi": 400.0, "col": Color(0.42, 0.52, 0.62), "seed": 23.0},
 ]
 
 ## 峰形的频率比全取无理数，否则各倍频会周期对齐、每 2π 重复一次同样的轮廓
@@ -29,9 +36,23 @@ const _FREQS := [1.0, 2.7183, 4.4814, 7.3891, 12.426, 20.086]
 const _AMPS := [0.52, 0.24, 0.13, 0.07, 0.04, 0.02]
 
 
+var _mats: Array[StandardMaterial3D] = []
+
+
 func _ready() -> void:
 	for layer in LAYERS:
 		add_child(_build_layer(layer))
+
+
+## 整体乘一层色。黄昏用（DayCycle 调）。
+##
+## 山线是 SHADING_MODE_UNSHADED，它**不吃场景光照** —— 空气透视烘在顶点色里，
+## 这么调才保得住 LAYERS 那套递淡。可代价是环境一换色，三层山就顶着自己那套
+## 青灰色站在一片橙里，地平线整个打架。`vertex_color_use_as_albedo` 打开时
+## `albedo_color` 是个乘数，所以传白就是原样。
+func set_tint(c: Color) -> void:
+	for m in _mats:
+		m.albedo_color = c
 
 
 ## 高度剖面：几个不同频率正弦叠加，再过一道 ridged 变换把圆钝的波峰掐成尖峰。
@@ -87,6 +108,7 @@ func _build_layer(layer: Dictionary) -> MeshInstance3D:
 	# 收得够暗就盖得住，改完必须跑 lookdev_horizon.gd 看图确认，不能靠数字判断。
 	mat.disable_fog = true
 	mi.material_override = mat
+	_mats.append(mat)
 	return mi
 
 

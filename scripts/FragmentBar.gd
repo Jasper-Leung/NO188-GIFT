@@ -107,11 +107,39 @@ func _draw() -> void:
 			draw_circle(ctr, r + 8, Color(col.r, col.g, col.b, 0.2))
 			draw_circle(ctr, r + 3, Color(col.r * 0.7, col.g * 0.7, col.b * 0.7, 0.5))
 			_draw_fragment_icon(ctr, i, col, 1.0)
+			_draw_visit_pips(ctr, r, i)
 		else:
 			var gray = Color(0.35, 0.35, 0.35, 0.55)
 			draw_circle(ctr, r, gray)
 			_draw_fragment_icon(ctr, i, gray, 0.6)
 			draw_string(ThemeDB.fallback_font, ctr + Vector2(-7, 6), "?", HORIZONTAL_ALIGNMENT_CENTER, -1, 18, Color(0.5, 0.5, 0.5))
+
+
+## 圆外面那排小点：这件碎片到访了几次。
+##
+## 完满评级要求每座碎片驿站去过 MAX_VISITS_PER_STATION 次，可这一排圆点原先
+## 收过之后**三次长得一模一样** —— 玩家既看不到"这里还能再来两次"，回访之后
+## 也看不到自己推进了什么。对着最强的重玩钩子毫无反馈，钩子就等于不存在。
+## 点亮几个由存档算，未收的那几格不画（还没到访，没有次数可报）。
+func _draw_visit_pips(ctr: Vector2, r: float, slot_idx: int) -> void:
+	var max_visits: int = int(GameManager.MAX_VISITS_PER_STATION)
+	var left: int = GameManager.fragment_slot_visits_left(slot_idx)
+	var done: int = maxi(max_visits - left, 0)
+	var pip_r := 3.5
+	var gap := 10.0
+	# 三颗点排在圆的正下方。r+8 是外圈光晕，压在它下面才不会被光晕吃掉
+	var base_y := ctr.y + r + 12.0
+	for k in max_visits:
+		var p := Vector2(ctr.x + (float(k) - float(max_visits - 1) * 0.5) * gap, base_y)
+		if k < done:
+			draw_circle(p, pip_r, Color(0.96, 0.88, 0.62, 0.95))
+		else:
+			# 没到的点画成空心：还差几次这件事本身就是要给玩家看的信息。
+			# 底栏底下就是 3D 场景（常常正好是一片深色树冠），所以空心点先垫一圈
+			# 近黑再描金边 —— 单独一道金边压在深色上会整个消失掉。
+			draw_circle(p, pip_r + 1.0, Color(0.10, 0.08, 0.05, 0.8))
+			draw_circle(p, pip_r, Color(0.30, 0.26, 0.18, 0.9))
+			draw_arc(p, pip_r, 0.0, TAU, 14, Color(0.96, 0.88, 0.62, 0.7), 1.0)
 
 
 func _draw_fragment_icon(ctr: Vector2, idx: int, col: Color, alpha: float) -> void:

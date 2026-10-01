@@ -14,10 +14,12 @@ extends Control
 
 var _help_overlay: Control = null
 var _help_overlay_label: Label = null
+var _finish_btn: Button = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_finish_btn = _make_finish_btn()
 	_continue_btn.pressed.connect(_on_continue_pressed)
 	_restart_btn.pressed.connect(_on_restart_pressed)
 	_help_btn.pressed.connect(_on_help_pressed)
@@ -27,12 +29,48 @@ func _ready() -> void:
 	_language_btn.pressed.connect(_on_language_pressed)
 	AudioManager.mute_changed.connect(_update_mute_buttons)
 	Localization.language_changed.connect(_apply_language)
+	# 必须在这里连：World3D.tscn 里 PausePanel 那个节点没有 [connection] 段，
+	# 而 _on_visibility_changed 是靠信号才会在"面板被打开"那一刻跑到。
+	# 没连的话这个函数从头到尾没人调用——静音按钮的开场状态也就永远不刷新。
+	visibility_changed.connect(_on_visibility_changed)
 	_apply_language()
 	_help_overlay = _make_help_overlay()
 	add_child(_help_overlay)
 	_help_overlay_label = _help_overlay.get_node("HelpPanel/HelpLabel")
 	_help_overlay.visible = false
 	_update_mute_buttons()
+
+
+## 「结束这一趟」——这一趟现在**只能**由刷满五座碎片驿站结束（那是重玩钩子，
+## 不该被玩家的耐心决定），所以总得留一个玩家自己喊停的出口。否则低档明信片
+## （初旅/探索者/朝圣者/大师）就成了永远走不到的死代码，PostcardVariant 的前四档
+## 全部作废，而且玩家只剩"重新开始"——把这一趟从头再来一遍。
+##
+## 代码里建而不是摆进 .tscn：这个按钮的可见性依赖存档（收过几块），场景文件里
+## 存不下这个条件。
+func _make_finish_btn() -> Button:
+	var btn = Button.new()
+	btn.name = "FinishBtn"
+	btn.custom_minimum_size = Vector2(0, 44)
+	btn.pressed.connect(_on_finish_pressed)
+	var vbox := _continue_btn.get_parent()
+	vbox.add_child(btn)
+	vbox.move_child(btn, _continue_btn.get_index() + 1)
+	return btn
+
+
+## 一块碎片都还没拿到时不许收工：那时候做出来的是一张空卡，
+## 而"空卡"这个状态在 EndCard 上没有任何说法，只会让玩家以为按错了。
+func _refresh_finish_btn() -> void:
+	var have := int(GameManager.get_collected_count()) > 0
+	_finish_btn.visible = have
+	_finish_btn.text = Localization.t("finish_run")
+	_finish_btn.tooltip_text = Localization.t("finish_run_hint")
+
+
+func _on_finish_pressed() -> void:
+	AudioManager.set_paused_bgm(false)
+	GameManager.go_to_end_card()
 
 
 func _make_help_overlay() -> Control:
@@ -100,6 +138,7 @@ func _on_help_overlay_input(_event: InputEvent) -> void:
 func _on_visibility_changed() -> void:
 	if visible:
 		_update_mute_buttons()
+		_refresh_finish_btn()
 
 
 func _on_continue_pressed() -> void:
