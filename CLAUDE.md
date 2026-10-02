@@ -26,7 +26,6 @@ scenes/           场景文件 (.tscn)
   GiftBox.tscn    开始界面
   World3D.tscn    3D 骑行主场景
   EndCard.tscn    收集完成
-  Bike.tscn       自行车模型
   FragmentBar.tscn 顶部碎片栏
   EditorHUD.tscn  编辑模式侧栏（仅编辑时挂载）
 
@@ -46,12 +45,17 @@ scripts/          GDScript 脚本
   LayoutData.gd         res://layout.json 读写（编辑模式产物）
   LayoutEditor.gd       编辑模式主控制器
   EditorHUD.gd          编辑模式 UI
-  Player3D.gd / Bike.gd / HUD3D.gd / MiniMap.gd / CheckInPrompt.gd ...
+  Player3D.gd / HUD3D.gd / MiniMap.gd / CheckInPrompt.gd ...
   Localization.gd       i18n
 
 assets/
+  bike.glb       玩家那辆自行车（**在 assets/ 根下，不在 models/ 里**）。
+				 World3D._build_bike() 按 BIKE_SCALE=0.012 整体缩放，本地 AABB
+				 50.7×114.5×198.1 → 实车 1.37m 高 / 2.38m 长。
+				 正后方看它正投影成一根竖条，所以相机必须横向让开——见
+				 Player3D.CAM_SIDE 与 tools/verify_camera_bike.gd
   fonts/         LXGWWenKai (中英文 fallback)
-  models/        bush.glb / tree.glb / station_*.glb / bike.glb
+  models/        bush.glb / tree.glb / station_*.glb（**没有 bike.glb**）
   shaders/       asphalt.gdshader (路面全程序化,零贴图)
 				 terrain_grass.gdshader (地形草地质感,零贴图)
 				 grass.gdshader (实例化草皮卡片,零贴图)
@@ -77,7 +81,14 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						+ **云影台的完成度必须真的来自"描过"**：同一段上晃 60 次只记 13%、
 						不许越过 75% 及格线，而顺次描完 / 一甩到底都得能描完
 						+ **禽的四只鸟是四个形状**：BIRD_SHAPES 的几何两两不同、
-						且每行多边形都能展开成有限坐标）
+						且每行多边形都能展开成有限坐标
+						+ **五件乐事各在自己的地方，琴弦顺着琴身长边**：五个小游戏引用的
+						主题常量必须是自己那件（抄错下标就串了地方，而 headless 下
+						`_draw` 一笔不落、没有任何像素断言能看见）；琴的命中区必须
+						宽 > 高，量的是 `_string_rects()` 这个不碰画笔的纯函数
+						+ **三次到访轮换五件乐事**：首次到访拿到的还是这座驿站自己的那件
+						（拿真实的 road_data 逐格对拍，不许靠抄一份表蒙对）、同一座连着
+						三次不重样、15 局里每件正好 3 次）
   verify_interact_latch.gd 交互闩锁 / 对白抢占回归（郑铎在播时按空格不许开打卡、
 						setup() 顶掉一轮对白必须放出旧等待者、被顶掉的郑铎戏自己清
 						_villain_playing、回访不再重播小游戏/谎报碎片、
@@ -324,12 +335,16 @@ echo. > .editor_mode
 - 修改 `scripts/VegBuilder.gd` 前先跑 `verify_vegetation.gd` + `verify_pavilion_bushes.gd` + `verify_vegetation_grounding.gd`
 - 修改 `scripts/GrassScatter.gd` 前先跑 `verify_grass_scatter.gd`
 - 修改 `scripts/TreeScatter.gd` 前先跑 `verify_tree_scatter.gd`；改间距/离路/淡出参数后还要跑 `lookdev_trees.gd` 看图（`CELL` 必须和 `GrassScatter.CELL` 一致，两套流式共用同一张格子）
-- 修改 `assets/shaders/grass.gdshader` 前先跑 `lookdev_grass.gd` 看图（`--headless` 的 dummy renderer **不编译着色器**，语法错在无头下会静默通过）
+- 修改 `assets/shaders/grass.gdshader` 的 `card_width` / `card_height` / `blade_count` / 循环上限 / `blade_base` / `blade_tip` 前先跑 `verify_grass_scatter.gd` 的"草皮着色器：形状与颜色"一节（它把这些值从**文本**里读出来，卡片高宽比、绝对尺寸、叶数、循环上限 vs `blade_count`、绿-红通道差、纯文本断言），再跑 `lookdev_grass.gd` 看图（`--headless` 的 dummy renderer **不编译着色器**，语法错和观感错在无头下都会静默通过）。看图时记住 `lookdev_grass.gd` 的相机必须站在草环圆心
 - 修改 `scripts/mini_games/*.gd` / 打卡流程前先跑 `verify_mini_game.gd` + `verify_bamboo_world.gd` + `verify_mini_game_keys.gd` + `verify_bamboo_done.gd` + `verify_mini_game_fail.gd` + `verify_checkin_all5.gd`
 - 改 `OnboardingGuide` 的 `_build_ui()`（尤其焦点）/ `ShopPanel._button()` / `_grab_first_focus()` / `_refresh()` / `GameManager._bind_ui_accept_to_physical()`，或**任何一个 Button 的键盘可达性**前跑 `verify_panel_keyboard.gd`（**不能加 --headless**）。它量的是"冷启动 → 收掉操作说明 → 推完序章 → 驿铺买成一件"，不是量某一个函数；两种按键事件形状各测一遍，只测一种的话另一半坏了照样全绿
 - 改 `MiniGameCloud.PATH_POINTS` / `_update_draw()` / `_next_seg` 前跑 `verify_mini_game.gd` 第 7 节（**完成度只能来自"描过"**：原地晃 60 次只记一段的 13%，够不着 75% 的及格线；顺次描完和一甩到底都得能描完——甩过去的那几段要一起记上，否则光标卡死在没描到的那段上，后面整条云再也描不完）。顺手也跑 `verify_mini_game_keys.gd` 的云那一局：它当初的绿**是靠这个漏洞**刷出来的，修好漏洞后如果它变红，先看它是不是还踩在原地
 - 改 `MiniGameCloud._gui_input_key()` 的挪光标 / `KEY_STEP` 前跑 `verify_mini_game_keys.gd`（到达判据必须 ≥ `KEY_STEP`，否则 12px 的整步走会在目标两侧横跳、`_cloud_t` 永远不前进）
 - 改 `MiniGameBird.BIRD_SHAPES` / `_draw_bird_silhouette()` / `MiniGameZither.SHOW_DELAY` / `_advance_show()` 前跑 `verify_mini_game.gd` 第 6b/6e/6f 节 + `lookdev_journey.gd` 看那两张 `minigame_禽` / `minigame_琴`（**`--headless` 根本不调 `_draw`**，几何里写错一个构造在无头下永远是绿的，必须靠带窗口的回归和图）；禽的四只鸟要**形状**不同，不能是同一个形状刷四种颜色，画法在 `BIRD_SHAPES` 表里、回归也读同一张表
+- 改 `scripts/mini_games/MiniGamePicker.gd`（`SCRIPTS` 顺序 / `game_for()`）或 `World3D._run_mini_game()` 的轮换那一行前跑 `verify_mini_game.gd` 第 7 节 + `verify_interact_latch.gd` 第 4 节。`SCRIPTS` 是一份和 `RoadData.FRAGMENT_SLOT_STATION_IDX` **对拍的独立副本**，顺序错了第一次到访就配错乐事——回归拿真实的 `road_data.gd` 逐格核，抄一份表蒙是不行的。第 4 节量的是真实 World3D 里"回访确实起了**换过的那件**"（原来它断言"回访不重播小游戏"，那个契约已经作废了）
+- 改 `World3D._do_check_in()` 里 `is_first_visit` 的两处分支（对白 / 小游戏）前跑 `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`。**对话仍然只在首次到访，乐事每一趟都有**——两者的门不一样：驿站的开场白是自我介绍，回访再念一遍会冲掉顶栏那 3 次的进度感；而完满评级要的正是三次，一次都不给就把最强的重玩钩子空着
+- 改 `scripts/mini_games/MiniGameBackdrop.gd`（`THEMES` 配色 / 五个主题常量）或任何一个小游戏里 `MiniGameBackdrop.draw_scene(...)` 那一行前跑 `verify_mini_game.gd` 第 6 节 + `lookdev_journey.gd` 看 5 张 `minigame_*.png`。第 6 节只核对**引对了没有**（读源码文本），景好不好看只有图能判——"五个乐事共用一片黑幕"正是原来的毛病，而它在无头下永远全绿
+- 改 `MiniGameZither._board_rect()` / `_string_rects()` / `_draw_string_h()` 前跑 `verify_mini_game.gd` 第 6 节的琴弦那几条 + `lookdev_journey.gd` 看 `minigame_琴`。判据是**命中区宽 > 高**：古琴的弦平行于长轴，旧版把四根弦竖着插在一条又宽又短的琴身上，那不是琴。注意几何必须抽成 `_string_rects()` 这种不碰画笔的纯函数让回归直接调——`_note_rects` 是在 `_draw()` 里填的，headless 读它只会读到空数组
 - 改 `scripts/AudioManager.gd` 或 `scripts/mini_games/*.gd` 里的发声前先跑 `check_all_scripts.gd` + 上面那 6 条；新加了 sfx 还要跑一次 `--headless --editor --quit-after 60` 生成 `.import`
 - 改任何一屏玩家可见的东西（HUD / 标题页 / 新手引导 / 商店 / 驿铺 / 明信片 / 结算）前跑 `lookdev_journey.gd` 看图
 - 改 `EndCard._export_two_images_web()` / `GameManager.SAVE_PATH` / `_save_game()` / `_load_save()`
@@ -408,6 +423,20 @@ echo. > .editor_mode
   走不到——进程被 `--quit-after` 收掉时**退出码是 0**，一行断言都没打过的
   回归看着像跑通了。所以带超时的脚本要么在协程外也保证 `_report()` 被打到，
   要么就别指望退出码，**读输出里有没有那行汇总**。
+- **调用一个带 `await` 的函数而不 `await` 它，函数体会静默停在第一个 `await` 上**：
+  GDScript 调一个含 `await` 的函数不写 `await` 是**合法**的，函数从头跑到第一个
+  `await` 就把控制权还给调用方，剩下的挂在那里等一个**没人等的信号**。所以
+  `verify_mini_game.gd` 新加的 `_section_backdrops()` 第一版打成
+  `_section_backdrops()`（漏了 `await`）时：标题和前 6 条断言照常打印，
+  到第一个 `await process_frame` 静默停住，主协程接着跑完、打出
+  `PASS failures=0`、`quit(0)`——**一整节断言一行没跑，报告却全绿**。
+  这跟上一条「`await` 挂死」是同一个家族（都表现为"静默"，都不报错），
+  但成因不同：那条是**协程内部**的信号永远不来，这条是**调用方**没接。
+  判据是"这节的断言数是不是每次都一样"——新增的断言第一次跑就没印出来，
+  就不是它绿，是它没跑。两处对策：新加的节要么调用处写 `await`，
+  要么干脆别用 `await`：能不挂进场景树就不挂（`MiniGameZither._string_rects()`
+  是纯几何函数，`new()` 出来设个 `size` 直接调，连节点都不用加）。
+  跑完记得数一遍输出里的 `[OK]`/`[FAIL]` 是不是预期的那个数。
 - **屏幕上的字必须和代码真的那么干**：这一族 bug 每一处单独看都像对的。茶写
   「松开手指即失败」而代码只是把 `_hold_time` 清零；竹标题写「竹子倒下时按」而引导
   明写「现在就可以按」、代码也确实允许引导期提前按——**同一屏上两句话互相拆台**。
@@ -448,6 +477,30 @@ echo. > .editor_mode
   管线（引擎在 `ALPHA_SCISSOR_THRESHOLD` 也被赋值时按不透明材质处理，深度
   写入、正确排序、阴影投射都还在）。这坑是看截图发现的：headless 下不编译
   着色器，`verify_grass_scatter.gd` 全绿也照样错。
+
+- **草皮的"卡片"不是草：一片 0.34×0.15m 的卡片上只画 7 片叶，图上是一堵墙**：
+  玩家相机离地 1.6m，而一丛草占掉半米见方、7 片叶又宽又大，近景整片读成
+  **龙舌兰**而不是草——`lookdev_grass.gd` 的 4m 那张就是这么翻车的，
+  路面被草挡掉一半，顶栏那条"下一处"的引导也就断了。真实路肩草是**矮而密**：
+  靠丛数不靠每丛的尺寸，所以正确的方向是卡片收到 0.24×0.085m、而
+  `blade_count` 从 7 提到 10 来补覆盖度（收到 4m 那张才站得住）。
+  连带两条：`fragment` 里那个 `for (int i = 0; i < 8; i++)` 的上限是**硬编码**的，
+  把它调到 10 而循环还写 8 会被静默截断成 8 片——**看着像**"我调密了"，
+  一片叶子都没多；`hint_range(1.0, 8.0)` 的上界也是 8，两处必须一起改。
+  回归验证：`verify_grass_scatter.gd` 末节（从**文本**里读这几个值，
+  因为 headless 不编译着色器）+ `lookdev_grass.gd` 看图。
+
+- **`ROAD_CLEAR` 量的是到路**中心线**的距离，不是到沥青外沿**：
+  写的是 `TOTAL_HALF_WIDTH(6.5) + 1.5 路肩` = 8.0，而"调到 6.2 让草长到路肩上"
+  这个想法会把草种到沥青上——中心线到沥青边才 6.5m，6.2 < 6.5。
+  顺带记一条免得下次白忙：**挡视线的是草高不是密度**。把卡片从 0.15m 降到
+  0.085m 之后，路自己就露出来了，不需要为视线另开一条走廊、也不该动密度。
+
+- **改完着色器别把一次 7ms → 16ms 的跳变算到自己头上**：那次跳变是在一次
+  **只改颜色**的编辑之后出现的，而颜色不花片元预算。把 `blade_count` 退回 7
+  再跑，单帧一模一样还是 16.20ms——**那就不是它的账**。同族的判据就是本文件
+  已有的那条：先 `tasklist` 查有没有上次掐掉的 Godot 还在吃 CPU，
+  再把可疑的那一项单独退回原值跑一遍，两边都动不了才轮到怀疑自己。
 
 - **`MultiMesh.use_custom_data` 只能在 `instance_count == 0` 时设置**：
   引擎规定 `transform_format` → `mesh` → `use_custom_data` → `instance_count`

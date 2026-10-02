@@ -228,18 +228,21 @@ func _section_doc() -> void:
 				"文档里没有「%s」这种把 km 说成玩家可见单位的说法" % lie)
 	_ck(doc.contains("驿"), "文档写明顶栏走的是驿数口径（P0-4 把 km 换成了驿数）")
 
-	# 5.3 相机参数是手抄的，代码里早就从 `* 8 + (0,5,0)` 改成了 `* 6 + (0,4,0)`。
+	# 5.3 相机参数是手抄的，代码里早就从 `* 8 + (0,5,0)` 改成了 `* 6 + (0,4,0)`，
+	# 后来又加上了横向让位（`+ right * CAM_SIDE`）。
 	# 这里不比单个数字，而是把 Player3D.gd 里那一整行 `target_pos = ...` 整句抠出来，
 	# 要求文档里逐字有同一句——手工拼一个 `-forward * 6.0` 当 needle 是错的：
 	# 代码写的是 `global_position - forward * 6.0`，减号两边有空格，
 	# 少写一个空格就永远匹配不上，而"永远匹配不上"和"文档写错了"
 	# 在这一行上长得一模一样（第一版就是这么把自己坑了一轮）。
+	# 正则也不再写死数字与括号形状：参数名化之后它会整个失配，而上面那条
+	# "防正则失效的空跑"只拦得住"找不到行"，认不出新写法照样是假绿。
 	var player := FileAccess.get_file_as_string("res://scripts/Player3D.gd")
 	var m := RegEx.new()
-	m.compile("var target_pos = global_position - forward \\* [0-9.]+ \\+ Vector3\\(0, [0-9.]+, 0\\)")
+	m.compile("var target_pos = global_position[^\\n]*")
 	var hit: RegExMatch = m.search(player)
 	_ck(hit != null, "Player3D.gd 里找得到相机的 target_pos 那一行（防正则失效的空跑）")
 	if hit != null:
-		var line: String = hit.get_string()
+		var line: String = hit.get_string().strip_edges()
 		_ck(doc.contains(line), "文档里的相机定位与代码逐字一致",
 				"代码是：%s" % line)
