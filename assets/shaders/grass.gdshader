@@ -22,22 +22,32 @@ render_mode cull_disabled;
 // 卡片底色取自脚下那块地的世界坐标噪声，和地形 shader 是同一套 fbm 同一尺度，
 // 所以草和地看不出接缝。
 
-uniform vec4 blade_base     : source_color = vec4(0.235, 0.375, 0.150, 1.0);
-uniform vec4 blade_tip      : source_color = vec4(0.400, 0.545, 0.235, 1.0);
-uniform vec4 ground_color   : source_color = vec4(0.360, 0.550, 0.240, 1.0);
-uniform vec4 ground_dark    : source_color = vec4(0.240, 0.390, 0.160, 1.0);
+// 颜色整体退饱和过一轮。原来 blade_tip 是 (0.40,0.55,0.24)——绿通道比红通道
+// 高 0.15、蓝通道几乎贴着红通道，是那种"塑料草坪"的纯度。真实草皮的黄化成分
+// 很重：三个通道要往中间收，收完远景才接得上地形 shader（那边更灰）。
+uniform vec4 blade_base     : source_color = vec4(0.290, 0.335, 0.225, 1.0);
+uniform vec4 blade_tip      : source_color = vec4(0.470, 0.505, 0.360, 1.0);
+uniform vec4 ground_color   : source_color = vec4(0.375, 0.475, 0.285, 1.0);
+uniform vec4 ground_dark    : source_color = vec4(0.255, 0.335, 0.205, 1.0);
 
 uniform float mottle_scale  : hint_range(0.01, 4.0) = 0.35;   // 必须与地形同尺度
-uniform float card_width    : hint_range(0.05, 2.00) = 0.34;
-uniform float card_height   : hint_range(0.05, 2.00) = 0.15;
-uniform float blade_count   : hint_range(1.0, 8.0) = 7.0;
+// 卡片从 0.34×0.15 收到 0.24×0.085。定妆照拍出来的是一地龙舌兰：叶宽到
+// 0.34m、只有 7 片，一丛草占掉半米见方，站近了就是一堵墙——而玩家相机离地
+// 1.6m，这堵墙正好挡住前方的路。真实的路肩草是"矮而密"，靠的是**丛数**
+// 而不是每丛的尺寸，所以下面 blade_count 反而要加。
+uniform float card_width    : hint_range(0.05, 2.00) = 0.24;
+uniform float card_height   : hint_range(0.05, 2.00) = 0.085;
+// 7 → 10。卡片小了一半，丛数不变的话覆盖度会掉一半，所以每丛要多摊几片叶
+// 才补得回来。循环上限同步放到 12（原来硬编码 8，改 blade_count 超过 8
+// 会被静默截断——uniform 的 hint_range 上限也是 8，两处必须一起改）。
+uniform float blade_count   : hint_range(1.0, 12.0) = 10.0;
 uniform float alpha_cutoff  : hint_range(0.05, 0.95) = 0.32;
 uniform float fade_start    : hint_range(1.0, 200.0) = 20.0;
 uniform float fade_end      : hint_range(1.0, 200.0) = 30.0;
 uniform float wind_amp      : hint_range(0.0, 0.5) = 0.055;
 uniform float wind_freq     : hint_range(0.0, 8.0) = 1.7;
-uniform float hue_jitter    : hint_range(0.0, 0.5) = 0.10;
-uniform float blade_width   : hint_range(0.002, 0.100) = 0.014;  // 卡片 UV 里的半宽
+uniform float hue_jitter    : hint_range(0.0, 0.5) = 0.06;
+uniform float blade_width   : hint_range(0.002, 0.100) = 0.011;  // 卡片 UV 里的半宽
 uniform float width_floor   : hint_range(0.0, 3.0) = 0.70;      // 见 fragment 的注释
 
 varying vec3 v_world;
@@ -120,7 +130,7 @@ void fragment() {
 	float best = 0.0;
 	float best_tip = 0.0;
 	float n = max(1.0, blade_count);
-	for (int i = 0; i < 8; i++) {
+	for (int i = 0; i < 12; i++) {
 		if (float(i) >= n) {
 			break;
 		}

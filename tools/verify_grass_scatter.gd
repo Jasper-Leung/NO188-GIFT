@@ -601,7 +601,99 @@ func _run() -> void:
 	_check(_grass.live_tuft_count() < 200000,
 		"骑行稳态下的可见实例数在 20 万以内（%d）" % _grass.live_tuft_count())
 
+	_shader_silhouette()
 	_report()
+
+
+## 草皮**画出来**的形状：卡片尺寸、草叶数、颜色退饱和程度。
+##
+## 放在这里而不是 `verify_terrain_shader.gd`，因为它量的是"这片草看起来像草吗"，
+## 而那正是本文件守的另一半（另一半是放置与流式）。全是纯文本断言——
+## `--headless` 用 dummy renderer，着色器根本不编译，所以**只有**文本这条
+## 路拦得住它们被改回旧值。
+##
+## 每一条都对应一次真的看图翻车：
+## · 卡片 0.34×0.15 + 7 片叶 → 定妆照拍出来是一地龙舌兰，半米高的一堵墙，
+##   而玩家相机离地 1.6m，这堵墙正好挡住前方的路；
+## · 循环上限硬编码 8 而 `hint_range` 上限也是 8 → 把 blade_count 调到 10
+##   会被静默截断成 8，**看着像**"我调密了"，其实一片叶子都没多。两处必须同改。
+## · 颜色纯度太高 → 远景接不上地形 shader（那边更灰），读成一块塑料草坪。
+func _shader_silhouette() -> void:
+	print("\n---- 草皮着色器：形状与颜色 ----")
+	var path := "res://assets/shaders/grass.gdshader"
+	if not FileAccess.file_exists(path):
+		_check(false, "grass.gdshader 在磁盘上")
+		return
+	var src := FileAccess.get_file_as_string(path)
+
+	var w := _uni(src, "card_width")
+	var h := _uni(src, "card_height")
+	_check(w > 0.0 and h > 0.0, "读到 card_width / card_height（%.3f / %.3f）" % [w, h])
+	# 宽高比：草叶是**竖**的。旧值 0.34/0.15 = 2.27，读起来是宽叶植物；
+	# 收到 0.24/0.085 = 2.82 之后才站得住，而绝对尺寸一起小了一半。
+	_check(h > 0.0 and w / h < 3.2,
+		"卡片宽高比 < 3.2，草叶是竖的而不是宽叶（%.3f / %.3f = %.2f）" % [w, h, w / h])
+	_check(h <= 0.10,
+		"卡片高 <= 0.10m：1.6m 高的相机看得过去（%.3f）" % h)
+	_check(w <= 0.26,
+		"卡片宽 <= 0.26m：一丛不该占掉半米见方（%.3f）" % w)
+
+	var n := _uni(src, "blade_count")
+	var loop_cap := _loop_cap(src)
+	_check(n >= 10.0, "每丛草叶 >= 10 片，卡片小了一半要靠叶数补覆盖度（%.1f）" % n)
+	_check(loop_cap >= 12, "fragment 循环上限 >= 12（实测 %d）" % loop_cap)
+	_check(loop_cap >= int(n),
+		"循环上限 %d >= blade_count %.1f，否则叶数被静默截断" % [loop_cap, n])
+	var hr := _hint_hi(src, "blade_count")
+	_check(hr >= n,
+		"blade_count 的 hint_range 上限 %.1f >= 实际值 %.1f（否则编辑器里也调不上去）"
+		% [hr, n])
+
+	# 退饱和：绿通道与红通道的差要压住。旧值 tip=(0.40,0.55,0.24)，差 0.15。
+	for uni in ["blade_base", "blade_tip"]:
+		var c := _uni_color(src, uni)
+		var spread: float = c.y - c.x
+		_check(spread <= 0.10,
+			"%s 的绿-红通道差 <= 0.10，不是塑料草坪（%.1f, %.1f, %.1f = %.3f）"
+			% [uni, c.x, c.y, c.z, spread])
+		_check(c.z <= c.x + 0.02,
+			"%s 蓝通道没有塌到绿通道之下（%.1f vs %.1f）" % [uni, c.z, c.x])
+
+
+## 取 `uniform float <name> ... = <v>;` 的默认值
+func _uni(src: String, name: String) -> float:
+	var rx := RegEx.new()
+	rx.compile("uniform\\s+float\\s+%s\\s*:[^=]*=\\s*([0-9.]+)" % name)
+	var m := rx.search(src)
+	return float(m.get_string(1)) if m != null else -1.0
+
+
+## 取 `uniform float <name> : hint_range(<lo>, <hi>)` 的**上界**
+func _hint_hi(src: String, name: String) -> float:
+	var rx := RegEx.new()
+	rx.compile("uniform\\s+float\\s+%s\\s*:[^=]*hint_range\\([^)]*,\\s*([0-9.]+)\\)" % name)
+	var m := rx.search(src)
+	return float(m.get_string(1)) if m != null else -1.0
+
+
+## fragment 里 `for (int i = 0; i < N; i++)` 的那个 N
+func _loop_cap(src: String) -> int:
+	var rx := RegEx.new()
+	rx.compile("for\\s*\\(int\\s+i\\s*=\\s*0;\\s*i\\s*<\\s*([0-9]+)")
+	var m := rx.search(src)
+	return int(m.get_string(1)) if m != null else -1
+
+
+## 取 `uniform vec4 <name> : source_color = vec4(r, g, b, a);` 的 rgb
+func _uni_color(src: String, name: String) -> Vector3:
+	var rx := RegEx.new()
+	rx.compile("uniform\\s+vec4\\s+%s\\s*:[^=]*=\\s*vec4\\(\\s*([0-9.]+)\\s*,\\s*([0-9.]+)\\s*,\\s*([0-9.]+)"
+		% name)
+	var m := rx.search(src)
+	if m == null:
+		return Vector3(-1, -1, -1)
+	return Vector3(float(m.get_string(1)), float(m.get_string(2)),
+		float(m.get_string(3)))
 
 
 ## 逐字节比较两格草的内容
