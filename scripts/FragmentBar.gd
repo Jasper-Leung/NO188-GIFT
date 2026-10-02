@@ -151,12 +151,37 @@ func _draw_fragment_icon(ctr: Vector2, idx: int, col: Color, alpha: float) -> vo
 		4: _draw_bird(ctr, col, alpha)
 
 
+## 云：和 `Postcard._draw_cloud` / `FragmentIcon._draw_cloud` 同一套鼓包、同一段
+## 轮廓算法。原来这里是三个同半径的圆叠出来的，攒齐之后明信片上却是另一朵云 ——
+## 玩家一路看着它在顶栏长大，最后带走的那张纸上认不出是同一件东西。
+## 逐列取最上面的鼓包，别改成「每团各画半圆」（会自交，三角化出 0 面积）。
 func _draw_cloud(c: Vector2, col: Color, a: float) -> void:
-	var r = 8.0
-	draw_circle(c + Vector2(-8, 2), r, Color(col.r, col.g, col.b, a))
-	draw_circle(c + Vector2(0, -4), r + 2, Color(col.r, col.g, col.b, a))
-	draw_circle(c + Vector2(8, 2), r, Color(col.r, col.g, col.b, a))
-	draw_arc(c + Vector2(0, -4), r + 2, PI * 0.1, PI * 0.9, 12, Color(1, 1, 1, a * 0.7), 1.5)
+	var bumps := [
+		[Vector2(-26.0, 5.0), 13.0],
+		[Vector2(-9.0, -6.0), 19.0],
+		[Vector2(10.0, -2.0), 15.0],
+		[Vector2(24.0, 6.0), 9.0],
+	]
+	var sc := 0.44
+	var base_y := 13.0 * sc
+	var x0 := c.x - 38.0 * sc
+	var x1 := c.x + 32.0 * sc
+	var poly := PackedVector2Array()
+	const STEPS := 48
+	for i in range(STEPS + 1):
+		var x := lerpf(x0, x1, float(i) / float(STEPS))
+		var top := base_y
+		for b in bumps:
+			var r := float(b[1]) * sc
+			var dx := x - (c.x + float(b[0].x) * sc)
+			if absf(dx) < r:
+				top = minf(top, c.y + float(b[0].y) * sc - sqrt(r * r - dx * dx))
+		poly.append(Vector2(x, top))
+	poly.append(Vector2(x1, c.y + base_y))
+	poly.append(Vector2(x0, c.y + base_y))
+	draw_colored_polygon(poly, Color(col.r, col.g, col.b, a))
+	draw_arc(c + Vector2(-9.0 * sc, -6.0 * sc), 12.0 * sc, PI * 1.12, PI * 1.62, 10,
+			Color(1, 1, 1, a * 0.7), 1.5)
 
 
 func _draw_teacup(c: Vector2, col: Color, a: float) -> void:

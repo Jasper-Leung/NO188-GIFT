@@ -23,11 +23,38 @@ func _draw() -> void:
 		4: _draw_bird(col)
 
 
+## 云：和 `Postcard._draw_cloud` 同一套鼓包、同一段轮廓算法，只是缩到 32px 基准。
+## 这五件碎片在顶栏和明信片上各画一遍，两边**必须**是同一个形状 —— 玩家一路
+## 收集的是云、最后带走的那张纸上却不是同一朵云，是在最贵的那一屏上拆台。
+## 轮廓逐列取最上面的鼓包（详见 Postcard 那边的注释：别改成「每团各画半圆」，
+## 相邻两团半径和大于圆心距，那样连出来是自交的线，三角化出 0 面积）。
 func _draw_cloud(col: Color) -> void:
-	draw_circle(Vector2(-8, 2), 8.0, col)
-	draw_circle(Vector2(0, -4), 10.0, col)
-	draw_circle(Vector2(8, 2), 8.0, col)
-	draw_arc(Vector2(0, -4), 10.0, PI * 0.1, PI * 0.9, 16, Color(1, 1, 1, alpha * 0.7), 2.0)
+	var bumps := [
+		[Vector2(-26.0, 5.0), 13.0],
+		[Vector2(-9.0, -6.0), 19.0],
+		[Vector2(10.0, -2.0), 15.0],
+		[Vector2(24.0, 6.0), 9.0],
+	]
+	var sc := 0.44
+	var base_y := 13.0 * sc
+	var x0 := -38.0 * sc
+	var x1 := 32.0 * sc
+	var poly := PackedVector2Array()
+	const STEPS := 48
+	for i in range(STEPS + 1):
+		var x := lerpf(x0, x1, float(i) / float(STEPS))
+		var top := base_y
+		for b in bumps:
+			var r := float(b[1]) * sc
+			var dx := x - float(b[0].x) * sc
+			if absf(dx) < r:
+				top = minf(top, float(b[0].y) * sc - sqrt(r * r - dx * dx))
+		poly.append(Vector2(x, top))
+	poly.append(Vector2(x1, base_y))
+	poly.append(Vector2(x0, base_y))
+	draw_colored_polygon(poly, col)
+	draw_arc(Vector2(-9.0 * sc, -6.0 * sc), 12.0 * sc, PI * 1.12, PI * 1.62, 10,
+			Color(1, 1, 1, alpha * 0.7), 2.0)
 
 
 func _draw_teacup(col: Color) -> void:

@@ -147,15 +147,28 @@ func _draw() -> void:
 		var rx: float = i * sect_w
 		var shimmer: float = sin(_t * 1.5 + i * 1.2) * 0.04
 		var fill_col: Color = base_col.darkened(0.18 + shimmer) if not is_placeholder else Color.GRAY.darkened(0.3)
-		draw_rect(Rect2(rx, sect_y, sect_w, sect_h), fill_col)
-		draw_rect(Rect2(rx, sect_y, sect_w, sect_h), Color(1, 1, 1, 0.08), false, 1)
+		var panel := Rect2(rx, sect_y, sect_w, sect_h)
+		draw_rect(panel, fill_col)
+		if not is_placeholder:
+			_draw_panel_wash(panel, i)
+		draw_rect(panel, Color(1, 1, 1, 0.08), false, 1)
 		var ctr = Vector2(rx + sect_w * 0.5, sect_y + sect_h * 0.5)
-		var sc: float = min(sect_w, sect_h) / 180.0
+		# 图标要撑满画区才读得出来。旧值 /180 在 150px 宽的格子里只画出 40px，
+		# 五个图标全缩在格子中央一小团 —— 导出成 1920 宽的 PNG 之后更看不清。
+		# 分母 82 是被最宽的琴（±38）压住的，再大就顶格。
+		var sc: float = minf(sect_w / 82.0, sect_h / 210.0)
 		if not is_placeholder and slot_idx >= 0:
-			var icon_col: Color = base_col.lightened(0.25)
-			_draw_fragment_icon(slot_idx, ctr, icon_col, 1.0, sc)
+			# 图标走墨色而不是底色的浅色调。旧版拿 base_col.lightened(0.25) 压在
+			# base_col.darkened(0.18) 的格子上，两者只差一档，读出来是"颜色深一点
+			# 的方块"；换墨色之后才是一个剪影。
+			_draw_fragment_icon(slot_idx, ctr, _ink, 1.0, sc)
 			var label_key: String = "fragment_%d" % slot_idx
-			draw_string(ThemeDB.fallback_font, Vector2(rx + sect_w * 0.5 - 14, sect_y + sect_h - 14),
+			var lpos := Vector2(rx + sect_w * 0.5, sect_y + sect_h - 20.0)
+			# 底下垫一条纸色的带：格子的底色每件都不一样，字要是不垫底
+			# 就跟着那一件变深变浅，云那一格尤其读不出来。
+			draw_rect(Rect2(lpos.x - sect_w * 0.5, lpos.y - 26.0, sect_w, 32.0),
+				Color(1, 1, 1, 0.30))
+			draw_string(ThemeDB.fallback_font, lpos - Vector2(0, 6),
 				Localization.t(label_key), HORIZONTAL_ALIGNMENT_CENTER, -1, 28, _ink)
 		else:
 			# 占位灰块显示 "?"
@@ -225,6 +238,24 @@ func _draw_cloud_sky(w: float, h: float) -> void:
 	# "云"字
 	draw_string(ThemeDB.fallback_font, Vector2(w * 0.5 - 20, 38),
 		Localization.t("fragment_0"), HORIZONTAL_ALIGNMENT_CENTER, -1, 36, _ink)
+
+
+## 画区里的纸感。五个画区原来是五块**平涂**的色卡，远看就是一份色板，
+## 而玩家带走的是一张纪念。补三层：顶部受光的竖向渐变、底部一道水色
+## 积聚的暗边、几根纸纤维。色块有了厚度，才不像 UI 的取色器。
+func _draw_panel_wash(r: Rect2, seed_i: int) -> void:
+	const BANDS := 5
+	for i in BANDS:
+		var t0 := float(i) / float(BANDS)
+		var y0 := r.position.y + r.size.y * t0
+		var hh := r.size.y * (float(i + 1) / float(BANDS) - t0) + 1.0
+		draw_rect(Rect2(r.position.x, y0, r.size.x, hh), Color(1, 1, 1, 0.11 * (1.0 - t0)))
+	draw_rect(Rect2(r.position.x, r.position.y + r.size.y * 0.86, r.size.x, r.size.y * 0.14),
+			Color(0.20, 0.16, 0.12, 0.10))
+	for i in 5:
+		var fx := r.position.x + fmod(float(seed_i * 7 + i * 53), r.size.x)
+		var fy := r.position.y + fmod(float(seed_i * 11 + i * 31), r.size.y * 0.92)
+		draw_line(Vector2(fx, fy), Vector2(fx + 5.0, fy - 1.0), Color(0.25, 0.20, 0.15, 0.10), 1)
 
 
 func _draw_road_sign(w: float, h: float) -> void:
@@ -324,72 +355,131 @@ func _draw_fragment_icon(slot_idx: int, c: Vector2, col: Color, a: float, sc: fl
 		4: _draw_bird(c, col, a, sc)
 
 
-## 云：三团叠起来的絮。形状取自 FragmentIcon._draw_cloud（画区这套按 sc 放大）。
-## B0C4DE 是五色里最淡的一个，图标又比底板只亮 0.25，光靠实心团子读不出来 ——
-## 所以三团各压一道白色高光，跟另外几个线描图标的高光笔触一致。
+## 云：一朵**有平底**的积云 —— 四团大小不一的鼓包沿一条平底线闭合成轮廓。
+## 旧版是三个同半径的圆叠出来的 B0C4DE 色团子，在画区里读成"三个点"，
+## 而叠圆按定义接不出平底 —— 平底正是云和烟唯一的区别。
 func _draw_cloud(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var r = 10.0 * sc
-	draw_circle(c + Vector2(-10 * sc, 3 * sc), r, Color(col.r, col.g, col.b, a))
-	draw_circle(c + Vector2(0, -5 * sc), r + 3 * sc, Color(col.r, col.g, col.b, a))
-	draw_circle(c + Vector2(10 * sc, 3 * sc), r, Color(col.r, col.g, col.b, a))
-	var hi := Color(1, 1, 1, a * 0.75)
-	draw_arc(c + Vector2(0, -5 * sc), r + 3 * sc, PI * 0.10, PI * 0.90, 20, hi, 2.0 * sc)
-	draw_arc(c + Vector2(-10 * sc, 3 * sc), r, PI * 0.18, PI * 0.62, 12, hi, 1.8 * sc)
-	draw_arc(c + Vector2(10 * sc, 3 * sc), r, PI * 0.38, PI * 0.82, 12, hi, 1.8 * sc)
+	var bumps := [
+		[Vector2(-26.0, 5.0), 13.0],   # 左肩，最矮
+		[Vector2(-9.0, -6.0), 19.0],   # 主体，最高
+		[Vector2(10.0, -2.0), 15.0],   # 右肩
+		[Vector2(24.0, 6.0), 9.0],     # 尾巴，最矮
+	]
+	# base_y 必须是**绝对**坐标。这几个鼓包的表面算出来是 c.y + …（三百多），
+	# 而 base_y 原来只是 13*sc（二十几），minf 一次都选不中鼓包，
+	# 九十九个点全部塌在同一条水平线上 —— 三角化照样出 97 个三角形，
+	# 面积是 0，图上就只剩那根线。
+	var base_y := c.y + 13.0 * sc
+	var x0 := c.x - 38.0 * sc
+	var x1 := c.x + 32.0 * sc
+	# 逐列取**最上面**那个鼓包的表面，拼出一条不自交的轮廓。
+	# 千万别改成「每团各画一段上半圆、再首尾相连」：相邻两团的半径和大于圆心距
+	# （19+13 > 17），后一团的起点会落在前一团终点的左边，连出来的是一条自己
+	# 压自己的线，三角化直接失败——第一版就是这么画成一根线的，而且不报任何错。
+	const STEPS := 96
+	var poly := PackedVector2Array()
+	for i in range(STEPS + 1):
+		var x := lerpf(x0, x1, float(i) / float(STEPS))
+		var top := base_y
+		for b in bumps:
+			var o := c.x + float(b[0].x) * sc
+			var r := float(b[1]) * sc
+			var dx := x - o
+			if absf(dx) < r:
+				top = minf(top, c.y + float(b[0].y) * sc - sqrt(r * r - dx * dx))
+		poly.append(Vector2(x, top))
+	poly.append(Vector2(x1, base_y))
+	poly.append(Vector2(x0, base_y))
+	draw_colored_polygon(poly, Color(col.r, col.g, col.b, a))
+	# 平底上压一道更重的墨，底边才立得住（云的影子就在脚下）
+	draw_line(Vector2(x0, base_y), Vector2(x1, base_y), Color(col.r, col.g, col.b, a), 2.0 * sc)
+	# 主体左上一道留白，跟另外几个线描图标的高光笔触一致
+	draw_arc(c + Vector2(-9.0 * sc, -6.0 * sc), 12.0 * sc, PI * 1.12, PI * 1.62, 12,
+			Color(1, 1, 1, a * 0.55), 2.0 * sc)
 
 
 func _draw_teacup(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
 	var r = 22.0 * sc
-	draw_arc(c + Vector2(0, 4 * sc), r, 0, PI, 24, Color(col.r, col.g, col.b, a), 3)
-	draw_line(c + Vector2(-r, 4 * sc), c + Vector2(-r, -8 * sc), Color(col.r, col.g, col.b, a), 3)
-	draw_line(c + Vector2(r, 4 * sc), c + Vector2(r, -8 * sc), Color(col.r, col.g, col.b, a), 3)
-	draw_arc(c + Vector2(0, -8 * sc), r, PI, TAU, 24, Color(col.r, col.g, col.b, a), 3)
-	draw_arc(c + Vector2(-30 * sc, -4 * sc), 8 * sc, -PI * 0.3, PI * 0.3, 12, Color(col.r, col.g, col.b, a), 2)
-	draw_arc(c + Vector2(-6 * sc, -22 * sc), 6 * sc, PI, TAU, 12, Color(1, 1, 1, a * 0.5), 1.5)
+	var ink := Color(col.r, col.g, col.b, a)
+	# 线宽跟着 sc 走：这五个图标原来在 180 的分母下画，线宽是写死的 3px；
+	# 画区放大两倍多之后 3px 的杯壁只剩一根发丝，缩略图上整个杯子就没了。
+	var lw := 3.0 * sc
+	draw_arc(c + Vector2(0, 4 * sc), r, 0, PI, 24, ink, lw)
+	draw_line(c + Vector2(-r, 4 * sc), c + Vector2(-r, -8 * sc), ink, lw)
+	draw_line(c + Vector2(r, 4 * sc), c + Vector2(r, -8 * sc), ink, lw)
+	draw_arc(c + Vector2(0, -8 * sc), r, PI, TAU, 24, ink, lw)
+	# 杯底一条，免得下半圆看着像悬空的碗
+	draw_line(c + Vector2(-r * 0.86, 4 * sc), c + Vector2(r * 0.86, 4 * sc), ink, lw * 0.7)
+	draw_arc(c + Vector2(-30 * sc, -4 * sc), 8 * sc, -PI * 0.3, PI * 0.3, 12, ink, lw * 0.7)
+	draw_arc(c + Vector2(-6 * sc, -22 * sc), 6 * sc, PI, TAU, 12, Color(1, 1, 1, a * 0.5), lw * 0.5)
 
 
 func _draw_guqin(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var pts = [
+	var pts = PackedVector2Array([
 		c + Vector2(-38 * sc, 6 * sc), c + Vector2(-22 * sc, -10 * sc),
 		c + Vector2(0, -14 * sc), c + Vector2(22 * sc, -10 * sc),
 		c + Vector2(38 * sc, 6 * sc)
-	]
-	for i in range(pts.size() - 1):
-		draw_line(pts[i], pts[i + 1], Color(col.r, col.g, col.b, a), 3)
-	draw_line(pts[0], pts[4], Color(col.r, col.g, col.b, a), 3)
-	for j in range(5):
-		var y = -8.0 * sc + j * 5 * sc
-		draw_line(c + Vector2(-30 * sc, y), c + Vector2(30 * sc, y), Color(1, 1, 1, a * 0.4), 1.5)
+	])
+	# 先把琴身填实，再压七根弦。旧版只画一圈描边、弦是白的：图标换成墨色之后
+	# 白弦落在浅色格子上等于没画。填实 + 亮弦才像一件漆黑的琴。
+	draw_colored_polygon(PackedVector2Array([
+		pts[0], pts[1], pts[2], pts[3], pts[4],
+		c + Vector2(30 * sc, 12 * sc), c + Vector2(-30 * sc, 12 * sc),
+	]), Color(col.r, col.g, col.b, a))
+	for j in range(7):
+		var y := -9.0 * sc + j * 3.6 * sc
+		var half := 30.0 * sc * (1.0 - 0.04 * float(j))
+		draw_line(c + Vector2(-half, y), c + Vector2(half, y),
+				Color(1, 1, 1, a * 0.55), 1.2 * sc)
+	# 两枚岳山和一枚雁足，认得出是琴而不只是一块梯形
+	draw_line(c + Vector2(-30 * sc, 10 * sc), c + Vector2(-24 * sc, 14 * sc),
+			Color(col.r, col.g, col.b, a), 3 * sc)
+	draw_line(c + Vector2(30 * sc, 10 * sc), c + Vector2(24 * sc, 14 * sc),
+			Color(col.r, col.g, col.b, a), 3 * sc)
 
 
 func _draw_bamboo(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
+	var ink := Color(col.r, col.g, col.b, a)
 	for s in range(-1, 2):
 		var bx = c.x + s * 18 * sc
 		for n in range(4):
 			var by = c.y - 28 * sc + n * 20 * sc
-			draw_line(Vector2(bx, by - 20 * sc), Vector2(bx, by + 8 * sc),
-				Color(col.r, col.g, col.b, a), 4)
-			draw_line(Vector2(bx - 8 * sc, by), Vector2(bx + 8 * sc, by),
-				Color(col.r, col.g, col.b, a), 2.5)
+			draw_line(Vector2(bx, by - 20 * sc), Vector2(bx, by + 8 * sc), ink, 4.0 * sc)
+			# 竹节：节间要略窄一点，才看得出是一节一节长的
+			draw_line(Vector2(bx - 8 * sc, by), Vector2(bx + 8 * sc, by), ink, 2.5 * sc)
+		# 竹叶两片，认得出是竹而不只是一排竖条
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(bx + 2 * sc, c.y - 48 * sc),
+			Vector2(bx + 22 * sc, c.y - 58 * sc),
+			Vector2(bx + 5 * sc, c.y - 36 * sc),
+		]), ink)
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(bx - 2 * sc, c.y - 34 * sc),
+			Vector2(bx - 22 * sc, c.y - 44 * sc),
+			Vector2(bx - 5 * sc, c.y - 22 * sc),
+		]), ink)
 
 
 func _draw_bird(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
 	var r = 18.0 * sc
-	draw_circle(c + Vector2(0, 4 * sc), r, Color(col.r, col.g, col.b, a))
+	var ink := Color(col.r, col.g, col.b, a)
+	draw_circle(c + Vector2(0, 4 * sc), r, ink)
 	# 翅膀（三角翼）
 	var wing_pts = PackedVector2Array([
 		c + Vector2(-2 * sc, -4 * sc),
 		c + Vector2(-22 * sc, -16 * sc),
 		c + Vector2(-12 * sc, 2 * sc),
 	])
-	draw_colored_polygon(wing_pts, Color(col.r * 0.85, col.g * 0.85, col.b * 0.85, a))
+	draw_colored_polygon(wing_pts, ink)
 	# 头 + 喙
-	draw_circle(c + Vector2(r - 2 * sc, -2 * sc), 5 * sc, Color(col.r, col.g, col.b, a))
-	draw_line(c + Vector2(r + 2 * sc, -2 * sc), c + Vector2(r + 12 * sc, 0), Color(col.r, col.g, col.b, a), 2)
+	draw_circle(c + Vector2(r - 2 * sc, -2 * sc), 5 * sc, ink)
+	draw_line(c + Vector2(r + 2 * sc, -2 * sc), c + Vector2(r + 12 * sc, 0), ink, 2.0 * sc)
 	# 尾
 	var tail_pts = PackedVector2Array([
-		c + Vector2(-r + 2, 0),
+		c + Vector2(-r + 2 * sc, 0),
 		c + Vector2(-r - 10 * sc, -6 * sc),
 		c + Vector2(-r - 10 * sc, 6 * sc),
 	])
-	draw_colored_polygon(tail_pts, Color(col.r * 0.85, col.g * 0.85, col.b * 0.85, a))
+	draw_colored_polygon(tail_pts, ink)
+	# 眼睛：墨色身子上一颗留白，认得出是鸟而不只是一颗圆
+	draw_circle(c + Vector2(r - 2 * sc, -3 * sc), 1.8 * sc, Color(1, 1, 1, a * 0.9))
