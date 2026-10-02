@@ -1,4 +1,8 @@
 extends Control
+
+## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
+## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 ## 茶烟小筑(10) 小游戏：按住3秒把水注满，松手退回零重来
 ##
 ## 这一行原来写的是「松开失败」，而代码从来没有实现失败：松手只是把
@@ -49,7 +53,7 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
-	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.65))
+	MiniGameBackdrop.draw_scene(self, w, h, MiniGameBackdrop.TEA)
 
 	# 标题
 	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.12),
@@ -62,8 +66,14 @@ func _draw() -> void:
 	var sc := minf(w, h) / 400.0
 	var rx := 78.0 * sc
 	var ry := 60.0 * sc
-	var col_pot := Color(0.40, 0.26, 0.15)
-	var col_edge := Color(0.66, 0.45, 0.26)
+	# 壶身不能是暖褐色。原来 col_pot = (0.40, 0.26, 0.15)，而茶烟小筑那屏的
+	# 天光渐变在壶所在的高度上正好是 (0.31, 0.23, 0.16) —— 两者亮度差不到
+	# 0.09，图上那只壶是一团和背景同色的糊，连壶嘴壶把都找不着。景做完之后
+	# 才暴露出来：这片景比原先那块 0.7 alpha 的黑幕亮，壶就得让开。
+	# 改成深色剪影 + 一道亮口沿：亮边在暖底上一眼能认出轮廓，壶里的水也才
+	# 亮得起来（0.11 的壶身配 0.74 的水，是这屏唯一的高对比处）。
+	var col_pot := Color(0.16, 0.10, 0.06)
+	var col_edge := Color(0.90, 0.66, 0.36)
 	draw_colored_polygon(_ellipse(pot_c, rx, ry), col_pot)
 	# 水位。逐行取椭圆的半宽来填，所以水是贴着壶壁涨的，不会溢出一个方块。
 	var fill: float = clampf(_hold_time / HOLD_DURATION, 0.0, 1.0)

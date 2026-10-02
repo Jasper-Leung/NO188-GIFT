@@ -1,4 +1,8 @@
 extends Control
+
+## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
+## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 ## 琴音林(13) 小游戏：Simon Says 记忆音符序列
 
 var _world_ref: Node = null
@@ -105,33 +109,71 @@ func _advance_show() -> void:
 	_note_show_timer = SHOW_DELAY
 	queue_redraw()
 
+## 琴身所占的矩形。四块几何都从它推出来，所以它自己也是一份单一出处。
+func _board_rect() -> Rect2:
+	return Rect2(size.x * 0.10, size.y * 0.24, size.x * 0.80, size.y * 0.40)
+
+
+## 四根弦的命中区。**只算几何，不碰画笔**。
+##
+## 原来这段只写在 `_draw()` 里，于是"弦到底顺不顺着琴身长边"这件事在
+## `--headless` 下量不到：回归读 `_note_rects` 只会读到空数组，量的是
+## "headless 不调 _draw"这条已知事实，不是这段几何对不对（同族：禽的
+## 剪影抽 `_poly` / `_oval`）。抽出来之后 `_draw()` 照旧填 `_note_rects`，
+## 回归直接调它。
+func _string_rects() -> Array[Rect2]:
+	var board := _board_rect()
+	var row_h := board.size.y / float(NOTE_COUNT)
+	var out: Array[Rect2] = []
+	for i in range(NOTE_COUNT):
+		var sy := board.position.y + row_h * (float(i) + 0.5)
+		out.append(Rect2(board.position.x, sy - row_h * 0.5, board.size.x, row_h))
+	return out
+
+
 func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
-	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.7))
+	MiniGameBackdrop.draw_scene(self, w, h, MiniGameBackdrop.ZITHER)
 
 	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.1),
 		Localization.t("mg_zither_title"), HORIZONTAL_ALIGNMENT_CENTER, w, 28, Color.WHITE)
 
 	# 琴面。原版是四块并排的纯色方块 + 数字，玩家读到的是"按 2"，
 	# 不是"拨第二根弦"。这里给一块木色琴面 + 四根并排的弦。
-	var board := Rect2(w * 0.10, h * 0.24, w * 0.80, h * 0.40)
-	draw_rect(board, Color("4A3524"), true)
-	draw_rect(board, Color("2A1C12"), false, 3.0)
+	#
+	# 弦必须**顺着琴身的长边**走。古琴的弦平行于长轴，玩家是横着拨的；
+	# 旧版把四根弦竖着插在一条又宽又短的琴身上，等于让玩家去拨一块
+	# 2.4m 宽的板子的短边——那不是琴，而且木面的宽高比和"琴"正好相反。
+	# 琴身也照古琴的样子收分：琴额（左）宽，琴尾（右）窄。
+	var board := _board_rect()
+	var cy := board.position.y + board.size.y * 0.5
+	var head_h := board.size.y * 0.5
+	var tail_h := board.size.y * 0.34
+	var body := PackedVector2Array([
+		Vector2(board.position.x, cy - head_h),
+		Vector2(board.end.x - board.size.x * 0.10, cy - tail_h),
+		Vector2(board.end.x, cy - tail_h * 0.72),
+		Vector2(board.end.x, cy + tail_h * 0.72),
+		Vector2(board.end.x - board.size.x * 0.10, cy + tail_h),
+		Vector2(board.position.x, cy + head_h),
+	])
+	draw_colored_polygon(body, Color("4A3524"))
+	draw_polyline(body, Color("2A1C12"), 3.0)
 
-	var col_w := board.size.x / NOTE_COUNT
-	var amp := board.size.x * 0.028
-	_note_rects.clear()
+	var row_h := board.size.y / float(NOTE_COUNT)
+	var amp := row_h * 0.26
+	# 命中区是整根弦所在的一条横带，比弦本身粗，玩家不必瞄准细线。
+	# 几何全在 _string_rects() 里，这里只把它搬到鼠标要用的那一份。
+	_note_rects = _string_rects()
 	for i in range(NOTE_COUNT):
-		var cx := board.position.x + col_w * (float(i) + 0.5)
-		# 命中区是整根弦所在的一列，比弦本身宽，玩家不必瞄准细线
-		_note_rects.append(Rect2(cx - col_w * 0.5, board.position.y - 24.0, col_w, board.size.y + 48.0))
-		_draw_string_v(i, cx, board, amp)
-		# 键位提示压在木面下沿，数字不再抢在弦前面
+		var sy := _note_rects[i].get_center().y
+		_draw_string_h(i, sy, board, amp)
+		# 键位提示压在琴尾之外，数字不再抢在弦前面
 		draw_string(ThemeDB.fallback_font,
-			Vector2(cx - col_w * 0.5, board.end.y + 34.0), "%d" % (i + 1),
-			HORIZONTAL_ALIGNMENT_CENTER, col_w, 26, Color(0.85, 0.78, 0.62))
+			Vector2(board.end.x + 12.0, sy + 9.0), "%d" % (i + 1),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 26, Color(0.85, 0.78, 0.62))
 
 	# 状态文字
 	var status := ""
@@ -152,26 +194,31 @@ func _draw() -> void:
 	draw_string(ThemeDB.fallback_font, Vector2(btn_rect.position.x, btn_rect.position.y + 30),
 		Localization.t("mg_cancel"), HORIZONTAL_ALIGNMENT_CENTER, btn_rect.size.x, 22, Color.WHITE)
 
-## 一根弦。振幅 = _ring[i] 随时间衰减，横向位移是两端固定的驻波：
+## 一根弦。**横向**的：沿着琴身长边从琴额拉到琴尾，振动方向是上下。
+## 振幅 = _ring[i] 随时间衰减，位移是两端固定的驻波：
 ## sin(pi·t) 保证两端钉死不动（琴码和雁柱），sin(_ring_t·f) 给出振动。
 ## 不振时退化成一条直线，但仍然画——四根弦必须在静止时也看得出来是四根。
-func _draw_string_v(i: int, cx: float, board: Rect2, amp: float) -> void:
+func _draw_string_h(i: int, sy: float, board: Rect2, amp: float) -> void:
 	var col: Color = _note_cols[i]
 	var e: float = _ring[i]
 	var lit := _active_note == i
+	var x0 := board.position.x + 14.0
+	var x1 := board.end.x - 18.0
 	var pts := PackedVector2Array()
 	for s in range(RING_SEGMENTS + 1):
 		var t := float(s) / float(RING_SEGMENTS)
-		var x := cx + e * amp * sin(_ring_t * RING_FREQ + t * 3.0) * sin(PI * t)
-		pts.append(Vector2(x, board.position.y + board.size.y * t))
+		pts.append(Vector2(
+			lerpf(x0, x1, t),
+			sy + e * amp * sin(_ring_t * RING_FREQ + t * 3.0) * sin(PI * t)))
 	draw_polyline(pts, col.lightened(0.15 if lit else 0.0), 3.0 if lit else 1.8)
-	# 弦轴：上端一颗小圆点，把这根线钉在木面上，也顺便交代"这是弦不是划痕"
-	draw_circle(Vector2(cx, board.position.y), 5.0, Color("8A6A4A"))
-	draw_circle(Vector2(cx, board.end.y), 5.0, Color("8A6A4A"))
+	# 两端的弦轴：左端琴码、右端雁柱，把这条线钉在木面上，
+	# 也顺便交代"这是弦不是划痕"
+	draw_rect(Rect2(x0 - 12.0, sy - 7.0, 8.0, 14.0), Color("8A6A4A"), true)
+	draw_rect(Rect2(x1 + 4.0, sy - 6.0, 7.0, 12.0), Color("8A6A4A"), true)
 	# 拨响时弦心亮一下，驻波的包络比整条弦提亮更容易被余光捕捉
 	if e > 0.02:
-		draw_circle(Vector2(cx, board.position.y + board.size.y * 0.5),
-			4.0 + 6.0 * e, Color(col.r, col.g, col.b, 0.55 * e))
+		draw_circle(Vector2(lerpf(x0, x1, 0.5), sy), 4.0 + 6.0 * e,
+				Color(col.r, col.g, col.b, 0.55 * e))
 
 
 func _gui_input(event: InputEvent) -> void:

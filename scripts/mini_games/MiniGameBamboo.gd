@@ -1,4 +1,8 @@
 extends Control
+
+## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
+## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 ## 竹雨庭(14) 小游戏：QTE 砍竹 — 5根竹子依次倒下，需在窗口内按键
 
 var _world_ref: Node = null
@@ -83,7 +87,7 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
-	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.65))
+	MiniGameBackdrop.draw_scene(self, w, h, MiniGameBackdrop.BAMBOO)
 
 	if _succeeded:
 		_draw_success(w, h)

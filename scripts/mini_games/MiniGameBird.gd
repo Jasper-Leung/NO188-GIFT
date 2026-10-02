@@ -1,4 +1,8 @@
 extends Control
+
+## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
+## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 ## 禽语湖湾(4) 小游戏：看清一只鸟的剪影，再从4只里把它认出来
 
 var _world_ref: Node = null
@@ -31,7 +35,12 @@ const BIRD_COLS: Array[Color] = [
 	Color(0.55, 0.4, 0.25),
 	Color(0.3, 0.35, 0.55),
 	Color(0.9, 0.9, 0.85),
-	Color(0.2, 0.2, 0.25),
+	# 乌鸦是四只里唯一的深色，而选项格底色 0.22 也不再是原来的 0.15。
+	# 原来是 0.20 压在 0.15 上——1.3 倍的亮度差，那只鸦在图上几乎看不见，
+	# 而这一局问的就是"刚才那只是哪一只"，认不出形状就等于没有题面。
+	# 现在鸦压到 0.11：仍然是四只里最黑的一只（读得出"这是只乌鸦"），
+	# 又和底色拉开了两倍。
+	Color(0.11, 0.11, 0.14),
 ]
 
 ## 键盘选第 i 个选项。取消按钮是 _draw() 画的假按钮，键盘够不着，
@@ -74,7 +83,7 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
-	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.7))
+	MiniGameBackdrop.draw_scene(self, w, h, MiniGameBackdrop.BIRD)
 
 	match _state:
 		STATE_SHOW:
@@ -136,7 +145,7 @@ func _draw_choice_phase(w: float, h: float) -> void:
 		var by := start_y + (i / 2) * (btn_h * 0.6)
 		var r := Rect2(bx, by, btn_w, btn_h * 0.5)
 		_choice_buttons.append(r)
-		draw_rect(r, Color(0.15, 0.15, 0.2), true)
+		draw_rect(r, Color(0.22, 0.22, 0.27), true)
 		draw_rect(r, Color(0.7, 0.7, 0.7), false, 2)
 		var bird_idx: int = _choice_options[i]
 		# 0.38 不是随手挑的：选项格是 btn_h*0.5 高，白鹭那一只是竖着长出来
@@ -204,7 +213,12 @@ const BIRD_SHAPES: Array = [
 
 func _draw_bird_silhouette(bird_idx: int, c: Vector2, sc: float) -> void:
 	var col: Color = BIRD_COLS[bird_idx]
-	var shade := Color(col.r * 0.74, col.g * 0.74, col.b * 0.74)
+	# 辅色往**亮**里去还是往**暗**里去，看这只鸟本身有多深。原先一律乘 0.74，
+	# 于是乌鸦身上的辅色（喙、脚、翅根）比身子还暗 0.11×0.74 = 0.08——
+	# 压在 0.22 的底色上彻底没了，那只鸦就只剩一团看不出形状的墨。
+	# 这不是配色偏好，是"辅色必须比本体更靠近底色以外的那一侧"。
+	var lum := col.r * 0.3 + col.g * 0.59 + col.b * 0.11
+	var shade: Color = col.lightened(0.34) if lum < 0.30 else col.darkened(0.26)
 	for prim in BIRD_SHAPES[bird_idx]:
 		var a: Array = prim
 		match a[0]:

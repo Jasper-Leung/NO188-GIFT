@@ -1,4 +1,8 @@
 extends Control
+
+## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
+## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 ## 云影台(7) 小游戏：拖拽沿轨迹绘制云的形状
 ## 成功条件：完成80%以上路径
 
@@ -76,25 +80,29 @@ func _draw() -> void:
 	var w := size.x
 	var h := size.y
 
-	# 半透明黑色遮罩
-	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.6))
+	MiniGameBackdrop.draw_scene(self, w, h, MiniGameBackdrop.CLOUD)
 
-	# 游戏区域
+	# 游戏区域。这块板子原来是近乎全黑的不透明矩形，压在一片雨后初霁的
+	# 淡蓝天上像一块贴上去的补丁；改成半透明，让背景的天光透上来，
+	# 描边提亮，轨迹的对比度靠板子的暗而不是靠"不透明"。
 	var area_rect := Rect2(w * 0.15, h * 0.15, w * 0.7, h * 0.7)
-	draw_rect(area_rect, Color(0.1, 0.15, 0.2, 0.9), true)
-	draw_rect(area_rect, Color(0.8, 0.8, 0.8, 0.4), false, 2)
+	draw_rect(area_rect, Color(0.16, 0.22, 0.28, 0.34), true)
+	draw_rect(area_rect, Color(1, 1, 1, 0.55), false, 2)
 
 	# 标题
 	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.1),
 		Localization.t("mg_cloud_title"), HORIZONTAL_ALIGNMENT_CENTER, w, 28, Color.WHITE)
 
-	# 目标轨迹（虚线）
+	# 目标轨迹（虚线）。板子现在是半透明的，底下是随高度变化的天光，
+	# 纯白的点在天亮的那一段会淡掉 —— 每个点先压一道深色晕再点白心。
 	for i in range(_path_world.size()):
 		var p: Vector2 = _path_world[i]
-		draw_circle(p, 5, Color(1, 1, 1, 0.4))
 		if i < _path_world.size() - 1:
 			var np: Vector2 = _path_world[i + 1]
-			draw_line(p, np, Color(1, 1, 1, 0.25), 2, true)
+			draw_line(p, np, Color(0.10, 0.14, 0.18, 0.35), 4, true)
+			draw_line(p, np, Color(1, 1, 1, 0.72), 2, true)
+		draw_circle(p, 7, Color(0.10, 0.14, 0.18, 0.40))
+		draw_circle(p, 5, Color(1, 1, 1, 0.92))
 
 	# 进度条
 	var bar_w := w * 0.5

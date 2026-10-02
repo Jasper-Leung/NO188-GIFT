@@ -45,6 +45,129 @@ func _mm(pos: Vector2) -> InputEventMouseMotion:
 	e.global_position = pos
 	return e
 
+## 6. 五件乐事各在自己的地方，且琴弦顺着琴身长边
+##
+## 这一节量的是两件**只能量几何、量不了像素**的事：
+##
+## · 琴的命中区。四根弦以前是竖着插在一条又宽又短的琴身上的（每根命中区
+##   是一条竖列），古琴的弦是平行于长轴的。竖列 vs 横带在屏幕上都能画出来、
+##   都能点、都能弹对，所以前面 5 节全绿——它量的是"能不能玩"，
+##   量不到"这看起来是不是一把琴"。判据取「命中区宽 > 高」，
+##   把旧代码放回去立刻红。
+## · 景对不对得上站。这一条只能读源码文本：小游戏的 `_draw()` 在 headless 下
+##   一笔都不落盘，屏幕上是茶烟小筑的暖黄还是竹雨庭的夜雨，没有断言能看见。
+##   而"五件乐事用同一片黑幕"正是原来的毛病，风景全丢。所以这里核对每个小游戏
+##   引用的主题常量是不是它自己那件乐事的——抄错一个下标，图上就串了地方。
+const THEME_OF := {
+	7: "CLOUD", 10: "TEA", 13: "ZITHER", 14: "BAMBOO", 4: "BIRD",
+}
+
+
+func _section_backdrops() -> void:
+	print("\n---- 6. 五件乐事的景 + 琴弦方向 ----")
+	_check(load("res://scripts/mini_games/MiniGameBackdrop.gd") != null,
+		"MiniGameBackdrop 存在")
+	for idx in GAMES:
+		var src := FileAccess.get_file_as_string(GAMES[idx])
+		var want: String = str(THEME_OF[idx])
+		_check(src.contains("MiniGameBackdrop." + want),
+			"驿站%d 用的是 %s 那片景（不是别的乐事的）" % [idx, want])
+
+	# 琴弦方向。这一条量的是 `_string_rects()` 这个不碰画笔的纯函数，
+	# **不是** `_note_rects`：后者在 `_draw()` 里填，而 `--headless` 根本不调
+	# `_draw()`，去读它量到的是"headless 不调 _draw"这条已知事实。也不把
+	# 节点挂进树里等帧 —— 挂进去就得 await，调用方不 await 的话整节会在
+	# 第一个 await 处静默挂住，然后由主协程照常打一行 PASS（实测踩过）。
+	var z: Control = load(GAMES[13]).new()
+	z.size = Vector2(1280.0, 1280.0)
+	var rects: Array = z.call("_string_rects")
+	_check(rects.size() == 4, "琴有 4 根弦的命中区（实际 %d）" % rects.size())
+	var widest := 0
+	for i in rects.size():
+		var r: Rect2 = rects[i]
+		if r.size.x > r.size.y:
+			widest += 1
+		_check(r.size.x > r.size.y,
+			"第%d根弦的命中区是横带（宽 %.0f > 高 %.0f = 弦顺着琴身长边）"
+			% [i + 1, r.size.x, r.size.y])
+	# 全部四根都得是横带。留一个汇总判据是有意的：上面那圈是逐根的，
+	# 少印一行也照样看得见，但"0 根是横带"这种整体结论不该靠人加总。
+	_check(widest == rects.size(),
+		"四根弦全都顺着琴身长边（%d/%d 根是横带）" % [widest, rects.size()])
+	z.free()
+
+
+## 五件乐事在 15 趟打卡里的完整排布。判据不是"轮换"这两个字，是四条能各自
+## 变红的性质：
+##   · **首次到访拿到的还是这座驿站自己的那件**（云影台仍然是描云）。
+##     MiniGamePicker.SCRIPTS 是一份**独立副本**，和 RoadData 的驿站表、碎片顺序
+##     三处各写一遍；这里拿真实的 road_data.gd 逐格对拍，抄错一处立刻红。
+##   · 同一座驿站连着三次**不重样**（否则第三次是原样重播）。
+##   · 15 局里每件乐事**正好 3 次**（不多不少，重玩钩子的分量才稳）。
+##   · `script_for()` 和 `game_for()` 指回同一件事（两张出口不许漂）。
+func _section_rotation() -> void:
+	print("\n---- 7. 三次到访轮换五件乐事 ----")
+	var picker = load("res://scripts/mini_games/MiniGamePicker.gd")
+	_check(picker != null, "MiniGamePicker 存在")
+	if picker == null:
+		return
+	var scripts: Array = picker.SCRIPTS
+	_check(scripts.size() == 5, "五件乐事各一件（实际 %d）" % scripts.size())
+	for i in scripts.size():
+		_check(ResourceLoader.exists(str(scripts[i])),
+			"第%d件 %s 在磁盘上" % [i + 1, str(scripts[i]).get_file()])
+
+	# runtime load 而**不是** `var rd: RoadData` 类型注解 —— 注解会在编译期把
+	# road_data.gd 拖进来，而它引用了 Localization autoload，`--script` 模式下
+	# 解析不可靠（见 CLAUDE.md 已知陷阱）。
+	var rd = load("res://scripts/road_data.gd").new()
+	var stations: Array = rd.stations
+	var slot_of: Array = rd.FRAGMENT_SLOT_STATION_IDX
+	_check(slot_of.size() == scripts.size(),
+		"驿站表(%d) 和乐事表(%d) 一样长" % [slot_of.size(), scripts.size()])
+	const FRAG_ORDER := ["云", "茶", "琴", "竹", "禽"]
+	for slot in mini(slot_of.size(), scripts.size()):
+		var st_idx: int = slot_of[slot]
+		var frag: String = str(stations[st_idx].get("fragment", "?"))
+		_check(frag == FRAG_ORDER[slot],
+			"槽位%d 确实是驿站%d，它身上写的是「%s」（该是「%s」）"
+			% [slot, st_idx, frag, FRAG_ORDER[slot]])
+		# GAMES 是本文件顶部那张「驿站→自己的那件」表。它原本就是产品的真值，
+		# 现在成了轮换表「首次到访不变」这条性质的对照。
+		_check(str(GAMES.get(st_idx, "")) == str(scripts[slot]),
+			"驿站%d 第一次到访玩的是它自己那件（%s）"
+			% [st_idx, str(scripts[slot]).get_file()])
+		_check(picker.game_for(slot, 0) == slot,
+			"槽位%d 第 1 次到访 = 槽位自己" % slot)
+
+	# 同一座驿站连着三次不重样
+	for slot in scripts.size():
+		var seen := {}
+		var dup := -1
+		for visit in 3:
+			var g: int = picker.game_for(slot, visit)
+			if seen.has(g):
+				dup = visit
+			seen[g] = true
+			_check(picker.script_for(slot, visit) == str(scripts[g]),
+				"槽位%d 第%d次到访：script_for 和 game_for 指同一件（%s）"
+				% [slot, visit + 1, str(scripts[g]).get_file()])
+		_check(dup < 0, "槽位%d 连着三次不重样（重复出现在第 %d 次）" % [slot, dup + 1])
+
+	# 15 局里每件正好 3 次
+	var tally := {}
+	for slot in scripts.size():
+		for visit in 3:
+			var g: int = picker.game_for(slot, visit)
+			tally[g] = int(tally.get(g, 0)) + 1
+	var all_three := true
+	for i in scripts.size():
+		if int(tally.get(i, 0)) != 3:
+			all_three = false
+	_check(all_three,
+		"15 局里每件乐事正好 3 次（%s）" % str(tally))
+
+
 func _check(cond: bool, label: String) -> void:
 	if cond:
 		print("[OK] ", label)
@@ -380,6 +503,8 @@ func _initialize() -> void:
 		cloud.queue_free()
 	await process_frame
 
+	_section_backdrops()
+	_section_rotation()
 	for s in stubs:
 		s.free()
 	print("[verify_mini_game] ", "PASS" if _failures == 0 else "FAIL", " failures=", _failures)
