@@ -35,6 +35,9 @@ extends SceneTree
 ## 那才是 GUI 焦点路由的范围。
 
 const SHOT_DIR := "user://lookdev_journey"
+## 轮换表。第 4 节要认"回访该玩哪一件"，判据只能取产品自己的那张表——
+## 这里重抄一份的话，产品把轮换改坏了这条也会照样绿。
+const MiniGamePicker = preload("res://scripts/mini_games/MiniGamePicker.gd")
 
 var _fails := 0
 var _gm: Node = null
@@ -216,15 +219,36 @@ func _run() -> void:
 			_visit_prompt_label().contains(
 					(_root_loc().t("desktop_revisit_prompt") % 2)),
 			"圈上写着：%s" % _visit_prompt_label())
-	# 跑一遍完整回访序列：1.0s 运镜 + 1.5s 定格 + 0.4s 收尾 ≈ 2.9s，
-	# 面板在 ~2.5s 亮起、~2.9s 自己收掉，所以按墙钟等到序列结束再断言。
+	# 跑一遍完整回访序列。回访现在**也会有一件乐事**——原来只有首次到访才进
+	# `_run_mini_game()`，于是完满评级要的三次里后两次是空的。所以序列变成
+	# 1.0s 运镜 + 1.5s 定格 + 小游戏 + 面板 1.0s 飞行 + 0.4s 收尾，
+	# 4.0s 之内小游戏根本不会结束，得先把它交掉再等面板。
 	var lvbi_before: int = _gm.lvbi
 	_world._do_check_in(4)
+	var waited := 0.0
+	while _world._mini_game_state != _world.MG_RUNNING and waited < 10.0:
+		await create_timer(0.1).timeout
+		waited += 0.1
+	_ck("回访也有一件乐事（原来后两次到访是空的）",
+			_world._mini_game_state == _world.MG_RUNNING,
+			"等了 %.1fs，状态还是 %d" % [waited, _world._mini_game_state])
+	# 而且必须是**换过的那件**。驿站4 是槽位 4：第一次玩禽，第二次该轮到云。
+	# 这里只认 MiniGamePicker 算出来的那一个——把轮换退化成"每次都玩自己
+	# 那件"的话，这一条是唯一会红的地方。
+	if _world._mini_game_node != null and is_instance_valid(_world._mini_game_node):
+		var got: String = str(_world._mini_game_node.get_script().resource_path)
+		var want: String = MiniGamePicker.script_for(4, 1)
+		_ck("回访玩的是轮到的那一件，不是原样重播", got == want,
+				"实际 %s，该是 %s" % [got.get_file(), want.get_file()])
+		# 这一节量的是"回访这一趟的账"，不是怎么描完一朵云。直接交成功，
+		# 免得把云的描边逻辑在这里重演一遍（它有自己的一节，见 verify_mini_game）。
+		if _world._mini_game_state == _world.MG_RUNNING:
+			_world._on_mini_game_done(0)
 	await create_timer(4.0).timeout
 	_ck("回访序列跑完了", not _world._check_in_in_progress)
-	_ck("回访没有重播小游戏", _world._mini_game_node == null
+	_ck("回访跑完没有留下小游戏", _world._mini_game_node == null
 			and _world._mini_game_state != _world.MG_RUNNING,
-			"回访是歇一脚，不该再考一次")
+			"node=%s state=%d" % [str(_world._mini_game_node), _world._mini_game_state])
 	# _popup_text 在面板收掉之后仍然留着最后写的字，所以断字比断可见性稳
 	_ck("回访面板说的是「已经收过了」",
 			_world._popup_text.text == _root_loc().t("revisit_note"),

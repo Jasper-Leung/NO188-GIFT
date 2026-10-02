@@ -54,6 +54,9 @@ var _pass_inside: Dictionary = {}
 var _villain_armed: Array = []
 var _villain_playing := false
 const STATION_PASS_RADIUS := 15.0
+## 五件乐事怎么轮着上。preload 而不是 class_name —— `--script` 模式下
+## class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
+const MiniGamePicker = preload("res://scripts/mini_games/MiniGamePicker.gd")
 var _cam_look_at_target: Vector3 = Vector3.ZERO
 var _cam_look_at_active: bool = false
 var _paused: bool = false
@@ -957,13 +960,20 @@ func _do_check_in(idx: int) -> void:
 			_finish_check_in()
 			return
 
-	# 小游戏挑战（仅首次到访；回访只是路过，不该再考一次）
+	# 小游戏挑战。**每一趟都有一件乐事**，不再只是首次到访。
+	# 原来 `if is_first_visit:` 一刀切掉后两次，可完满评级要的正是三次——
+	# 玩家第三次骑到云影台，圈上写着「再访 · 还差 1 次」，走进去却只有一句
+	# 「这件已经收过了」。现在按 MiniGamePicker 轮换，同一趟的三件不重样。
+	# 非碎片驿站 _run_mini_game() 返回 SKIP，这一整段照走不误。
+	#
+	# 对白仍然只在首次到访：驿站的开场白是它的自我介绍，回访再念一遍只会
+	# 把顶栏那 3 次的进度感冲掉，而每趟都有的乐事已经把那三次填满了。
 	const SUCCESS := 0
 	const CANCELLED := 1
 	const SKIP := 2
 	var mini_result := SKIP
-	if is_first_visit:
-		mini_result = await _run_mini_game(idx)
+	mini_result = await _run_mini_game(idx)
+	if mini_result != SKIP:
 		# 必须放在 CANCELLED 分支之前：失败那趟也要留一点旅币，别让玩家觉得白挨。
 		GameManager.on_mini_game(idx, mini_result == SUCCESS)
 	if mini_result == CANCELLED:
@@ -1156,18 +1166,17 @@ func _spawn_synthesis_animation() -> void:
 
 
 func _build_bike() -> void:
-	# 加载 bike.glb 替代原程序化 CSG 自行车
-	# GLB 由 Godot 编辑器首次打开时自动 import 为 PackedScene
-	# 若模型尺寸/朝向不符合预期，在下面改 scale / rotation
+	# 资产在 res://assets/bike.glb（不在 models/ 下）。本地 AABB 50.7×114.5×198.1，
+	# 乘 BIKE_SCALE=0.012 之后是 1.37m 高、2.38m 长的实车尺寸。
+	# 旧的程序化 CSG 兜底已经删掉：它引用的 WY / RA_X / REAR_Z 从来没定义过，
+	# 一旦真被调用就是运行时报错，留在那儿只是看着像还有条退路。
 	var bike_path = "res://assets/bike.glb"
 	if not ResourceLoader.exists(bike_path):
-		push_warning("bike.glb not found at " + bike_path + " — 用程序化 fallback")
-		_build_bike_procedural()
+		push_error("bike.glb not found at " + bike_path)
 		return
 	var bike_scene: PackedScene = load(bike_path)
 	if bike_scene == null:
-		push_warning("bike.glb 加载失败 — 用程序化 fallback")
-		_build_bike_procedural()
+		push_error("bike.glb 加载失败")
 		return
 	var bike = bike_scene.instantiate()
 	bike.scale = Vector3(BIKE_SCALE, BIKE_SCALE, BIKE_SCALE)
@@ -1215,132 +1224,6 @@ func _disable_translatable(node: Node) -> void:
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	for child in node.get_children():
 		_disable_translatable(child)
-
-
-func _build_bike_procedural() -> void:
-	var player = _player
-
-	var tire_mat = StandardMaterial3D.new()
-	tire_mat.albedo_color = Color(0.10, 0.10, 0.10, 1.0)
-	tire_mat.roughness = 0.95
-
-	var hub_mat = StandardMaterial3D.new()
-	hub_mat.albedo_color = Color(0.50, 0.50, 0.50, 1.0)
-	hub_mat.roughness = 0.3
-	hub_mat.metallic = 0.9
-
-	var frame_mat = StandardMaterial3D.new()
-	frame_mat.albedo_color = Color(0.80, 0.18, 0.10, 1.0)
-	frame_mat.roughness = 0.55
-	frame_mat.metallic = 0.05
-
-	var metal_mat = StandardMaterial3D.new()
-	metal_mat.albedo_color = Color(0.38, 0.38, 0.38, 1.0)
-	metal_mat.roughness = 0.35
-	metal_mat.metallic = 0.85
-
-	var saddle_mat = StandardMaterial3D.new()
-	saddle_mat.albedo_color = Color(0.15, 0.10, 0.08, 1.0)
-	saddle_mat.roughness = 0.88
-
-	var pedal_mat = StandardMaterial3D.new()
-	pedal_mat.albedo_color = Color(0.22, 0.22, 0.22, 1.0)
-	pedal_mat.roughness = 0.5
-	pedal_mat.metallic = 0.7
-
-	var make_cyl = func(parent: Node, pos: Vector3, radius: float, h: float, mat, sides: int = 10) -> CSGCylinder3D:
-		var c = CSGCylinder3D.new()
-		c.radius = radius
-		c.height = h
-		c.sides = sides
-		c.position = pos
-		c.material = mat
-		parent.add_child(c)
-		return c
-
-	var make_box = func(parent: Node, pos: Vector3, sz: Vector3, mat) -> CSGBox3D:
-		var b = CSGBox3D.new()
-		b.size = sz
-		b.position = pos
-		b.material = mat
-		parent.add_child(b)
-		return b
-
-	const WHEEL_R = 0.34
-	const WHEEL_H = 0.06
-	const _WY = WHEEL_R
-	const BB_Y = _WY + 0.28
-	const BB_Z = 0.0
-	const HT_Z = -0.30
-	const HT_BOTTOM_Y = WY + 0.10
-	const HT_TOP_Y = HT_BOTTOM_Y + 0.32
-	const HT_X = 0.30
-	const SC_Z = 0.06
-
-	var rear_wheel: CSGCylinder3D = make_cyl.call(player, Vector3(RA_X, WY, REAR_Z), WHEEL_R, WHEEL_H, tire_mat, 24)
-	var front_wheel: CSGCylinder3D = make_cyl.call(player, Vector3(FA_X, WY, FRONT_Z), WHEEL_R, WHEEL_H, tire_mat, 24)
-	var rear_hub = make_cyl.call(player, Vector3(RA_X, WY, REAR_Z), 0.040, WHEEL_H + 0.04, hub_mat, 12)
-	var front_hub = make_cyl.call(player, Vector3(FA_X, WY, FRONT_Z), 0.040, WHEEL_H + 0.04, hub_mat, 12)
-	var sprocket = make_cyl.call(player, Vector3(RA_X, WY, REAR_Z + 0.06), 0.040, 0.014, hub_mat, 18)
-
-	rear_wheel.rotation.z = deg_to_rad(90)
-	front_wheel.rotation.z = deg_to_rad(90)
-	rear_hub.rotation.z = deg_to_rad(90)
-	front_hub.rotation.z = deg_to_rad(90)
-	sprocket.rotation.z = deg_to_rad(90)
-
-	_bike_rear_wheel = rear_wheel
-	_bike_front_wheel = front_wheel
-
-	var bb = Vector3(0, BB_Y, BB_Z)
-	var sc = Vector3(-0.05, BB_Y + 0.48, SC_Z)
-	var ht_bottom = Vector3(HT_X, HT_BOTTOM_Y, HT_Z)
-	var ht_top = Vector3(HT_X, HT_TOP_Y, HT_Z)
-	var fa = Vector3(FA_X, WY, FRONT_Z)
-	var ra = Vector3(RA_X, WY, REAR_Z)
-
-	make_cyl.call(player, Vector3(HT_X, (HT_BOTTOM_Y + HT_TOP_Y) * 0.5, HT_Z), 0.026, 0.32, frame_mat, 10)
-	make_box.call(player, Vector3(HT_X, HT_BOTTOM_Y + 0.06, (HT_Z + FRONT_Z) * 0.5), Vector3(0.05, 0.05, abs(HT_Z - FRONT_Z) + 0.08), metal_mat)
-
-	var set_tube = func(p0: Vector3, p1: Vector3, radius: float, mat) -> void:
-		var dir = (p1 - p0).normalized()
-		if dir.length_squared() < 0.0001:
-			return
-		var cyl = CSGCylinder3D.new()
-		cyl.radius = radius
-		cyl.height = 1.0
-		cyl.sides = 10
-		cyl.material = mat
-		cyl.transform.basis = Basis.looking_at(dir, Vector3.UP)
-		cyl.position = p0 + dir * 0.5
-		player.add_child(cyl)
-
-	set_tube.call(bb, ht_bottom, 0.026, frame_mat)
-	set_tube.call(bb, sc, 0.022, frame_mat)
-	set_tube.call(sc, ht_top, 0.020, frame_mat)
-	set_tube.call(bb, ra + Vector3(0, 0, 0.05), 0.012, frame_mat)
-	set_tube.call(bb, ra + Vector3(0, 0, -0.05), 0.012, frame_mat)
-	set_tube.call(sc, ra + Vector3(0, 0, 0.05), 0.010, frame_mat)
-	set_tube.call(sc, ra + Vector3(0, 0, -0.05), 0.010, frame_mat)
-	set_tube.call(ht_bottom, fa, 0.014, metal_mat)
-	set_tube.call(ht_bottom, fa + Vector3(0, 0, 0.05), 0.012, metal_mat)
-	set_tube.call(ht_bottom, fa + Vector3(0, 0, -0.05), 0.012, metal_mat)
-
-	make_cyl.call(player, Vector3(HT_X, HT_TOP_Y + 0.10, HT_Z), 0.014, 0.16, metal_mat)
-	make_cyl.call(player, Vector3(HT_X, HT_TOP_Y + 0.24, HT_Z), 0.012, 0.42, metal_mat)
-	make_cyl.call(player, Vector3(HT_X, HT_TOP_Y + 0.20, HT_Z + 0.24), 0.016, 0.10, metal_mat)
-	make_cyl.call(player, Vector3(HT_X, HT_TOP_Y + 0.20, HT_Z - 0.24), 0.016, 0.10, metal_mat)
-	make_cyl.call(player, Vector3(-0.04, BB_Y + 0.14, BB_Z), 0.012, 0.12, metal_mat)
-	make_box.call(player, Vector3(-0.04, BB_Y + 0.22, SC_Z), Vector3(0.20, 0.030, 0.26), saddle_mat)
-	make_cyl.call(player, Vector3(0, BB_Y, BB_Z + 0.06), 0.040, 0.10, hub_mat, 12)
-	make_cyl.call(player, Vector3(0, BB_Y, BB_Z + 0.06), 0.078, 0.012, hub_mat, 28)
-	make_box.call(player, Vector3(0, BB_Y - 0.08, BB_Z + 0.12), Vector3(0.05, 0.14, 0.022), metal_mat)
-	make_box.call(player, Vector3(0, BB_Y - 0.12, BB_Z + 0.20), Vector3(0.08, 0.018, 0.12), pedal_mat)
-	make_box.call(player, Vector3(0, BB_Y + 0.08, BB_Z - 0.12), Vector3(0.05, 0.14, 0.022), metal_mat)
-	make_box.call(player, Vector3(0, BB_Y + 0.04, BB_Z - 0.20), Vector3(0.08, 0.018, 0.12), pedal_mat)
-
-	_bike_rear_wheel = rear_wheel
-	_bike_front_wheel = front_wheel
 
 
 func _on_check_in_pressed() -> void:
@@ -1399,14 +1282,18 @@ func _run_mini_game(station_idx: int) -> int:
 	var rd = _road_builder.get_road_data()
 	if not rd.station_has_fragment(station_idx):
 		return 2  # SKIP
-	var script_path: String
-	match station_idx:
-		7:  script_path = "res://scripts/mini_games/MiniGameCloud.gd"
-		10: script_path = "res://scripts/mini_games/MiniGameTea.gd"
-		13: script_path = "res://scripts/mini_games/MiniGameZither.gd"
-		14: script_path = "res://scripts/mini_games/MiniGameBamboo.gd"
-		4:  script_path = "res://scripts/mini_games/MiniGameBird.gd"
-		_:  return 2
+	# 哪一件乐事由 MiniGamePicker 算：按 (碎片槽位 + 第几次到访) 轮换，
+	# 第一次到访拿到的还是这座驿站自己的那件。原来这里是一张
+	# 「驿站 → 固定小游戏」的表，而调用方只在首次到访时才进它，
+	# 于是三次到访里有两次是空的。
+	#
+	# `get_station_count()` 此刻还是**本次之前**的次数——`GameManager.check_in()`
+	# 要等小游戏和弹窗都走完才调，所以这里拿到的正好是「这是第几次来」。
+	var slot: int = rd.FRAGMENT_SLOT_STATION_IDX.find(station_idx)
+	if slot < 0:
+		return 2  # SKIP
+	var script_path: String = MiniGamePicker.script_for(
+			slot, GameManager.get_station_count(station_idx))
 	_mini_game_node = load(script_path).new()
 	# 注入回调节点引用，让小游戏能通知完成
 	_mini_game_node._world_ref = self
