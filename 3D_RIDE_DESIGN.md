@@ -111,14 +111,20 @@ World3D (Node3D)
 
 ## 相机方案
 
-第三人称跟随（车后方斜上方），`Player3D._update_camera()`：
+第三人称跟随（车后方斜上方**偏侧**），`Player3D._update_camera()`：
 
 ```gdscript
 var forward = -global_transform.basis.z
-var target_pos = global_position - forward * 6.0 + Vector3(0, 4.0, 0)
+var right = global_transform.basis.x
+var target_pos = global_position - forward * CAM_BACK + right * CAM_SIDE + Vector3(0, CAM_UP, 0)
 _cam.global_position = _cam.global_position.lerp(target_pos, 0.12)
-_cam.look_at(global_position + forward * 3.0 + Vector3(0, 1.0, 0), Vector3.UP)
+_cam.look_at(global_position + forward * CAM_LOOK_AHEAD + Vector3(0, CAM_LOOK_UP, 0), Vector3.UP)
 ```
+
+`CAM_SIDE` 不是构图口味，是**可读性**：正后方 0 横向偏移时，一辆车在这个距离上
+正投影成一根竖条——车架三角、两个轮子全部侧对镜头，认不出是自行车。
+横向让开 1.15m 是唯一能把车读成"车"的自由度（`tools/verify_panel_keyboard.gd`
+之外的 `tools/verify_camera_bike.gd` 钉这条：屏幕上车的投影宽高比）。
 
 `set_camera_locked(true)` 期间相机冻结——打卡时的运镜由 `World3D._do_check_in()`
 用另一条 tween 接管（1.0s 移到站点旁的机位，再定格 1.5s）。

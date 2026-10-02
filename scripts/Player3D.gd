@@ -7,6 +7,17 @@ const DECEL = 12.0
 const REVERSE_SPEED = 5.0
 const TURN_SPEED = 1.8
 
+## 跟随机位。正后方 0 横向偏移时，一辆车在这个距离上正投影成一根竖条——
+## 车架三角、两个轮子全都侧对镜头，认不出是自行车。CAM_SIDE 是唯一能
+## 把车读成"车"的自由度，实测顶点投影宽高比 0.30（正后方）→ 0.86（现在），
+## 判据在 tools/verify_camera_bike.gd。CAM_BACK / CAM_UP / LOOK_* 是扫出来
+## 的：横向让开之后要相应把相机压低拉近，车的轮廓才铺得开。
+const CAM_BACK = 3.2       # 沿车头方向往后
+const CAM_UP = 2.3         # 抬高
+const CAM_SIDE = 2.4       # 横向让开
+const CAM_LOOK_AHEAD = 2.2
+const CAM_LOOK_UP = 1.1
+
 var _speed: float = 0.0
 var _can_move = true
 var _cam_locked = false
@@ -55,9 +66,10 @@ func _update_camera(delta: float) -> void:
 	if _cam_locked:
 		return
 	var forward = -global_transform.basis.z
-	var target_pos = global_position - forward * 6.0 + Vector3(0, 4.0, 0)
+	var right = global_transform.basis.x
+	var target_pos = global_position - forward * CAM_BACK + right * CAM_SIDE + Vector3(0, CAM_UP, 0)
 	_cam.global_position = _cam.global_position.lerp(target_pos, 0.12)
-	_cam.look_at(global_position + forward * 3.0 + Vector3(0, 1.0, 0), Vector3.UP)
+	_cam.look_at(global_position + forward * CAM_LOOK_AHEAD + Vector3(0, CAM_LOOK_UP, 0), Vector3.UP)
 
 
 func set_camera_locked(v: bool) -> void:
