@@ -102,7 +102,19 @@ void fragment() {
 	float shoulder = smoothstep(road_half_width, total_half_width, edge);
 	col = mix(col, dirt_color.rgb, shoulder * (1.0 - plaza_mode));
 
-	// 标线：仅中央白色虚线（线长 4m / 间隔 6m），路缘不画线
+	// 标线：中央白色虚线（线长 4m / 间隔 6m）+ 两侧沥青边上的白色实线。
+	//
+	// 边线这一条原来是**没有**的，而 `edge_line_color` 这个 uniform 一直挂在
+	// 第 12 行没人读——一份声明了却从没被用过的 uniform，正是「写进字段不等于
+	// 读进世界」那一族里最不容易被发现的一种：它在着色器里合法、没有任何报错。
+	// 它同时治两样玩家读得出来的东西：
+	//   ①沥青到路肩是**几何上的一刀切**（mesh 的外沿，|lateral| = road_half_width），
+	//     切面上没有任何过渡，掠射角下读成一条锯齿。一条**在切面内侧**慢慢
+	//     淡出的实线把人的视线钉在路缘上，锯齿于是有了去处。
+	//   ②没有边线时，沥青到泥土是靠 `shoulder` 那条 smoothstep 混出来的，
+	//     而 dirt 偏黄、沥青偏冷，两色直接相接读成"路面画到一半断了"。
+	// 宽度 0.12m 的半宽是给抗锯齿留的余量：白线两侧各有 0.10m 的羽化，
+	// 所以它在 1m 外的一辆自行车上仍是一条线，而它在 40m 外是一条会抖的亮带。
 	float asp_mask = 1.0 - smoothstep(road_half_width - 0.06, road_half_width, edge);
 
 	float phase = mod(along, 10.0);
@@ -111,6 +123,14 @@ void fragment() {
 
 	col = mix(col, center_line_color.rgb, center_lines);
 	col = mix(col, col * (0.84 + 0.32 * grain), center_lines * 0.3);
+
+	// 边线：贴着沥青外沿（road_half_width）**内侧**的一条实线，不随 dash 断续。
+	// 中心线之所以要断续是因为它在路中间，而路缘线的作用是**定住那条边界**，
+	// 断续的话边界反而读不出来了。中心距 0.12m → 半宽 0.12m 即 0.24m 宽。
+	float d_edge = abs(abs(lateral) - (road_half_width - 0.18));
+	float edge_line = (1.0 - smoothstep(0.06, 0.12, d_edge)) * (1.0 - plaza_mode);
+	col = mix(col, edge_line_color.rgb, edge_line);
+	col = mix(col, col * (0.84 + 0.32 * grain), edge_line * 0.3);
 
 	ALBEDO = col;
 
