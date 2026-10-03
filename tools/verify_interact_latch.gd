@@ -468,6 +468,32 @@ func _run() -> void:
 	_world._headless_mode = true
 	_gm.headless_mode = true
 
+	# ---------- 6b 暂停时脚下的圈要收掉 ----------
+	# 和第 6 节同一个家族（"这些状态下提示不许还在推销一个按不出来的交互"），
+	# 但成因不同，所以收的地方也不同：`_physics_process` 那张早退单子管的是
+	# **状态还在跑**的情形，而暂停是**树停了**——`_process` 不再跑，
+	# `queue_redraw()` 再也不来，圈会**冻在最后一帧**上继续显示。
+	# 暂停面板的遮罩是 0.8 alpha（3D 透出来是故意的），于是那圈和它那行
+	# 「空格 · 进入小镇」会从面板底下透上来，正好落在「语言」那一行上，
+	# 读起来就是「语言：空格 · 进入小镇」。定妆照 `lookdev_journey` 的
+	# `04a_pause_暂停面板` 就是这么发现的。
+	_teleport(4)
+	await process_frame
+	await process_frame
+	_ck("挪到碎片站 4 旁边时圈是亮的（这一节的前提，不成立的话后面恒绿）",
+			not cp6._prompt_target().is_empty(),
+			"圈目标=%s" % str(cp6._prompt_target()))
+	_world.toggle_pause()
+	await process_frame
+	_ck("暂停面板弹出来了", _world._pause_panel.visible)
+	_ck("暂停时脚下的圈收掉了（不许冻在最后一帧上透过面板继续显示）",
+			not _world._check_in_prompt.visible,
+			"visible=%s" % str(_world._check_in_prompt.visible))
+	_world.toggle_pause()
+	await process_frame
+	_ck("继续之后圈又回来了（不是被永久收走）",
+			_world._check_in_prompt.visible)
+
 	# ---------- 7 铺子最终可达 ----------
 	_teleport(shop_idx)
 	await process_frame

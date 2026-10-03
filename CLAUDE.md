@@ -8,7 +8,7 @@
 
 - **引擎**: Godot 4.6.2 (Forward+)
 - **主场景**: `res://scenes/GiftBox.tscn` → `res://scenes/World3D.tscn` → `res://scenes/EndCard.tscn`
-- **Autoload**: `GameManager`（存档）、`AudioManager`（音效）、`Localization`（中/英双语）
+- **Autoload**: `GameManager`（存档）、`AudioManager`（音效）、`Localization`（中/英双语）、`QualitySettings`（画质档位）
 - **导出目标**: Windows .exe, Web (HTML5 + WebAssembly), Android
 
 ## Godot 可执行文件路径
@@ -89,6 +89,20 @@ scripts/          GDScript 脚本
 						不是 `ui_cancel`，本工程 InputMap 里没有后者）。**收面板的责任在
 						`World3D._on_synthesis_choice()` 那一处**，不是散在按钮回调里——
 						`synthesis_choice` 是公开信号，定妆照脚本和以后的自动导览都走不到按钮
+  QualitySettings.gd    画质档位（autoload）：低 / 中 / 高，玩家在暂停面板里自己挑。
+						**桌面默认 high**——全部回归脚本量的都是那一档，低档等于让三十多条
+						回归在不知情的情况下量一个缩水的世界；Web / 移动端默认 low。
+						三档动的只有两样：太阳 `shadow_enabled` 与草皮/行道树的加载半径。
+						三档都**不动 3D 渲染分辨率**（实测 Compatibility 下
+						`scaling_3d_scale` 反而更慢，多一条全屏 blit 通道）。
+						高档那两个半径写的是 -1 = 不动、沿用 `target_radius()`，而
+						`apply_to_world()` 把 -1 落成 **0**（不是"不写"）——不写的话
+						override 是**粘的**，玩家在低档下把世界建起来再切回高档，
+						按钮写着「高」而下一趟的草皮还是 70m。
+						**故意没搬**（REF 原型里有）：帧率触发的自动降档，和
+						`Engine.max_physics_steps_per_frame = 4`——后者是用来压一条**至今
+						没定位**的间歇性段错误的，而它本身会改 `_process` 与
+						`_physics_process` 的相对频率。理由写在文件头里
   Localization.gd       i18n
 
 assets/
@@ -212,13 +226,35 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						颜色按距离递淡）—— 颜色本身只有 lookdev_horizon.gd 能判
   lookdev_horizon.gd      远景山线四张定妆照：路面视角 / 地形高点 / 逆光 / 高空
 						（**不能加 --headless**、**不能加 --quit-after**）
-  verify_day_cycle.gd     昼夜切换回归（第三圈门槛、太阳**方向**跟着降、
+  verify_day_cycle.gd     昼夜切换回归（第二圈门槛、太阳**方向**跟着降、
 						ProceduralSky 天色真的走了、白昼档没被顺手改掉、
 						dusk_began 只发一次；顺带断言"场景自带的天空是空的"）
 						**外加"天为什么曾经是一整片"那两条成因断言**：`fog_sky_affect`
 						必须为 0（场景雾不许画天），且白昼那档在**线性空间**里的纵向反差
 						≥ 0.50（常量是按 sRGB 写的，换算前按 sRGB 算出 0.39，看着
 						已经很够，而 AGX 压的是线性那一头，画面上是一片平）
+  verify_quality_settings.gd 画质档位回归（六节 48 条）。守六件事：①**三档的代价
+						单调**（把高档那个 -1 解析成 `target_radius()` 的生效值再比——
+						拿 -1 直接比的话 `低 < 中 < 高` 恒不成立，而那不是产品坏了，
+						是这一格故意不落数字）；②桌面默认 high；③**档位真的落到世界上**，
+						量的是 **setup() 之后的 `_radius`** 而不是 `radius_override`
+						那个字段——字段写了而 setup() 没读、或者被 `target_radius()`
+						盖回去，都属于"接线断了而两边各自都绿"；淡出带量的是材质上那个
+						`fade_end` 参数（压根没有成员变量，且每帧被 `set_fade_for_camera()`
+						按相机高度外扩，所以要先显式调一次 `apply_ground_fade()` 再读）；
+						④中途切档只有阴影当场生效、植被半径下一趟，所以面板那行提示必须
+						在，且**切回高档时 override 要让位回 0 而不是粘在低档那个数上**；
+						⑤**落盘闸**：`persist_enabled=false` 时存档一个字节都不动，
+						**外加一条正对照**（闸开着时确实落盘）——只测"闸没开"的话，一个
+						从来就不落盘的 `set_tier` 也能让那条绿一辈子；另有一条**读源码
+						文本**的判据：`set_tier` 的**参数表里一个 `=` 都没有**（第一版找
+						的是 `"persist ="` 这个子串，而带类型的默认值长成
+						`persist: bool = true`，中间隔着 `: bool `，那个子串压根不存在，
+						于是把默认值写回去照样绿）；⑥面板那一列在 1280×720 / 1280×1080
+						**中英各一遍**下装得下（英文那句才是卡边的一份），且画质按钮键盘可达
+						（`focus_mode` + 真的在按钮排里）。**四个突变都做过**：世界不推
+						档位 → 4 条红 / 参数表加默认值 → 1 条红 / override 改回"只在 >0
+						时写" → 2 条红 / 提示行去掉最小宽度 → 4 条红
   probe_water.gd         一次性探针：逐只碗报自由板 / 水面盖住碗的百分比 /
 						各方向水面半径 / 有几个角找不到岸。**改碗的参数先跑它**
   verify_water.gd         三处水回归（水体挂在那三座名字承诺了水的站上、水面
@@ -434,7 +470,7 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 # 远景山线材质（三层都关了雾、半径在地形之外、颜色按距离递淡）
 "$GODOT" --headless --path . --script tools/verify_far_ridge.gd
 
-# 昼夜切换（骑满两圈之后天色走到黄昏；含"场景自带的天空是空的"这条前提断言）
+# 昼夜切换（骑满一圈之后天色走到黄昏；含"场景自带的天空是空的"这条前提断言）
 "$GODOT" --headless --path . --script tools/verify_day_cycle.gd --quit-after 30000
 
 # 远景山线定妆照：路面视角 / 地形高点 / 逆光 / 高空，存到 user://lookdev_horizon/
@@ -627,6 +663,7 @@ echo. > .editor_mode
 - 改 `SynthesisPanel.gd` 的任何一处 / `World3D._synthesis_choice_open` / `_on_all_collected()` 的尾巴 / `_on_synthesis_choice()` / `HUDLayer/SynthesisPanel` 节点前跑 `verify_interact_latch.gd` **第 10 节** + `verify_minimap.gd` 第 9 节 + `verify_demo_path.gd` 第 1 节 + `lookdev_journey.gd` 看 `13b_synthesis_集齐二选一` 与 `13c_after_再骑一圈`。三件事一条都不能省：**第 10 节量面板本身**（两个按钮都在屏内不叠、都有 `focus_mode`、ESC 收得掉、`_all_done` 没被顺带翻过去）；**`verify_minimap` 第 9 节现在必须先选「再骑一圈」再逐站核对脚下的圈**——它原来直接接着扫，扫的时候面板还开着，`_nearby_*` 早被清成 -1，十条断言一起红，而那个红是**新行为的正确结果**，不是产品坏了；**`verify_demo_path` 第 1 节**守着 90 秒演示不被这个面板打断（`fill_finished_run()` 走直写字段不发信号，而刷满的碎片站被 `is_station_exhausted` 挡在 `_nearby_station_idx` 之外，演示里根本打不了卡）
 - 改 `Localization.gd` 里 `revisit_note` / `touch_revisit_button` / `collecting_message` / `revisit_available` / `synthesis_done_message` / `finish_run` 前跑 `verify_economy.gd`（文案扫描）+ `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`。前三句曾经一起写着"再歇一脚"——集齐之后唯一还在对玩家说的话是劝他别再跑了
 - 改 `PausePanel.gd` / 暂停面板按钮 / `go_to_end_card()` 的触发条件前跑 `verify_minimap.gd` 第 8b 节（出口在不在、零碎片时在不在、收工时评级按走过的算）+ `verify_postcard_ending.gd`（EndCard 得接得住非完满档）
+- 改 `QualitySettings.gd` 的任何一处 / `GrassScatter.radius_override` / `TreeScatter.radius_override` / `World3D._ready()` 里那一句 `QualitySettings.apply_to_world(self)` 的**位置** / 暂停面板 `VBox` 的行数或 `separation` / `Localization` 那五个画质 key 前跑 `verify_quality_settings.gd`（**不能加 --headless 之外还要注意 `--quit-after` 给小了**：它要真的起两份 World3D）。这一族守的是"接线"，而接线断掉时**两侧各自都绿**——见下面陷阱清单里那条「写进字段不等于读进世界」。另外两条只有它能量：**面板装不装得下**（多两行之后 VBox 的最小高度超过面板内容区时**不报错**，只把最下面那两行顶出下沿，而"最下面那两行"正好是新加的画质按钮和提示），以及**落盘闸**（`persist` 没有默认值这条靠反射量不到，是读源码文本的）
 - 改 `EndCard._show_ending_choice()` / `_seed_back_text()` 前跑 `verify_postcard_ending.gd`（`keep`/`break` 的后果必须落在**正面**：留门=背面写上那句、放手=背面留白且封口的蜡掰开，两张卡片的正文必须**就是**真正会发生的那件事本身，不能另写一段描述——否则又变回"承诺一个差别、实际只改一句话"）
 - 改 `EndCard._refresh_back_thumb()` / `_grab_back_thumb()` 前跑 `verify_postcard_ending.gd`（SubViewport 回读要等两帧；节流按累计 delta 掐，headless 跑两帧等不到 0.12s，测试里必须等墙钟）+ `lookdev_journey.gd` 看 `16_postcard_back`（要打完字再拍，只拍初始帧看不出缩略图跟不跟得上）
 - 改 `EndCard._show_back_editor()` 的布局（输入框高度 / 按钮摆法 / `THUMB_BTN_*`）前跑 `verify_postcard_ending.gd` 第 3 节（量控件几何：两个按钮不叠、都在屏内、缩略图 ≥400px 宽且不遮按钮）+ `lookdev_journey.gd` 的 `16_postcard_back`——那一屏现在带**像素级**断言（暗像素占比 + 落在几条横带上 + 明暗跨度），因为尺寸对了不代表里面真有字，SubViewport 回读到空帧时预览就是一块纯色、尺寸一模一样
@@ -640,6 +677,44 @@ echo. > .editor_mode
 - 改 `GameManager.enter_demo()` / `fill_finished_run()` / `demo_mode` 或标题页那个「演示 · 90 秒」按钮前跑 `verify_demo_path.gd` 第 1 节（秒级）。`fill_finished_run()` 走的是**直写字段**而不是 `check_in()`：后者会把 `all_fragments_maxed_reached` 闩锁翻过来，于是 `World3D._on_all_maxed()` 当场锁死操纵权、2.5 秒后自己跳去结算页——而那时候演示还在半路
 
 ## 已知陷阱
+
+- **「写进字段」不等于「读进世界」，而这一族断掉时两侧各自都绿**：画质档位
+  靠一个 `radius_override` 把半径推给 `GrassScatter` / `TreeScatter`。它写在
+  世界建起来**之前**，由 `setup()` 读走——所以断言必须量 **setup() 之后的
+  `_radius`**，量 `radius_override` 那个字段被写了等于什么都没量：字段写了而
+  setup() 没读它（接线断在散落体那一头），或者写了又被 `target_radius()`
+  盖回去（接线断在散落体自己那一头），两种都表现为"字段有值"而世界是 200m 那一档。
+  **同族的第二个坑是"不写"不等于"清空"**：高档那一档的半径是 -1 = 不动，
+  于是 `apply_to_world()` 第一版写成"只在 > 0 时才写"——override 是**粘的**，
+  玩家在低档下把世界建起来（override=70）、再切回高档，阴影当场回来了、按钮也
+  写着「高」，而**下一趟的草皮还是 70m**。这一条两侧更绿：阴影那侧量的是当场
+  生效的开关（确实回来了），半径那侧量的是这一趟建好的 `_radius`（确实还是 70，
+  符合"不重建"的预期）。正解是把 -1 落成 **0**（`maxf(..., 0.0)`，0 = 不接管）。
+  连带一条**量法上的教训**：这一批断言我是**四个突变一起做**的，结果
+  「世界不推档位」那个突变顺手把 override 清成了 0，于是"粘住"那个突变
+  **一条红都没报**——掩体是另一个突变提供的。**突变要一个一个撤**，批量做的时候
+  一个突变会把另一个的失败路径垫掉，而"全绿"这时候最危险。
+
+- **带 `autowrap_mode` 的 Label 不给 `custom_minimum_size.x`，它会一个字一行**：
+  暂停面板那行画质提示 33 个中文字，实测 `get_combined_minimum_size()` 是
+  `(1, 586)`——宽度 1px，于是自动折行按**逐字**断，33 行 × 17.75px。整列最小高度
+  从 452px 涨到 1022px，而面板内容区只有 464px（720p）。**VBox 装不下时不报错**，
+  只把最下面那两行顶出面板下沿——而最下面那两行正好是新加的按钮和提示，
+  于是"面板按钮多了一行"这件事在画面上表现为**新按钮不见了**。
+  修法是给一个真实折行宽度（440px，中文一行、英文两行）。
+  连带两条同族的：**"多量两遍分辨率"必须真的把窗口改掉**（第一版两次调用量的是
+  同一个 rect——headless 下视口是固定的 `project.godot` 窗口大小，于是"720p 和
+  1080p 都装得下"实际上只量了一次）；以及**英文往往才是卡边的那一份**
+  （108 个字符约 650px，33 个中文字只有 396px），只量中文的话英文界面下溢出。
+
+- **判"某个参数有没有默认值"要找对子串**：`set_tier(t, persist: bool = true)`
+  那一行里**不存在** `"persist ="` 这个子串——中间隔着 `: bool `。第一版就写的
+  `not sig.contains("persist =")`，于是把默认值写回去之后那条断言**照样绿**，
+  它从写下来那天起就是恒绿的。判据改成"**参数表里一个 `=` 都没有**"。
+  可推广的一条同族：**用文本断言去钉某条性质之前，先确认那个性质真的会在文本里
+  留下一个可搜的痕迹**——搜不到不等于性质成立，只等于判据量的是别的东西。
+  顺带一条相邻的：**只测"闸没开"的话，一个从来就不落盘的函数也能让那条绿一辈子**，
+  所以落盘闸这一族必须配一条**正对照**（闸开着的时候确实落盘了）
 
 - **想量一块 3D `Label3D` 在屏上占多大，两条路都是错的，第三条才对**：
   ①按 `outline_size × pixel_size` 反推——**描边并不按那个算米铺开**，

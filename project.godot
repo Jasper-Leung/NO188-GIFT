@@ -21,6 +21,7 @@ config/icon="res://icon.svg"
 GameManager="*res://scripts/GameManager.gd"
 AudioManager="*res://scripts/AudioManager.gd"
 Localization="*res://scripts/Localization.gd"
+QualitySettings="*res://scripts/QualitySettings.gd"
 
 [display]
 

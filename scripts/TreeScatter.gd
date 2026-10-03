@@ -98,6 +98,12 @@ var _mesh: Mesh = null
 var _cam_extra := 0.0
 
 
+## `QualitySettings.apply_to_world()` 在 setup() **之前**写这里。理由同
+## `GrassScatter.radius_override`：改 `RADIUS_DESKTOP` 那两个常量会把所有回归
+## 量的 150m 那一档悄悄换成另一个世界，而这个数只有跑过一次才知道合不合适。
+var radius_override := 0.0
+
+
 ## Web 与移动端砍到 100m。OS.has_feature 在导出时才为真，本地编辑器/桌面跑的是
 ## RADIUS_DESKTOP——回归脚本里量的就是 150m 那档。
 static func target_radius() -> float:
@@ -108,7 +114,7 @@ static func target_radius() -> float:
 
 func setup(terrain: Node3D, centerlines: Array, protected_positions: Array = []) -> void:
 	_terrain = terrain
-	_radius = target_radius()
+	_radius = radius_override if radius_override > 0.0 else target_radius()
 	_protected.clear()
 	for p in protected_positions:
 		if p is Vector3:

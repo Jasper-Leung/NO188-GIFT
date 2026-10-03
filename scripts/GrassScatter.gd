@@ -135,6 +135,15 @@ var _tick_acc := 0.0
 var _mat: ShaderMaterial = null
 
 
+## `QualitySettings.apply_to_world()` 在 setup() **之前**写这里：>0 就拿它当加载
+## 半径，<=0 走平台默认。必须开这道口子而不是改 `RADIUS_DESKTOP` 那两个常量——
+## 草皮是全场最贵的一样东西（一格 ring 0 约 10ms，见本文件建格预算那几行），
+## 而"这台机器铺 200m 铺不动"只有跑过一次才知道；写死在常量里的话低配玩家
+## 没有任何办法降档，而**所有回归量的都是 200m 那一档**，改常量等于把 30+ 条
+## 回归的世界悄悄缩了水。
+var radius_override := 0.0
+
+
 ## Web 与移动端砍半。OS.has_feature 在导出时才为真，本地编辑器/桌面跑的是
 ## RADIUS_DESKTOP——回归脚本里量的就是 200m 那档。
 static func target_radius() -> float:
@@ -154,7 +163,7 @@ func _ring_of(dist: float) -> int:
 
 func setup(terrain: Node3D, centerlines: Array, protected_positions: Array = []) -> void:
 	_terrain = terrain
-	_radius = target_radius()
+	_radius = radius_override if radius_override > 0.0 else target_radius()
 	_protected.clear()
 	for p in protected_positions:
 		if p is Vector3:

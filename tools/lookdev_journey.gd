@@ -448,6 +448,29 @@ func _run() -> void:
 	_check_bike_on_screen()
 	await _snap("04_ride_骑行中")
 
+	# ---- 04a 暂停面板：唯一一处改过行数的地方 ----
+	# 画质档位往这一列里加了一个按钮和一行提示，而 VBox 装不下时**不报错**，
+	# 只把最下面那两行顶出面板下沿——最下面那两行正好就是新加的那两行。
+	# 尺寸断言量的是"VBox 最小高度 ≤ 面板内容区"，量不到那行 12px 的字在
+	# 画面上读不读得出来，所以这一屏要图。
+	#
+	# **英文那一屏才是卡边的一份**：提示 33 个中文字占 396px，一行放得下；
+	# 英文 108 个字符约 650px，同一个框宽下折成两行。只拍中文的话英文界面
+	# 下的排版就没人看着了。
+	var panel: Control = _world.get_node_or_null("PausePanel")
+	if panel != null:
+		# 走**真的** `toggle_pause()`，不要直接写 `visible = true`：这一屏要拍的
+		# 是"玩家按 ESC 之后看到的那一屏"，而直接置 visible 跳过了 `set_can_move`
+		# 与音频那一整套，底下的世界会停在一个玩家根本看不到的状态上。
+		_world.toggle_pause()
+		await _snap("04a_pause_暂停面板")
+		_loc.set_language("en")
+		panel.call("_apply_language")
+		await _snap("04a_pause_EN")
+		_loc.set_language("zh")
+		panel.call("_apply_language")
+		_world.toggle_pause()
+
 	# ---- 04b 反派戏打断：入场提示 + 镜头收束 ----
 	# 这一屏以前一张图都没有：`lookdev_journey` 开头就把 `seen_villain` 顶到 3
 	# 把三场全跳过去了，于是新增的入场提示只有数字守着、没有图守着。
@@ -576,8 +599,10 @@ func _run() -> void:
 	# 动了太阳方向、环境光、雾、远景山线四样，只有看图能判它们凑在一起对不对。
 	#
 	# _odometer_units 是**累加器**（World3D 只在玩家位移时往上加），所以站着不动
-	# 把它摆到第三圈就成立，转场期间玩家没动它也不会被改回去。
-	_world._odometer_units = 3.0 * _world._total_arclen
+	# 把它摆到门槛之后 0.5 圈就成立，转场期间玩家没动它也不会被改回去。
+	# 跟着 `DUSK_FROM_LAP` 走而不是写死一个圈数：门槛一挪（现在 2.0 → 1.0，
+	# 因为一趟从 20~30 分钟缩到 3.1 分钟），这一屏得跟着代表"玩家真的会看到的那一段"。
+	_world._odometer_units = (_world._day_cycle.DUSK_FROM_LAP + 0.5) * _world._total_arclen
 	# 机位必须是**真实跟随相机**（Player3D._update_camera 的第三人称机位）。
 	# 旧版把人按到离地 1m 处平视，拍出来是一堵草墙：车小到只剩一个红点，
 	# 地平线压在画面上沿，判不出黄昏到底把光打成了什么样——而这正是这一屏
@@ -607,7 +632,7 @@ func _run() -> void:
 	# 转场 9 秒（DayCycle.FADE_SEC），按墙钟等 —— 这台机器帧数不等于秒数
 	await create_timer(11.0).timeout
 	var dusk_t: float = float(_world._day_cycle.get_t())
-	_ck("骑满两圈之后天色真的走到黄昏（不是还在半路上）", dusk_t == 1.0,
+	_ck("骑满一圈之后天色真的走到黄昏（不是还在半路上）", dusk_t == 1.0,
 			"t=%f" % dusk_t)
 	# 太阳压到 9° 之后影子该拉得很长，而且方向和正午那档差了一截。
 	# 这一屏不校验数字（verify_day_cycle.gd 已经逐条量过了），只看整张图凑不凑。

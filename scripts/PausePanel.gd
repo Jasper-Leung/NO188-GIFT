@@ -1,6 +1,6 @@
 extends Control
 ## PausePanel — 暂停菜单 (PRD F-32)
-## 全屏黑底 + 中央 Panel：继续 / 重新开始 / 操作说明 / 全局静音 / BGM 静音 / SFX 静音
+## 全屏黑底 + 中央 Panel：继续 / 结束这一趟 / 重新开始 / 操作说明 / 三档静音 / 语言 / 画质
 ## 挂载：World3D/PausePanel，初始 visible=false，由 World3D.toggle_pause() 控制
 
 @onready var _continue_btn: Button = $Overlay/Panel/VBox/ContinueBtn
@@ -10,6 +10,8 @@ extends Control
 @onready var _bgm_btn: Button = $Overlay/Panel/VBox/BgmBtn
 @onready var _sfx_btn: Button = $Overlay/Panel/VBox/SfxBtn
 @onready var _language_btn: Button = $Overlay/Panel/VBox/LanguageBtn
+@onready var _quality_btn: Button = $Overlay/Panel/VBox/QualityBtn
+@onready var _quality_hint: Label = $Overlay/Panel/VBox/QualityHintLabel
 @onready var _title_label: Label = $Overlay/Panel/VBox/TitleLabel
 
 var _help_overlay: Control = null
@@ -27,6 +29,7 @@ func _ready() -> void:
 	_bgm_btn.pressed.connect(_on_bgm_pressed)
 	_sfx_btn.pressed.connect(_on_sfx_pressed)
 	_language_btn.pressed.connect(_on_language_pressed)
+	_quality_btn.pressed.connect(_on_quality_pressed)
 	AudioManager.mute_changed.connect(_update_mute_buttons)
 	Localization.language_changed.connect(_apply_language)
 	# 必须在这里连：World3D.tscn 里 PausePanel 那个节点没有 [connection] 段，
@@ -39,6 +42,7 @@ func _ready() -> void:
 	_help_overlay_label = _help_overlay.get_node("HelpPanel/HelpLabel")
 	_help_overlay.visible = false
 	_update_mute_buttons()
+	_update_quality_button()
 
 
 ## 「结束这一趟」——这一趟现在**只能**由刷满五座碎片驿站结束（那是重玩钩子，
@@ -122,6 +126,8 @@ func _apply_language() -> void:
 	_help_btn.text = Localization.t("help")
 	_language_btn.text = "%s  %s" % [Localization.t("language"), Localization.t("language_current")]
 	_update_mute_buttons()
+	if _quality_hint != null:
+		_quality_hint.text = Localization.t("quality_hint")
 	if _help_overlay_label != null:
 		_help_overlay_label.text = Localization.t("help_overlay")
 
@@ -138,6 +144,7 @@ func _on_help_overlay_input(_event: InputEvent) -> void:
 func _on_visibility_changed() -> void:
 	if visible:
 		_update_mute_buttons()
+		_update_quality_button()
 		_refresh_finish_btn()
 
 
@@ -174,3 +181,21 @@ func _update_mute_buttons() -> void:
 	_mute_btn.text = "%s [%s]" % [Localization.t("mute"), on if AudioManager.is_muted() else off]
 	_bgm_btn.text = "%s [%s]" % [Localization.t("bgm_mute"), on if AudioManager.is_bgm_muted() else off]
 	_sfx_btn.text = "%s [%s]" % [Localization.t("sfx_mute"), on if AudioManager.is_sfx_muted() else off]
+
+
+func _on_quality_pressed() -> void:
+	# 落盘（persist=true）：玩家自己挑的档位要留下来。而阴影是**当场**生效的，
+	# 所以要再推一遍给已经建好的世界——植被半径写回 radius_override，
+	# 下一趟 setup() 才读它（面板上那一行提示就是在说这件事）。
+	QualitySettings.set_tier((QualitySettings.tier + 1) % QualitySettings.TIER_COUNT, true)
+	QualitySettings.apply_to_world(get_parent())
+	_update_quality_button()
+
+
+func _update_quality_button() -> void:
+	if _quality_btn == null:
+		return
+	_quality_btn.text = "%s  %s" % [Localization.t("quality"),
+			Localization.t(str(QualitySettings.tier_name_key()))]
+	if _quality_hint != null:
+		_quality_hint.text = Localization.t("quality_hint")

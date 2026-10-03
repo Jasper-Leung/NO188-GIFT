@@ -462,7 +462,7 @@ offset_left = 20.0
 offset_top = 20.0
 offset_right = -20.0
 offset_bottom = -20.0
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 
 [node name="TitleLabel" type="Label" parent="PausePanel/Overlay/Panel/VBox"]
 layout_mode = 2
@@ -505,6 +505,20 @@ theme_override_font_sizes/font_size = 16
 layout_mode = 2
 text = "语言：中文"
 theme_override_font_sizes/font_size = 16
+
+[node name="QualityBtn" type="Button" parent="PausePanel/Overlay/Panel/VBox"]
+layout_mode = 2
+text = "画质：高"
+theme_override_font_sizes/font_size = 16
+
+[node name="QualityHintLabel" type="Label" parent="PausePanel/Overlay/Panel/VBox"]
+custom_minimum_size = Vector2(440, 0)
+layout_mode = 2
+text = "低档关阴影并把草皮行道树收到 70m · 植被范围重新进这一趟生效"
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.72, 0.72, 0.76, 1)
+horizontal_alignment = 1
+autowrap_mode = 3
 
 [node name="OnboardingGuide" type="Control" parent="."]
 visible = false

@@ -68,6 +68,17 @@ const STRINGS := {
 		"off": "关",
 		"bgm_short": "乐",
 		"sfx_short": "效",
+		# 画质档位。低/中/高三档切的是**阴影与植被半径**，不切渲染分辨率——
+		# Compatibility 下 3D 缩放反而更慢（多一条全屏 blit 通道），而本作零贴图，
+		# 想要更多帧只有关阴影、把草皮和行道树收进来这两条路。
+		"quality": "画质",
+		"quality_low": "低",
+		"quality_medium": "中",
+		"quality_high": "高",
+		# 面板上得说清一件事：切档之后**只有阴影立刻变**，植被半径要重新进这一趟
+		# 才看得见（草皮的池和环数在 setup() 那一刻就定死了，当场重建比那点
+		# 收益贵得多）。玩家看不到这半句就会以为按钮坏了。
+		"quality_hint": "低档关阴影并把草皮行道树收到 70m · 植被范围重新进这一趟生效",
 		"help_overlay": "WASD / 方向键  移动\n空格 / Enter     驿站打卡\nESC              暂停菜单\nM               静音开关\n点击碎片图标     查看碎片说明\nBGM/SFX 静音     分别控制背景音乐和音效",
 		"help_close": "点击面板外关闭",
 		# 原来这里有一个 "progress": "已行 %dkm / 188km"。世界只有 1228.8m 一圈，
@@ -302,6 +313,11 @@ const STRINGS := {
 		"off": "Off",
 		"bgm_short": "Music",
 		"sfx_short": "SFX",
+		"quality": "Quality",
+		"quality_low": "Low",
+		"quality_medium": "Medium",
+		"quality_high": "High",
+		"quality_hint": "Low turns off sun shadows and pulls grass and trees in to 70m - vegetation range applies on your next ride",
 		"help_overlay": "WASD / Arrows   Move\nSpace / Enter   Station check-in\nESC             Pause menu\nM               Mute all\nTap shard icon  View shard story\nBGM/SFX mute    Control music and sounds",
 		"help_close": "Click outside the panel to close",
 		"stations_seen": "Posts passed %d/%d",

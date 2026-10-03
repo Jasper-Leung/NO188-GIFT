@@ -287,6 +287,10 @@ func _ready() -> void:
 		_veg_builder.setup(_road_builder.get_road_data().points, _terrain_builder, _player,
 			_road_builder.get_all_centerlines(), _station_protection_positions(), plant_overrides)
 
+	# 画质档位必须在**两个散落体 setup 之前**推：草皮/行道树的池、环数、淡出带
+	# 全在 setup() 里按半径一次性定死，推晚了就得当场重建整片草皮。阴影当场生效。
+	QualitySettings.apply_to_world(self)
+
 	if _grass_scatter != null:
 		# 用全部驿站，不是 _station_protection_positions()：那个只给 7/10 两个
 		# （灌木要为亭子让视线），草要避开每一个驿站的铺装地面。
@@ -831,8 +835,10 @@ func _physics_process(_delta: float) -> void:
 		var km := minf(_odometer_units / _total_arclen * GameManager.TOTAL_ROUTE_KM, GameManager.TOTAL_ROUTE_KM)
 		GameManager.set_progress_km(km)
 		GameManager.earn_km(km)
-		# 骑满两圈之后天色转成黄昏。里程表是按前进量累的，所以绕 8 字交叉点
+		# 骑满一圈之后天色转成黄昏。里程表是按前进量累的，所以绕 8 字交叉点
 		# 或者回头路都照算，不靠"我在第几个点上"这种会漂的判据。
+		# 打卡要拐下路到亭子跟前去，所以里程跑得比沿中心线快——门槛因此比
+		# "骑满一圈"到得更早一点，而它本来就是观感门槛（见 DayCycle 那条常量）。
 		if _day_cycle != null:
 			_day_cycle.set_laps(_odometer_units / _total_arclen, _delta)
 
@@ -1503,6 +1509,14 @@ func toggle_pause() -> void:
 	_pause_panel.visible = _paused
 	AudioManager.set_paused_bgm(_paused)
 	_player.set_can_move(not _paused and not _check_in_in_progress and not _all_done and not _shop_open)
+	# 脚下的圈和它那行提示要一起收掉，**必须在 toggle_pause() 这一处收**。
+	# 暂停面板的遮罩是 0.8 alpha 的（3D 画面透出来是故意的），而这个圈是
+	# `_draw()` 画在 HUD 层上的：树一停 `_process` 就不跑了，`queue_redraw()` 再也不会
+	# 来，所以它会**冻在最后一帧**上继续显示。玩家在驿站旁按 ESC 时，那圈和
+	# 「空格 · 进入小镇」正好落在面板的「语言」那一行上，读起来就是
+	# 「语言：空格 · 进入小镇」——两个提示在同一刻互相拆台，而面板上多两行之后
+	# 撞得更准了。定妆照 `04a_pause_暂停面板` 就是这么发现的。
+	_check_in_prompt.visible = not _paused
 
 
 func resume_game() -> void:
