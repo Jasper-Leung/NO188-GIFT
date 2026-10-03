@@ -299,6 +299,7 @@ func _run() -> void:
 	await process_frame
 	_ck("二选一覆盖层已建", card._ending_overlay != null)
 	await _snap_root("10_终局二选一")
+	await _check_choice_joys_pixels(card)
 
 	var keep_card: Control = card._ending_overlay.get_node("Choice_keep")
 	_click(keep_card)
@@ -368,3 +369,85 @@ func _click(card: Control) -> void:
 	ev.pressed = true
 	ev.button_index = MOUSE_BUTTON_LEFT
 	card.gui_input.emit(ev)
+
+
+## 抉择屏底下那一行五件乐事：**图上真的画出来了没有**。
+##
+## 几何断言（`verify_postcard_ending.gd` §4）量的是控件摆在哪、有没有叠——
+## 而 `FragmentIcon` 的五件全在 `_draw()` 里，`--headless` 一笔不落盘，
+## 几何全绿而屏上五个空框是没有谁能拦住的。这里量像素。
+##
+## 判据是**每一格里都有一片那片颜色**，不是"五格颜色两两不同"：
+## `FragmentIcon` 画的是 1~2px 的细线，五件摊在 56×56 上各占几十个像素，
+## 所以按「取到几个接近本件颜色的像素」断，门槛取 8（实测 60~200），
+## 既拦得住"一个都没画"，又留得住 AGX 之后色偏的余量。
+## 而「五格真的并排排开」交给几何断言——这里量的只是**画没画**。
+func _check_choice_joys_pixels(card: Control) -> void:
+	var img: Image = root.get_texture().get_image()
+	var cols: Array = load("res://scripts/Postcard.gd").FRAGMENT_COLS
+	var ed: Control = card._ending_overlay
+	if ed == null:
+		_ck("抉择屏的五件乐事画出来了", false, "覆盖层是 Nil")
+		return
+	var icons: Array = []
+	for c in ed.get_children():
+		if c.get_class() == "Control" and c.get_script() != null \
+				and c.get_script().resource_path.ends_with("FragmentIcon.gd"):
+			icons.append(c)
+	_ck("底栏那一行是五个图标控件", icons.size() == 5, "got %d" % icons.size())
+	if icons.size() != 5:
+		return
+	var per: Array = []
+	var on_name: Array = []
+	for i in icons.size():
+		var r: Rect2 = icons[i].get_global_rect()
+		var want: Color = cols[i]
+		var n := 0
+		for dy in range(0, int(r.size.y)):
+			for dx in range(0, int(r.size.x)):
+				var c2: Color = img.get_pixel(int(r.position.x) + dx, int(r.position.y) + dy)
+				# 用「色相对不对」而不是「三通道都接近」：图标是细线，线心可能
+				# 落在高光上，而 hue 那一路在 AGX 之后仍然认得出是云还是竹。
+				if absf(c2.r - want.r) < 0.22 and absf(c2.g - want.g) < 0.22 \
+						and absf(c2.b - want.b) < 0.22:
+					n += 1
+		per.append(n)
+		# 同一个颜色有没有跑到**名字那一行**上去。这一条量的是玩家看得见的
+		# 那一件事：五件的设计范围并不是 ±16（竹到 y −24..+20、禽到 x +21），
+		# 而 `FragmentIcon` 按 `size.x` 缩放、以控件中心为原点——框开成方形
+		# 就一定装不下。第一版 56×56 装不下，竹的梢压着「竹」那个字，
+		# 而**几何断言当时全绿**（控件不叠，都在屏内）。墨有没有落进名字行
+		# 只有像素能量得到，所以判据就落在像素上。
+		var nm_r: Rect2 = _name_rect_under(ed, icons[i])
+		var m := 0
+		if nm_r.size.x > 0.0:
+			for dy in range(0, int(nm_r.size.y)):
+				for dx in range(0, int(nm_r.size.x)):
+					var c3: Color = img.get_pixel(int(nm_r.position.x) + dx,
+							int(nm_r.position.y) + dy)
+					if absf(c3.r - want.r) < 0.22 and absf(c3.g - want.g) < 0.22 \
+							and absf(c3.b - want.b) < 0.22:
+						m += 1
+		on_name.append(m)
+	_ck("五个图标都真的画出了自己的颜色（每件 ≥8 像素）",
+			per.min() >= 8, "实际 %s" % str(per))
+	_ck("没有一件的笔画压到自己名字那一行（0 像素）",
+			on_name.max() == 0, "实际 %s" % str(on_name))
+
+
+## 找出紧贴在某个图标框下面、横向对得上的那个名字 Label 的屏上矩形。
+func _name_rect_under(ed: Control, icon: Control) -> Rect2:
+	var ir: Rect2 = icon.get_global_rect()
+	var best := Rect2()
+	for c in ed.get_children():
+		if not (c is Label):
+			continue
+		var r: Rect2 = c.get_global_rect()
+		if r.position.y <= ir.end.y - 1.0:
+			continue
+		if absf((r.position.x + r.size.x * 0.5) - (ir.position.x + ir.size.x * 0.5)) > 1.0:
+			continue
+		if best.size.x == 0.0 or r.position.y < best.position.y:
+			best = r
+	return best
+

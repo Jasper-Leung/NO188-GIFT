@@ -8,7 +8,9 @@ extends SceneTree
 ##   3. 散件：宣纸 / 松烟墨 / 蜡封 / 信封 各管各的那一笔，且互不覆盖
 ##   4. 终局二选一：覆盖层压在明信片揭示之前；keep 把那句写上背面、
 ##      break 让背面留白并把封口的蜡掰开——抉择必须落在正面（导出那张 PNG）上，
-##      不只是"多一句可改的预填"；点描述文字也算命中
+##      不只是"多一句可改的预填"；点描述文字也算命中；
+##      **这一屏不许空出下半屏**（原来卡片下沿到屏幕下沿空 277px）、
+##      底下那一行五件乐事按 云茶琴竹禽 同序、两张卡的标题齐平
 ##   5. 未竟：碎片不齐直接出明信片，背面留白
 ##   6. EndCard 管线：显示用的 Postcard 与导出用的 PostcardExport 拿到同一套纸面
 ##
@@ -28,6 +30,11 @@ var _gm: Node = null
 var _loc: Node = null
 var _pc_script: GDScript = null
 var _frag_idx: Array = []
+
+## 认「哪几个子节点是五件乐事的图标」用脚本比，不用 `is FragmentIcon`：
+## 那个 class_name 走的是编译期拉依赖（见 CLAUDE.md 已知陷阱），而这里
+## 比 `get_script()` 认的是**真被挂上去的那一份**。
+const FragmentIconScript = preload("res://scripts/FragmentIcon.gd")
 
 
 func _ck(label: String, cond: bool, detail: String = "") -> void:
@@ -600,7 +607,10 @@ func _audit_ending_choice() -> void:
 
 	var ed: Control = card._ending_overlay
 	_eq("覆盖层铺满", ed.size, card.size)
-	_eq("覆盖层子节点数", ed.get_child_count(), 5)
+	# 5 = 遮罩 / 标题 / 提示 / 两张卡；底下那一行「这一趟收下的五件」连标题带
+	# 五个图标、五个名字是 11 个子节点（见下面那组断言），所以这里数的是
+	# 「该有的骨架一个不多」，不是「总共就这么几个」。
+	_eq("覆盖层骨架子节点数", ed.get_child_count(), 16)
 
 	# 几何体检：项目在这上面摔过多次（锚点不写、size 与 offset 互踩）
 	var i := 0
@@ -628,6 +638,56 @@ func _audit_ending_choice() -> void:
 	_eq("放手标题", card._choice_break_title.text, _loc.t("ending_break"))
 	_eq("放手正文说的是留白", card._choice_break_desc.text, _loc.t("back_break_blank"))
 	_ck("两条正文说的不是同一件事", card._choice_keep_desc.text != card._choice_break_desc.text)
+
+	# ---- 这一屏原来从卡片下沿到屏幕下沿空着 277px（720p 下占 38%）----
+	# 判据是**内容下沿离屏幕下沿还有多远**，不是"有没有加东西"：
+	# 加了一行无关紧要的字，空带子短了 20px，这条照样绿。
+	#
+	# **必须排除那层遮罩。**第一版没排除，于是它全绿着——`shade` 是
+	# `_stretch_full` 的 ColorRect，`get_rect().end.y` 恒等于屏高，
+	 # 而"铺满全屏"是它的定义不是它的内容。第一版把整行五件删掉跑一遍，
+	# 这条照样 OK：量的是背景。判据量错了东西的时候它不会红。
+	var body_bottom: float = 0.0
+	for c in ed.get_children():
+		if c is ColorRect:
+			continue
+		body_bottom = maxf(body_bottom, c.get_rect().end.y)
+	_ck("抉择屏没有空出下半屏（内容下沿 ≥ 屏高的 78%）",
+			body_bottom >= ed.size.y * 0.78,
+			"下沿 %.0f / 屏高 %.0f = %.0f%%" % [body_bottom, ed.size.y,
+					body_bottom / ed.size.y * 100.0])
+
+	# 五件乐事：图标 + 名字，认得出是玩家一路收下的那五件。
+	# 整块**不许裸解引用**成员：产品把那一行整个去掉时，第一版在这里抛
+	# "Invalid access to property 'text' on Nil"，把这一节从中间掐断——
+	# 汇总照样打「FAIL 1」，而后面五十来条断言一条没跑（CLAUDE.md 记着
+	# 这一族：抛异常的协程退出码是 0，而少跑的断言不会替自己说话）。
+	# 所以拿不到成员就地记 FAIL 并跳过，剩下的照跑。
+	if card._choice_joys_caption == null:
+		_ck("五件乐事那一行在", false, "_choice_joys_caption 是 Nil（那一行被去掉了？）")
+	else:
+		_audit_choice_joys(card, ed, keep_card)
+	# 两张卡的标题在同一条线上。**这一条量的是"两个选项被当成同一种东西看"**：
+	# 留门那句正文是单行、放手那句带 \n 是两行，VBox 各自居中，于是两个标题
+	# 差着 12px 高低——并排比选项的时候，高低不齐读成"这两个不是一回事"。
+	#
+	# 量的是 `get_global_rect()`，**不是 `.position.y`**：第一版量 position，
+	# 而 `PanelContainer` 是延迟排版的子节点（`_sort_children` 排在通知里），
+	# 那一刻读到的两个标题都在各自 VBox 的 0 处——差 0px，恒绿。
+	# `get_global_rect()` 走的是排版后的结果，也就是图上那两个 y。
+	#
+	# 两条断言缺一不可：删掉那句 `custom_minimum_size.y = two_lines`，
+	# "行盒一样高"照样绿（两边都退成 0，仍然相等），**只有"齐平"那条会红**
+	# ——而它报的正是图上那 12px。恒真的那一条是拿来指路的，不是拿来断的。
+	#
+	# **这两条必须摆在点击之前**：`_choose_ending()` 把这些成员全置成 Nil，
+	# 摆在后面的话它们量的不是"抉择那一刻玩家看见的排版"，而是一堆 null。
+	_eq("两张卡的正文行盒一样高",
+			card._choice_keep_desc.custom_minimum_size.y,
+			card._choice_break_desc.custom_minimum_size.y)
+	var title_dy: float = absf(card._choice_keep_title.get_global_rect().position.y
+			- card._choice_break_title.get_global_rect().position.y)
+	_ck("两张卡的标题齐平（≤1px）", title_dy <= 1.0, "差 %.1fpx" % title_dy)
 	_eq("抉择前背面留白", card._back_text, "")
 	_eq("抉择前 ending_id 为空", _gm.ending_id, "")
 
@@ -743,6 +803,46 @@ func _click(card: Control, pressed: bool, button: int) -> void:
 	# 分支参数由 connect 时绑的 ending 补齐
 	card.gui_input.emit(ev)
 
+
+
+
+## 抉择屏底下那一行五件乐事。单独一个函数，好让调用处在成员为 Nil 时能跳过。
+func _audit_choice_joys(card: Control, ed: Control, keep_card: Control) -> void:
+	_eq("五件乐事的说明行", card._choice_joys_caption.text, _loc.t("ending_joys_caption"))
+	var icons: Array = []
+	var names: Array = []
+	for c in ed.get_children():
+		if c is Label and c != card._choice_keep_desc and c != card._choice_break_desc \
+				and c != card._choice_title and c != card._choice_hint \
+				and c != card._choice_joys_caption:
+			names.append(c)
+		elif c.get_class() == "Control" and c.get_script() == FragmentIconScript:
+			icons.append(c)
+	_eq("五件图标", icons.size(), 5)
+	_eq("五个名字", names.size(), 5)
+	if icons.size() != 5 or names.size() != 5:
+		return
+	var order_ok := true
+	var detail := ""
+	for k in 5:
+		var want: String = _loc.t("fragment_%d" % k)
+		if String(names[k].text) != want:
+			order_ok = false
+			detail += " 第%d格是%s(要%s)" % [k + 1, names[k].text, want]
+		if int(icons[k].get("fragment_idx")) != k:
+			order_ok = false
+			detail += " 第%d个图标 idx=%d" % [k + 1, icons[k].get("fragment_idx")]
+	_ck("五件按 云茶琴竹禽 同序", order_ok, detail)
+	# 名字不许挤成一团：相邻两格不许叠，且整排不许跑到卡片那半边去
+	var row_overlap := false
+	for k2 in 4:
+		var a: Rect2 = names[k2].get_rect()
+		var b: Rect2 = names[k2 + 1].get_rect()
+		if a.end.x > b.position.x - 0.5:
+			row_overlap = true
+	_ck("五个名字不叠", not row_overlap)
+	_ck("五件那一排在卡片下沿之下",
+			names[0].get_rect().position.y > keep_card.get_rect().end.y)
 
 func _audit_ending_restored() -> void:
 	print("\n---------- 5. 存档恢复已选结局 ----------")

@@ -1,5 +1,6 @@
 extends Control
 ## EndCard — 结局 / 礼物合成 (PRD §5.5)
+
 ## 集齐5块碎片后合成动态明信片，可一键导出PNG
 ##
 ## 明信片是三层拼的（整合方案 §5.3），只有一层是买的：
@@ -10,6 +11,13 @@ extends Control
 ## 选之前就让它露出来等于剧透了一半（§7.3）。
 ## keep/break 唯一的后果就是背面预填哪一句（_seed_back_text），所以卡片上
 ## 摆的就是那一句本身，不另编一段"选了会怎样"——见 _show_ending_choice。
+
+## 用 preload 而不是 class_name（见 CLAUDE.md 已知陷阱）。两处：
+## `FragmentIcon` 要 `new()` 出来摆控件；`Postcard` 没有 class_name（它自己
+## 就不让 `--script` 模式按类名拉依赖，见 Postcard.gd 第 18 行），所以五件
+## 乐事的颜色是从这里拿的，**不是**另一份抄开的表。
+const FragmentIconScript = preload("res://scripts/FragmentIcon.gd")
+const PostcardScript = preload("res://scripts/Postcard.gd")
 
 @onready var _export_btn: Button = $VBox/ExportBtn
 @onready var _restart_btn: Button = $VBox/RestartBtn
@@ -42,6 +50,7 @@ var _choice_keep_title: Label = null
 var _choice_keep_desc: Label = null
 var _choice_break_title: Label = null
 var _choice_break_desc: Label = null
+var _choice_joys_caption: Label = null    # 抉择屏底部那一行「这一趟收下的五件」
 var _recap_overlay: Control = null      # 「重新开始」前的这一趟回执
 var _recap_title: Label = null
 var _recap_body: Label = null
@@ -139,6 +148,8 @@ func _apply_language() -> void:
 		_choice_break_title.text = Localization.t("ending_break")
 	if _choice_break_desc:
 		_choice_break_desc.text = Localization.t("back_break_blank")
+	if _choice_joys_caption:
+		_choice_joys_caption.text = Localization.t("ending_joys_caption")
 	if _variant_hint and _variant_hint.visible:
 		_variant_hint.text = Localization.t("postcard_variant_hint")
 	if _recap_overlay != null:
@@ -227,6 +238,74 @@ func _show_ending_choice() -> void:
 		"ending_keep", "back_keep", "keep", card_w, left, h * 0.38, card_h))
 	_ending_overlay.add_child(_make_choice_card(
 		"ending_break", "back_break_blank", "break", card_w, left + card_w + gap, h * 0.38, card_h))
+	_add_choice_joys(vw, h)
+
+
+## 抉择屏底下那一行「这一趟收下的五件」。
+##
+## 这一屏原来从卡片下沿到屏幕下沿**空着 277px（720p 下占 38%）**——标题、
+## 一句提示、两张卡片，然后什么都没有。而它是全场最后一个抉择：玩家刚骑完，
+## 刚在五个小游戏里各认了一件事，正被要求「选一边，另一边就没了」——
+## 屏上却没有任何一样东西提醒他**刚才那趟收下了什么**。
+##
+## 摆的是五件乐事本身（图标 + 名字），不是这一趟的评级：评级是
+## `_show_variant_hint()` 的活，而那行**故意**留在揭示之后（提前说了，
+## 揭示那一屏就没得揭了）。图标直接用 `FragmentIcon`——和顶栏、底栏、明信片
+## 上那五个是同一份画法，玩家一路看着它们长大，这一屏认出的是同一件东西。
+##
+## 必到五件齐了才弹这屏（`_needs_choice()`），所以这里不存在"还差几件"那一档，
+## 也就没有半排空格子。
+func _add_choice_joys(vw: float, h: float) -> void:
+	# `FragmentIcon._draw()` 按 **`size.x`** 缩放 32px 的设计坐标，并以**控件中心**
+	# 为原点。五件的设计范围并不是 ±16：竹到 y −24..+20、禽到 x +21、云到 x ±17。
+	# 于是**正方形的框一定装不下**——缩放比永远由宽决定，把框开成正方形等于
+	# 一分余量都没给（第一版 56×56，竹的梢探出框底 7px，正好压在「竹」那个字上，
+	# 禽的嘴探出框右 9px）。所以框是**竖长条** 48×92：缩放比仍是 1.5，而中心
+	# 落在 y=46，竹于是落在 10..76；禽横向溢出 7px，可那一侧是空白，
+	# 不是笔画打架。
+	const ICON_W := 48.0
+	const ICON_H := 92.0
+	# 名字摆在框底往下 4px 处。竹的**可见**下沿是 46 + 20×1.5 = 76，比框底 92
+	# 早 16px，所以这条 4px 的余量是照着"别压到字"留的，不是照着框留的。
+	const NAME_DY := 80.0
+	const NAME_H := 22.0
+	const CAP_H := 28.0
+	const CAP_DY := 10.0
+	var foot_h := CAP_H + CAP_DY + NAME_DY + NAME_H
+	# 从**下沿**往上摆，而不是从上往下留一截：这一屏的内容重心原来整个压在
+	# 上半屏，底部那条空带子读成"这一屏没做完"，而不读成"留白"。
+	var foot_top := h - h * 0.085 - foot_h
+
+	_choice_joys_caption = Label.new()
+	_choice_joys_caption.text = Localization.t("ending_joys_caption")
+	_choice_joys_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_choice_joys_caption.add_theme_font_size_override("font_size", 18)
+	_choice_joys_caption.add_theme_color_override("font_color", Color(0.72, 0.67, 0.58))
+	_place_top_wide(vw, _choice_joys_caption, foot_top, CAP_H)
+	_ending_overlay.add_child(_choice_joys_caption)
+
+	var cell_w := 120.0
+	var cell_gap := 16.0
+	var row_w := cell_w * 5.0 + cell_gap * 4.0
+	var row_x := maxf((vw - row_w) * 0.5, 0.0)
+	var icon_top := foot_top + CAP_H + CAP_DY
+	for i in RoadData.FRAGMENT_SLOT_STATION_IDX.size():
+		var x := row_x + float(i) * (cell_w + cell_gap)
+		var ic: Control = FragmentIconScript.new()
+		ic.set("fragment_idx", i)
+		ic.set("color", PostcardScript.FRAGMENT_COLS[i])
+		ic.set("alpha", 0.92)
+		ic.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_place_fixed(ic, x + (cell_w - ICON_W) * 0.5, icon_top, ICON_W, ICON_H)
+		_ending_overlay.add_child(ic)
+		var nm := Label.new()
+		nm.text = Localization.t("fragment_%d" % i)
+		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nm.add_theme_font_size_override("font_size", 16)
+		nm.add_theme_color_override("font_color", PostcardScript.FRAGMENT_COLS[i])
+		_place_fixed(nm, x, icon_top + NAME_DY, cell_w, NAME_H)
+		nm.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_ending_overlay.add_child(nm)
 
 
 func _make_choice_card(title_key: String, desc_key: String, ending: String,
@@ -260,6 +339,13 @@ func _make_choice_card(title_key: String, desc_key: String, ending: String,
 	dl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	dl.add_theme_font_size_override("font_size", 16)
 	dl.add_theme_color_override("font_color", Color(0.80, 0.75, 0.66))
+	# 两条正文天生一样长吗？不是：留门那句是单行，放手那句带 \n 是两行。
+	# VBox 是各自居中的，于是「留门」的标题比「放手」的标题低 12px——
+	# 两张并排的抉择卡，标题不在一条线上，而玩家比的就是这两个选项，
+	# 高低不齐读成"这两个不是同一种东西"。给正文一个**两行**的定高，
+	# 两张卡的内容于是从同一条基线开始。（中英两侧各量一遍：英文那句更长。）
+	var two_lines := 2.0 * ThemeDB.fallback_font.get_height(16) + 4.0
+	dl.custom_minimum_size.y = two_lines
 	box.add_child(tl)
 	box.add_child(dl)
 	card.add_child(box)
@@ -298,6 +384,7 @@ func _choose_ending(ending: String) -> void:
 	_choice_keep_desc = null
 	_choice_break_title = null
 	_choice_break_desc = null
+	_choice_joys_caption = null
 	_reveal_postcard()
 
 

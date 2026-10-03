@@ -373,9 +373,21 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						读到的高度；另含一条读源码文本的「画笔真的调了
 						`_message_font_size`」——把 `var font_size := 36` 写回去，
 						几何那十几条全绿而预览里那行字又变回 8px）
+						+ **第 4 节那五件乐事底栏**（内容下沿 ≥ 屏高的 78%——**排除 `shade`**
+						那层铺满全屏的 ColorRect，骨干子节点数 16、五个图标控件 + 五个名字、
+						云茶琴竹禽同序、相邻名字不叠、整排在卡片之下；外加两张卡的
+						标题齐平 ≤1px 与行盒等高——齐平那两条**必须摆在点击之前**，
+						`_choose_ending()` 把那几个成员全置成 Nil）
   lookdev_postcard.gd      明信片 19 张定妆照（四档纸面/满配/背面三态（含**写满 200 字
 						那一档字号**）/蜡封三态/未竟缺格/二选一/揭示/**回执中英各一张**）
-						（**不能加 --headless**、**不能加 --quit-after**）
+						（**不能加 --headless**、**不能加 --quit-after**）。
+						`10_终局二选一` 后半段多出**三条像素判据**：底栏那一行真的挂着
+						五个图标控件 / **每个图标都真的画出了自己那件的颜色**（在图标
+						rect 内按 ±0.22 逐通道找 `Postcard.FRAGMENT_COLS[i]`，
+						每件 ≥8 像素）/ **没有一件的笔画压到它自己名字那一行**（同色
+						像素落在名字 Label 的行盒里必须 **0**）。后两条只有像素量得到：
+						`FragmentIcon` 缩放由**框宽**决定而设计坐标到 ±24，于是框一
+						开方，竹的梢就压在「竹」那个字上，而**控件几何全绿**
   measure_cold_start.gd    冷启动逐段墙钟：按「开启旅程」→ 世界起来 → 操作说明 → 能动。
 						跑两遍：一遍连打（量机器强加的等待）一遍人读节奏（量内容长度）。
 						判据钉的是 `GiftBox` 的**常量表**不是墙钟——把过场调慢一秒，
@@ -703,6 +715,7 @@ echo. > .editor_mode
 - 改 `PausePanel.gd` / 暂停面板按钮 / `go_to_end_card()` 的触发条件前跑 `verify_minimap.gd` 第 8b 节（出口在不在、零碎片时在不在、收工时评级按走过的算）+ `verify_postcard_ending.gd`（EndCard 得接得住非完满档）
 - 改 `QualitySettings.gd` 的任何一处 / `GrassScatter.radius_override` / `TreeScatter.radius_override` / `World3D._ready()` 里那一句 `QualitySettings.apply_to_world(self)` 的**位置** / 暂停面板 `VBox` 的行数或 `separation` / `Localization` 那五个画质 key 前跑 `verify_quality_settings.gd`（**不能加 --headless 之外还要注意 `--quit-after` 给小了**：它要真的起两份 World3D）。这一族守的是"接线"，而接线断掉时**两侧各自都绿**——见下面陷阱清单里那条「写进字段不等于读进世界」。另外两条只有它能量：**面板装不装得下**（多两行之后 VBox 的最小高度超过面板内容区时**不报错**，只把最下面那两行顶出下沿，而"最下面那两行"正好是新加的画质按钮和提示），以及**落盘闸**（`persist` 没有默认值这条靠反射量不到，是读源码文本的）
 - 改 `EndCard._show_ending_choice()` / `_seed_back_text()` 前跑 `verify_postcard_ending.gd`（`keep`/`break` 的后果必须落在**正面**：留门=背面写上那句、放手=背面留白且封口的蜡掰开，两张卡片的正文必须**就是**真正会发生的那件事本身，不能另写一段描述——否则又变回"承诺一个差别、实际只改一句话"）
+- 改 `EndCard._add_choice_joys()`（`ICON_W` / `ICON_H` / `NAME_DY` / `cell_w` / `cell_gap` / `foot_top`）、`_make_choice_card()` 里那句 `dl.custom_minimum_size.y = two_lines` / `_choice_joys_caption` / `Localization` 的 `ending_joys_caption` 前跑 `verify_postcard_ending.gd` 第 4 节 + `lookdev_postcard.gd` 看 `10_终局二选一`。这一屏原来内容全压在上半屏、**下沿只到屏高的 51%**，而它恰好是全场玩家唯一一次要**比较两个选项**的一屏：①**「空不空」量的是内容下沿到屏幕下沿的距离，不是"有没有加东西"**——而且必须**排除那层 `shade` 遮罩**（它是 `_stretch_full` 的 ColorRect，`get_rect().end.y` 恒等于屏高，"铺满全屏"是它的定义不是它的内容，第一版没排除于是那条恒绿）；②**两张卡的标题必须齐平**：留门那句是单行、放手那句带 `\n` 是两行，而两个 VBox 各自居中，标题就差 12px——差的量是 `get_global_rect().position.y` 而不是 `.position`（`PanelContainer` 延迟排版，排版前两个 Label 都在各自 VBox 的 0 处，差 0px，恒绿）。**"行盒一样高"那一条恒真**（删掉定高后两边都退成 0、仍然相等），它是**指路的不是断的**，所以必须和"齐平"成对写；③这两条断言**必须摆在点击之前**，`_choose_ending()` 把那几个成员全置成 Nil，摆在后面量到的是一堆 null。底部摆的是**五件乐事而不是评级**：评级是 `_show_variant_hint()` 的活儿，提前报就"剧透"了 `11_揭示明信片` 那一屏（`_needs_choice()` 保证五件齐了，所以没有半排状态）。**写完先证明它会红**：删掉 `_add_choice_joys` 3 条红 / 删掉那句定高 1 条红（且只有"齐平"那条红）/ `ICON_*` 退回 56×56 则几何全绿而 `lookdev_postcard` 的像素那条红
 - 改 `EndCard._refresh_back_thumb()` / `_grab_back_thumb()` 前跑 `verify_postcard_ending.gd`（SubViewport 回读要等两帧；节流按累计 delta 掐，headless 跑两帧等不到 0.12s，测试里必须等墙钟）+ `lookdev_journey.gd` 看 `16_postcard_back`（要打完字再拍，只拍初始帧看不出缩略图跟不跟得上）
 - 改 `EndCard._show_back_editor()` 的布局（输入框高度 / 按钮摆法 / `THUMB_BTN_*`）前跑 `verify_postcard_ending.gd` 第 3 节（量控件几何：两个按钮不叠、都在屏内、缩略图 ≥400px 宽且不遮按钮）+ `lookdev_journey.gd` 的 `16_postcard_back`——那一屏现在带**像素级**断言（暗像素占比 + 落在几条横带上 + 明暗跨度），因为尺寸对了不代表里面真有字，SubViewport 回读到空帧时预览就是一块纯色、尺寸一模一样
 - 改 `PostcardBack._message_box()` / `_wrap_text()` / `_message_font_size()` / `_draw_message()` / `_wrap_line()` / `FONT_MIN` / `FONT_MAX` / `LINE_GAP` 前跑 `verify_postcard_ending.gd` **第 3e 节** + `lookdev_postcard.gd` 看 `07_背面_留门_写上了那句` 与 `07b_背面_写满200字`（**成对看**：字号是按这块纸自动定的，字最少和写满是两种排版，只看 07 那一张，"字变大了"看着像只是把默认那句排好看了）+ `lookdev_journey.gd` 的 `16_postcard_back`。第 3e 节量的**不是**字号本身，是**玩家在编辑器那一屏上读到多高的一行字**：卡片在 SubViewport 里按 1920 宽画完再缩到预览上，所以是「卡片字号 × 预览宽 / 1920」这个乘积——卡片上写死 36px 时预览里那行只有 8.5px，而"预览宽 ≥400px"和"字号 = 36"**两条断言当时都是绿的**。三条别的：**每一行都在 `max_w` 之内**（原来的 `_wrap_line` 是"先把字放进去再看超没超"，只在空格处检查的西文会冲出去**一整个词**才收尾，实测一行 1969px vs 框宽 1792px）；**字号是放得下的最大号**（少了这条，把 `LINE_GAP` 或 `FONT_MAX` 调小到"还更空"照样全绿——和第 3d 节那条「`_caption_col_w` 没有算窄」同一个坑）；**读源码文本**钉住画笔真的调了 `_message_font_size`。**写完先证明它会红**：画笔里写死 `36` → 2 条红；`FONT_MAX` 84→40 → 5 条红；`LINE_GAP` 10→30 → 1 条红
@@ -1895,3 +1908,36 @@ echo. > .editor_mode
   那条边界本身，不是另一个会变的量**。修法是从边界反解尺寸
   （`fall_len(spacing) = spacing * FRAC / sin(FALL_DEG)`），
   回归就也钉在同一条边界上，于是任何分辨率下量到的都是同一个比值
+
+- **「这一屏空不空」量的是内容下沿离屏幕下沿还有多远，而量的时候必须先把
+  那层铺满全屏的遮罩排除掉**：抉择屏原来内容全压在上半屏，**下沿只到屏高的 51%**
+  （720p 下从卡片下沿到屏幕下沿空着 277px，占 38%）——而它恰好是全场玩家唯一一次
+  要**比较两个选项**的一屏。可第一版的判据写成 `max(子节点 get_rect().end.y)`，
+  于是它恒绿：那个 `shade` 是 `_stretch_full` 铺满全屏的 ColorRect，
+  它的下沿恒等于屏高，而"铺满全屏"是它的**定义**不是它的**内容**——
+  拿它当"内容排到哪了"的证据，等于拿背景证明背景在。可推广的一条：
+  **凡是"某块版面排满了没有"这类判据，要先把装饰层和内容层分开**，
+  判据要问内容层自己最下边那个东西到边沿还差多少。
+  同族的一条紧挨着它：**判"两个东西齐不齐平"要量 `get_global_rect()`，不能量
+  `.position`**——`PanelContainer` 是延迟排版的子节点（`_sort_children` 排在通知里），
+  那一刻两个 Label 都在各自 VBox 的 0 处，量出来差 0px，于是**"两张卡的标题差 12px"
+  那条判据恒绿**。而"行盒一样高"那条同样恒真却**不是**同一个病：删掉那句定高之后
+  两边一起退成 0，仍然相等——它是**指路的，不是断的**，所以必须和"齐平"成对写，
+  否则一条恒绿会把另一条真的红掩盖掉（这两条"恒绿"长得一模一样，成因完全不同）
+
+- **图标控件按 `size.x` 缩放、而设计坐标早就出了 ±16 的，开正方形的框一定装不下**：
+  `FragmentIcon._draw()` 做的是 `draw_set_transform(size / 2.0, 0, Vector2(s, s))`
+  而 `s = size.x / 32.0`——**缩放比只由宽决定**，于是框开成正方形等于一分余量都没给。
+  而五件的设计范围并不是对称的 ±16：竹到 y −24..+20、禽到 x +21、云到 x ±17。
+  后果是第一版那个 56×56 的方框里，**竹的梢探出框底 7px、禽的嘴探出框右 9px**，
+  而竹那 7px 正好压在「竹」那个字上——**而当时所有几何断言全绿**（控件不叠、
+  都在屏内、五件的顺序也对），因为"墨有没有落进名字行"不是几何量。
+  修法是框改成**竖长条** 48×92（缩放比仍是 1.5，中心落在 y=46，于是竹落在 10..76），
+  禽横向仍溢出 7px，而那一侧是空白、不是笔画打架。
+  判据因此必须落在**像素**上：按 ±0.22 逐通道找 `Postcard.FRAGMENT_COLS[i]`，
+  在图标 rect 内量"这件的颜色真画出来了吗"，在名字 Label 的行盒里量
+  "同色像素是不是 **0**"（`lookdev_postcard.gd` 那两条）。
+  可推广的一条：**凡是一个"自己画自己"的控件，先读它 `_draw()` 里那句
+  `draw_set_transform` / `draw_rect` 的缩放是怎么取出来的**——按宽取还是按高取，
+  决定了它的框能不能开成正方形；而**设计坐标的极值**要在摆框之前量出来，
+  摆在之后永远量不到（那时你量的是框，不是墨）
