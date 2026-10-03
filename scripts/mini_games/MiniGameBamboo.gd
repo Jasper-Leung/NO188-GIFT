@@ -4,6 +4,7 @@ extends Control
 ## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
 const MiniGameBar = preload("res://scripts/mini_games/MiniGameBar.gd")
+const MiniGameChrome = preload("res://scripts/mini_games/MiniGameChrome.gd")
 ## 竹雨庭(14) 小游戏：QTE 砍竹 — 5根竹子依次倒下，需在窗口内按键
 
 var _world_ref: Node = null
@@ -226,6 +227,14 @@ func _draw() -> void:
 			Color(0.30, 0.62, 0.32, 0.95), Color(0.14, 0.20, 0.16, 0.75),
 			Color(1.0, 0.9, 0.5))
 
+	# 取消按钮。**这一屏原来一个按钮都没画**——理由写在这里是对的：
+	# 左键在竹子是"砍"，画个按钮上去还得判点击落在哪、怕误砍。
+	# 可那个理由只解释了难做，没解释不做：ESC 能按，可鼠标玩家看见的是
+	# 一个点哪都能砍的屏，他没有任何"退出"的地方（ESC 在这一屏是隐藏的）。
+	# 误砍的代价是零——1.2 秒窗口自己会过，驿站还能再来一次。
+	# 和云那一屏一样，热区判在"当成砍"之前，顺序反了就变成点了取消反而挨一刀。
+	MiniGameChrome.draw_cancel(self, MiniGameChrome.cancel_rect(Vector2(w, h)))
+
 
 ## 一根竹子。`state`: -1=还没冒头, 0=可砍, 1=已砍。
 ## 三种状态走的是同一套几何 —— 立着的时候是上下收分的竹身 + 竹节 + 顶上两片叶，
@@ -334,11 +343,19 @@ func _gui_input(event: InputEvent) -> void:
 		if _is_space_event(event):
 			get_viewport().set_input_as_handled()
 		return
-	# ESC 取消。这一屏连取消按钮都没画（鼠标点击在这里是"砍"，画个按钮上去
-	# 还要判点击落在哪、怕误砍），所以键盘玩家原本只能等 1.2s 窗口自己过掉。
-	# 成功画面期间不给 ESC：那 1.6s 是给玩家确认"是我砍赢的"，跳过它就回到
-	# "小游戏凭空消失"那个老毛病。
+	# ESC 取消。成功画面期间不给 ESC：那 1.6s 是给玩家确认"是我砍赢的"，
+	# 跳过它就回到"小游戏凭空消失"那个老毛病。
 	if _is_esc_event(event):
+		_world_ref._on_mini_game_done(CANCELLED)
+		queue_free()
+		return
+	# 取消按钮。**必须判在"当成砍"之前**：左键在这一屏是砍，
+	# 判在后面就成了"点了取消反而挨一刀"。热区走画笔那一处，
+	# 见 MiniGameChrome 那条注释。
+	if event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT \
+			and MiniGameChrome.cancel_rect(size).has_point(event.position):
+		get_viewport().set_input_as_handled()
 		_world_ref._on_mini_game_done(CANCELLED)
 		queue_free()
 		return

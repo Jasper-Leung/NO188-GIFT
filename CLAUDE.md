@@ -72,7 +72,7 @@ scripts/          GDScript 脚本
 						门槛之后那一截底色提亮；竹是**分格**而不是连续条——进度是
 						五件互相独立的事，一根填到 60% 的条读成"有一根被砍掉了 60%"，
 						实际是三根倒了、两根还立着，当前那格描金边。几何全是纯函数
-  MiniGameChrome.gd     四个小游戏共用的「取消」按钮。**它不穿警报红**：原来
+  MiniGameChrome.gd     五个小游戏共用的「取消」按钮。**它不穿警报红**：原来
 						云/茶/琴三处各画一份 `fill(0.4,0.3,0.3) + border(0.8,0.3,0.3)`，
 						而全工程真正在报警的红是 `HUD3D.set_boundary_intensity()` 那圈
 						边界警告和竹子的砍伐窗口倒计时——玩家学会「红 = 出事了」之后，
@@ -80,7 +80,12 @@ scripts/          GDScript 脚本
 						（ESC 也能按，驿站还能再来一次）。现在是一块**不透明**的中性
 						深灰小片 + 暖灰边 + 米白字：不透明是刻意的，五个小游戏背景
 						亮度差得远，半透明底板的对比度随背景漂。禽原来**留了热区却
-						没画**，右下角是一块点得着、读不出是什么的地方
+						没画**，右下角是一块点得着、读不出是什么的地方；**竹连按钮
+						都没有**，缺席理由写的是"左键在这一屏是砍，画按钮得判点击落在
+						哪、怕误砍"——那条只解释了难做、没解释不做：ESC 在这一屏是
+						隐藏的，于是鼠标玩家看见的是一个点哪都能砍、哪也退不出去的
+						黑幕。误砍的代价是零（1.2 秒窗口自己会过），而"点取消挨一刀"
+						不是——所以**竹的热区判在"当成砍"之前**，判在后面就反了
   SynthesisPanel.gd     集齐时的二选一面板：「收下明信片 · 结束这一趟」/「再骑一圈 ·
 						刷到完满」。量出来的下限是 3.1 分钟（`tools/play_newcomer.gd`，
 						五个小游戏的答案注入成功，所以那是**下限**不是全程），画面由
@@ -162,8 +167,9 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						是 0.84 / 0.50——**拿真警报当尺子**，不是拿"不是那个红"当
 						判据；底板不透明；「取消」在**自己那块底板**上 ≥4.5:1、
 						边框对底板 ≥3.0；**字形盒**整个在按钮之内；按钮在屏内、不贴
-						边、换 1080p 仍贴右下；四个画笔都调共用函数、热区没抄第二份
-						矩形。又是四条**读源码文本**的
+						边、换 1080p 仍贴右下；**五个**画笔都调共用函数、热区没抄
+						第二份矩形、**竹的热区判在"当成砍"之前**）。又是五条
+						**读源码文本**的
   verify_interact_latch.gd 交互闩锁 / 对白抢占回归（郑铎在播时按空格不许开打卡、
 						setup() 顶掉一轮对白必须放出旧等待者、被顶掉的郑铎戏自己清
 						_villain_playing、回访不再重播小游戏/谎报碎片、
@@ -621,7 +627,7 @@ echo. > .editor_mode
 - 改 `MiniGameCloud.CLOUD_CIRCLES` / `cloud_outline()` / `OUTLINE_SAMPLES` / `FLAT_Y` / `MiniGameBamboo.SPACING` / `stalk_poly()` / `node_fracs()` / `fall_len()` / `MiniGameZither.HUI_*` / `headgear_poly()` / `foot_polys()` / `mg_zither_title` / `mg_bamboo_intro` 前跑 `verify_mini_game.gd` **第 6g 节** + `verify_story.gd`（改了文案）+ `lookdev_journey.gd` 看 `minigame_云` / `minigame_竹` / `minigame_琴`。三处都做完了删除突变（轮廓换回八边形 → 尖角/平底两条红；竹身退回等宽 + 砍倒那截改回按高度取长 → 两条红；徽减到 7 个 / 从 0 起排 → 两条红）。**轮廓的采样数不能随手调小**：`OUTLINE_SAMPLES` 决定相邻两点的间距，间距必须 > `KEY_STEP`(12px)，否则键盘光标整步走会在两点之间横跳，而第 6g 节量的是间距、`verify_mini_game_keys.gd` 量的是走不走得完
 - 改 `MiniGameBar.gd` 的任何一处（`rect()` / `threshold_x()` / `tick_span()` / `tick_label_rect()` / `TICK_OVERHANG` / `TICK_LABEL_*` / `PIP_GAP_FRAC` / `pip_*`），或 `MiniGameCloud` / `MiniGameTea` / `MiniGameBamboo` 里那三行 `draw_bar(...)` / `draw_pips(...)` 之前跑 `verify_mini_game.gd` **第 6h 节** + `lookdev_journey.gd` 看那三张 `minigame_*.png`。第 6h 节里有**三条是读源码文本**的（和核 `MiniGameBackdrop.<THEME>` 同一个办法）：几何断言量的是那几个纯函数，而**量不到画笔有没有真的去调它们**——把画笔那一行的门槛换成字面量，几何照样全绿
 - 同一族里有一条**图先发现的、数值量不到**的坑：`draw_string` 的宽度参数是**裁切宽度**。刻痕下面那个「75%」第一版给了 28px，而 16px 的它实测要 32px——多出来的半个百分号被切掉，图上只剩「75」，而**标签框一直是 28px，量尺寸的任何断言都看不出问题**。所以判据钉的是 `get_string_size()` 给这串字的宽度 ≤ 框宽（改字体、改字号、改标签文案之后这条会自己变红）。同族的第二条：`TICK_LABEL_DY` 必须 > `TICK_OVERHANG`，否则刻痕的下半截从那串字里穿过去
-- 改 `MiniGameChrome.gd` 的任何一处（`cancel_rect()` / `label_rect()` / `draw_cancel()` / `FILL` / `BORDER` / `LABEL` / `CANCEL_*` / `BASELINE_UP`），或**四个小游戏里那个取消按钮**的画法与热区之前跑 `verify_mini_game.gd` **第 6i 节** + `lookdev_journey.gd` 看那四张 `minigame_*.png`。三条要记住的：①**判"它不该像警报"要拿真警报当尺子**——产品里 `HUD3D.set_boundary_intensity()` 那圈边界警告红（0.84 / 0.50）就是尺子，写成"不是 `Color(0.8,0.3,0.3)`"是拿自己测自己；②**底板必须不透明**，五个小游戏背景亮度差得远，半透明底的对比度随背景漂，而"五屏上都读得出来"只有底板自己说了算才立得住；③`draw_string` 的 position.y 是**基线**不是行盒顶，所以"基线在按钮高度的 68%"会让 22px 的字身从按钮顶沿探出去——**量行盒量不出来**（框还在按钮里，探出去的是字形），要量就得用字体真实的 ascent/descent 算字形盒，画笔和回归读同一个盒子
+- 改 `MiniGameChrome.gd` 的任何一处（`cancel_rect()` / `label_rect()` / `draw_cancel()` / `FILL` / `BORDER` / `LABEL` / `CANCEL_*` / `BASELINE_UP`），或**五个小游戏里那个取消按钮**的画法与热区之前跑 `verify_mini_game.gd` **第 6i 节** + `lookdev_journey.gd` 看那五张 `minigame_*.png`。三条要记住的：①**判"它不该像警报"要拿真警报当尺子**——产品里 `HUD3D.set_boundary_intensity()` 那圈边界警告红（0.84 / 0.50）就是尺子，写成"不是 `Color(0.8,0.3,0.3)`"是拿自己测自己；②**底板必须不透明**，五个小游戏背景亮度差得远，半透明底的对比度随背景漂，而"五屏上都读得出来"只有底板自己说了算才立得住；③`draw_string` 的 position.y 是**基线**不是行盒顶，所以"基线在按钮高度的 68%"会让 22px 的字身从按钮顶沿探出去——**量行盒量不出来**（框还在按钮里，探出去的是字形），要量就得用字体真实的 ascent/descent 算字形盒，画笔和回归读同一个盒子；④**竹那一屏的热区必须判在"当成砍"之前**——左键在竹子是砍，判在后面就成了点取消挨一刀，而 ESC 在这一屏是隐藏的，鼠标玩家发现不了还能走。**写完先证明它会红**：把 `draw_cancel` 那一行删掉红 2 条、把热区挪到 `_cut_current_bamboo()` 之后红 1 条（突变要一个一个撤）
 - 改 `scripts/AudioManager.gd` 或 `scripts/mini_games/*.gd` 里的发声前先跑 `check_all_scripts.gd` + 上面那 6 条；新加了 sfx 还要跑一次 `--headless --editor --quit-after 60` 生成 `.import`
 - 改任何一屏玩家可见的东西（HUD / 标题页 / 新手引导 / 商店 / 驿铺 / 明信片 / 结算）前跑 `lookdev_journey.gd` 看图
 - 改 `EndCard._export_two_images_web()` / `GameManager.SAVE_PATH` / `_save_game()` / `_load_save()`

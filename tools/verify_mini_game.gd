@@ -914,24 +914,33 @@ func _initialize() -> void:
 			"1080p 上仍贴在右下（右边 %.0f / 下边 %.0f）"
 			% [1920.0 - cr2.end.x, 1080.0 - cr2.end.y])
 
-	# 三个画了这按钮的小游戏必须**调那个共用函数**，而禽必须**开始画**。
-	# 又是读源码文本那三条：几何量的是 `MiniGameChrome` 自己那一个函数，
-	# 量不到四个画笔有没有去调它，而禽原来连画都没画。
+	# 五个小游戏都得**调那个共用函数**。又是读源码文本那几条：几何量的是
+	# `MiniGameChrome` 自己那一个函数，量不到五个画笔有没有去调它——
+	# 禽原来连画都没画，竹原来也只在 `_gui_input` 留了 ESC。
 	var zsrc: String = FileAccess.get_file_as_string(GAMES[13])
 	var bsrc2: String = FileAccess.get_file_as_string(GAMES[4])
-	for pair in [[GAMES[7], csrc], [GAMES[10], tsrc], [GAMES[13], zsrc], [GAMES[4], bsrc2]]:
+	var basrc: String = FileAccess.get_file_as_string(GAMES[14])
+	for pair in [[GAMES[7], csrc], [GAMES[10], tsrc], [GAMES[13], zsrc],
+			[GAMES[4], bsrc2], [GAMES[14], basrc]]:
 		var pr: Array = pair
 		_check((pr[1] as String).contains("MiniGameChrome.draw_cancel(self,"),
 				"%s：画笔调共用的取消按钮（不是各画一份）"
 				% (pr[0] as String).get_file())
 	# 热区不许再抄一份 `Rect2(w - 160, ...)`：画和点各一份的话，挪一次按钮
 	# 就得改两处，而漏掉的那一处症状是「看得见点不着」。
-	for pair in [[GAMES[7], csrc], [GAMES[10], tsrc], [GAMES[13], zsrc], [GAMES[4], bsrc2]]:
+	for pair in [[GAMES[7], csrc], [GAMES[10], tsrc], [GAMES[13], zsrc],
+			[GAMES[4], bsrc2], [GAMES[14], basrc]]:
 		var pr2: Array = pair
 		var body: String = pr2[1]
 		_check(not body.contains("w - 160, h - 60") and not body.contains("size.x - 160, size.y - 60"),
 				"%s：热区也走 cancel_rect()，没抄第二份矩形"
 				% (pr2[0] as String).get_file())
+	# 竹那一屏的左键是"砍"，所以**取消的热区必须判在砍之前**。
+	# 判在后面的话，点了取消反而挨一刀——而这一屏 ESC 是隐藏的，
+	# 鼠标玩家发现不了还能走。
+	_check(basrc.find("cancel_rect(size).has_point(event.position)")
+			< basrc.find("_cut_current_bamboo()\n"),
+			"竹：取消热区判在当成砍之前（判在后面的话，点取消反而挨一刀）")
 
 	# 6d. 「第十八驿」是世界里的第 18 座驿站吗？不是 —— 那是旅店的名字。
 	# 顶栏写的是「已过 n 驿」，明信片背面写「第十八驿在我这儿」，
