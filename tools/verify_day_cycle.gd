@@ -58,6 +58,17 @@ func _eq(label: String, got: Variant, want: Variant) -> void:
 	_ck(label, got == want, "got=%s want=%s" % [str(got), str(want)])
 
 
+## 天顶色与地平线色之间的纵向反差，除以地平线那档的亮度。
+##
+## **两个参数都必须是线性值**。天空色在引擎里是辐照度、直接当线性值送进着色器，
+## 而 `DayCycle` 那六个常量是照着显示器写的 sRGB——按常量原样算出来是 0.39、
+## 看着已经很够，可 AGX 压的是线性那一头，画面上是一片平。
+## 换算之后白昼档 0.63、黄昏档 0.95。
+static func _sky_contrast(top: Color, horizon: Color) -> float:
+	var hl: float = horizon.get_luminance()
+	return (hl - top.get_luminance()) / maxf(hl, 0.001)
+
+
 func _initialize() -> void:
 	call_deferred("_run")
 
@@ -146,13 +157,39 @@ func _run() -> void:
 			str(_sun.light_color))
 	_ck("开局雾色 == 场景里的白昼档",
 			_env.fog_light_color.is_equal_approx(_day_fog), str(_env.fog_light_color))
-	_ck("开局天顶色 == 白昼档", _sky.sky_top_color.is_equal_approx(_dc.DAY_SKY_TOP),
+	_ck("开局天顶色 == 白昼档（sRGB 常量已经换成线性）",
+			_sky.sky_top_color.is_equal_approx(_dc.DAY_SKY_TOP.srgb_to_linear()),
 			str(_sky.sky_top_color))
-	_ck("开局地平线色 == 白昼档",
-			_sky.sky_horizon_color.is_equal_approx(_dc.DAY_SKY_HORIZON),
+	_ck("开局地平线色 == 白昼档（sRGB 常量已经换成线性）",
+			_sky.sky_horizon_color.is_equal_approx(_dc.DAY_SKY_HORIZON.srgb_to_linear()),
 			str(_sky.sky_horizon_color))
 	_ck("开局山线没有上色", _ridge._mats[0].albedo_color.is_equal_approx(Color.WHITE),
 			str(_ridge._mats[0].albedo_color))
+
+	# ---- 2b. 天为什么曾经"是一整片" ----
+	#
+	# 这两条量的是**原因**，渲染出来的那条带（仰角 0~22.5°）有多大的亮度落差是
+	# `lookdev_journey.gd` 在 12b/12c 两张同机位图上量的。分成两半是因为 headless
+	# 画不出像素，而那两条旋钮各自值多少只有这里能量。
+	#
+	# ① **场景的雾不许画天**。`fog_sky_affect` 原来 0.3，雾色是 (0.88,0.92,0.98)
+	#    那一档近白——于是天被往白色里洗，材质自己的蓝先被雾洗掉一层、
+	#    再被 AGX 的高光肩去一次饱和。改成 0 之后**同样那六个常量**渲出来的
+	#    带内落差从 8% 涨到 15%。
+	_ck("场景的雾不画天（fog_sky_affect = 0，天色归天色管）",
+			is_zero_approx(_env.fog_sky_affect), str(_env.fog_sky_affect))
+	# ② **天空色必须按线性算纵向反差**。天空色在引擎里是辐照度、直接当线性值用，
+	#    而那六个常量是照着显示器写的 sRGB。不换算的话 `DAY_SKY_HORIZON`
+	#    渲出来是 sRGB(0.87,0.94,0.99)——几乎就是白的。
+	#    换算把白昼档的线性纵向反差从 0.39 抬到 0.63，渲出来的带内落差从 8% 到 37%。
+	#    **注意这条问的是"线性空间里的反差"而不是常量本身的反差**：按未换算的
+	#    sRGB 数值算出来是 0.39，看着已经很够，而画面上一片平——因为 AGX 压的是
+	#    线性值那一头。这就是"量玩家用的那个量"的又一处。
+	var day_con: float = _sky_contrast(_dc.DAY_SKY_TOP.srgb_to_linear(),
+			_dc.DAY_SKY_HORIZON.srgb_to_linear())
+	_ck("白昼那档的天在线性空间里有足够纵向反差（AGX 压完还剩得下渐变）",
+			day_con >= 0.50, "%.3f（换算前按 sRGB 算是 %.3f，那个数是骗人的）" % [
+			day_con, _sky_contrast(_dc.DAY_SKY_TOP, _dc.DAY_SKY_HORIZON)])
 
 	# ---- 3. 门槛：前两圈不动，第三圈才转 ----
 	await _step(_world, 0.0, 0.5)
@@ -199,10 +236,17 @@ func _run() -> void:
 			str(_env.ambient_light_energy))
 	_ck("黄昏雾色", _env.fog_light_color.is_equal_approx(_dc.DUSK_FOG_COL),
 			str(_env.fog_light_color))
-	_ck("黄昏天顶色", _sky.sky_top_color.is_equal_approx(_dc.DUSK_SKY_TOP),
+	_ck("黄昏天顶色（sRGB 常量已经换成线性）",
+			_sky.sky_top_color.is_equal_approx(_dc.DUSK_SKY_TOP.srgb_to_linear()),
 			str(_sky.sky_top_color))
-	_ck("黄昏地平线色", _sky.sky_horizon_color.is_equal_approx(_dc.DUSK_SKY_HORIZON),
+	_ck("黄昏地平线色（sRGB 常量已经换成线性）",
+			_sky.sky_horizon_color.is_equal_approx(_dc.DUSK_SKY_HORIZON.srgb_to_linear()),
 			str(_sky.sky_horizon_color))
+	_ck("黄昏那档的天在线性空间里也有足够纵向反差（上暗下亮）",
+			_sky_contrast(_dc.DUSK_SKY_TOP.srgb_to_linear(),
+					_dc.DUSK_SKY_HORIZON.srgb_to_linear()) >= 0.50,
+			"%.3f" % _sky_contrast(_dc.DUSK_SKY_TOP.srgb_to_linear(),
+					_dc.DUSK_SKY_HORIZON.srgb_to_linear()))
 	# 天色的判据全写成"比白昼那一档"：黄昏档是照着渲出来的图调的，绝对值
 	# 单独写一份在这里等于又抄了一份基准，抄错了自己看不出来。
 	_ck("黄昏的天顶比白昼暗",
@@ -213,10 +257,14 @@ func _run() -> void:
 			_sky.sky_top_color.get_luminance() < _sky.sky_horizon_color.get_luminance(),
 			"top=%.3f horizon=%.3f" % [_sky.sky_top_color.get_luminance(),
 			_sky.sky_horizon_color.get_luminance()])
-	_ck("白昼那档是上亮下…（正午的天顶比地平线深，这是天该有的样子）",
-			_sky.sky_horizon_color.get_luminance() > _dc.DAY_SKY_TOP.get_luminance(),
-			"top=%.3f horizon=%.3f" % [_dc.DAY_SKY_TOP.get_luminance(),
-			_dc.DAY_SKY_HORIZON.get_luminance()])
+	# 常量是 sRGB、material 里是线性值，两边**必须都换算过再比**——
+	# 拿 material 的线性值去比常量的 sRGB 值，量的已经不是同一个颜色了
+	# （这条就是换色那一下真的变红的地方，所以顺带记在这儿）。
+	_ck("白昼那档是上亮下…（正午的天顶比地平线浅，这是天该有的样子）",
+			_sky.sky_horizon_color.get_luminance()
+			> _dc.DAY_SKY_TOP.srgb_to_linear().get_luminance(),
+			"top=%.3f horizon=%.3f" % [_dc.DAY_SKY_TOP.srgb_to_linear().get_luminance(),
+			_sky.sky_horizon_color.get_luminance()])
 	_ck("黄昏的地平线是烧红的（红压过蓝）",
 			_sky.sky_horizon_color.r > _sky.sky_horizon_color.b,
 			str(_sky.sky_horizon_color))

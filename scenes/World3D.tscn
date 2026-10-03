@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="Script" path="res://scripts/World3D.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/TerrainBuilder.gd" id="1b_terrain"]
@@ -16,6 +16,7 @@
 [ext_resource type="Script" path="res://scripts/DialoguePopup.gd" id="13_dialogue"]
 [ext_resource type="Script" path="res://scripts/GrassScatter.gd" id="14_grass"]
 [ext_resource type="Script" path="res://scripts/TreeScatter.gd" id="15_tree"]
+[ext_resource type="Script" path="res://scripts/SynthesisPanel.gd" id="16_synthesis"]
 
 [sub_resource type="BoxShape3D" id="BoxShape_bike"]
 size = Vector3(1.0, 0.9, 2.0)
@@ -64,7 +65,7 @@ fog_enabled = true
 fog_light_color = Color(0.88, 0.92, 0.98, 1)
 fog_density = 0.0003
 fog_aerial_perspective = 0.0
-fog_sky_affect = 0.3
+fog_sky_affect = 0.0
 sky = SubResource("ProceduralSky_sun")
 
 [node name="World3D" type="Node3D"]
@@ -220,6 +221,12 @@ visible = false
 anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("13_dialogue")
+
+[node name="SynthesisPanel" type="Control" parent="HUDLayer"]
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("16_synthesis")
 
 [node name="FragmentBarLayer" type="CanvasLayer" parent="."]
 

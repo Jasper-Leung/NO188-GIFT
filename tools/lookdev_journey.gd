@@ -68,7 +68,10 @@ func _initialize() -> void:
 
 
 ## 渲染三帧再导 PNG：queue_redraw / 材质编译都到下一帧才落地。
-func _snap(name: String) -> void:
+## 图返回出去给 12b/12c 那两条量像素——判据要落在画出来的那张上，
+## 而不是落在喂给着色器的那几个数上（sky_curve 之类的旋钮全对而画面一片平，
+## 这一族已经栽过一次）。
+func _snap(name: String) -> Image:
 	await process_frame
 	await process_frame
 	await process_frame
@@ -78,6 +81,84 @@ func _snap(name: String) -> void:
 	_ck("%02d %s（中心像素 %s）" % [_shots + 1, name, str(c)],
 			err == OK and img.get_width() == SHOT.x and c.a > 0.0)
 	_shots += 1
+	return img
+
+
+## 玩家真正看得见的那条天带，从图上量。
+##
+## **取样框是按真实机位算出来的，不是拍脑袋取的**：相机 fov 70（竖向）、
+## `Player3D._update_camera` 让它俯 12.5°（看向车上方 1.1m、往前 2.2m 那一点，
+## 而相机在 2.3m），于是屏幕顶端正好是**仰角 +22.5°**、地平线落在 y 比例 0.321。
+## 顶部 62px 是 `HUD3D` 那条衬底（`SCRIM_H`），所以取样从 y 比例 0.10 起
+## （仰角 15.5°）——再往上量到的是顶栏，不是天。
+##
+## 横方向只取左边五列：右边是小地图和那一片高过头顶的草，
+## 取到它们就不是"天是什么颜色"而是"草是什么颜色"了。
+##
+## 纵向这四行量的是**渐变**，从带顶一路量到最靠近地平线那一行。算出来的 0.321
+## 是**海平面地平线**在屏上的位置，而真实的地面轮廓线比它高得多——实测这条带
+## 整条都在天上：正午那张从 fy 0.086 的 sRGB(81,104,205) 一路泛白到 fy 0.22 的
+## (205,212,221)，再往下才是草地（0.23 起）。
+const SKY_ROWS := [0.10, 0.14, 0.18, 0.22]
+const SKY_COLS := [0.06, 0.14, 0.22, 0.30, 0.38]
+
+## 「天是不是蓝的」要单独取一行，**不能沿用 SKY_ROWS 的最后一行**。
+##
+## 最后那行落在**地平线霾**上，而霾是设计成近白的（`DAY_SKY_HORIZON` 本身就是
+## (0.72,0.85,0.97) 那一档淡青白）——拿它问"红是不是明显低于蓝"，量到的是
+## sRGB(205,212,221)、r/b = 0.93，于是判据红，可天其实蓝得很好。
+## 第一版就是这么错的：**同一段渐变它量得出（171→652 的相对亮度，一路上来），
+## 同一行取色它量错了**——因为"有没有层次"问的是两端之差、"是不是蓝"问的是单行色相，
+## 而两端里靠近地平线的那一端按设计就不蓝。可推广的一条：**同一个取样框上的两个判据
+## 不一定量的是同一件事**，取样框对了不代表每条判据都对。
+##
+## 取 0.12：仍在 `SCRIM_H`(62px = 0.086) 之下，且离草地边沿（≈0.19）还隔着七行。
+## 那里正午是 sRGB(92,114,205)、r/b = 0.45；同一行黄昏是 (118,5,8)、r/b = 15.5。
+const SKY_HUE_ROW := 0.12
+
+## `verify_mood_mask.gd` 第 9 节声明的「顶栏衬底的最坏背景」，sRGB 口径。
+##
+## 那边是无头回归，量不到像素，所以"那个数还够不够用"只有这里能量到。
+## 它**不是**把那边的常量抄一份来比颜色，而是拿**渲出来的天**去比它声明的亮度——
+## 两边不等就是"衬底底下那一带比声明的最坏情况还亮"，那条回归就该重新量了。
+## 这个数**不许往下调**：`SCRIM_TOP_ALPHA = 0.90` 当初取值的唯一理由就是那边
+## 第 9 节里"最坏背景比字还亮、所以只能靠 alpha 救"这条，而 alpha 的下限
+## （≥0.855 才够 4.5:1）是从这个数解出来的。"实测值变好看了"从来不是把
+## 下限放低的理由——所以改动之后这里保留原值当一个**故意保守的界**，
+## 由上面那条断言去盯真实的天空：一旦天真的亮过它，那边就该重新量，
+## 而不是把这儿改小。
+const SCRIM_WORST_BG := Color(198.0 / 255.0, 210.0 / 255.0, 237.0 / 255.0)
+
+
+## WCAG 相对亮度。输入是 sRGB 口径——`Image.get_pixel()` 给的就是 sRGB。
+static func _wcag_lum(c: Color) -> float:
+	return 0.2126 * _s2l(c.r) + 0.7152 * _s2l(c.g) + 0.0722 * _s2l(c.b)
+
+
+static func _s2l(v: float) -> float:
+	return v / 12.92 if v <= 0.04045 else pow((v + 0.055) / 1.055, 2.4)
+
+
+## 某一行的平均颜色。
+func _sky_row(img: Image, fy: float) -> Color:
+	var y: int = clampi(int(float(SHOT.y) * fy), 0, SHOT.y - 1)
+	var acc := Vector3.ZERO
+	for fx in SKY_COLS:
+		var p := img.get_pixel(clampi(int(float(SHOT.x) * fx), 0, SHOT.x - 1), y)
+		acc += Vector3(p.r, p.g, p.b)
+	var m := acc / float(SKY_COLS.size())
+	return Color(m.x, m.y, m.z, 1.0)
+
+
+## 天带里的纵向落差：从带顶那一行到地平线那一点的相对亮度差。
+##
+## 这就是"天是一整片的"那句话在像素上的样子。实测同一机位同一组天空常量，
+## 场景雾画不画天（`fog_sky_affect` 0.3 → 0）、天空色按不按 sRGB 换算，
+## 三档量出来是 **7% / 3% / 21%**——门槛取 12%，三档分得开。
+func _sky_gradient(img: Image) -> float:
+	var lo: float = _sky_row(img, SKY_ROWS[0]).get_luminance()
+	var hi: float = _sky_row(img, SKY_ROWS[SKY_ROWS.size() - 1]).get_luminance()
+	return absf(hi - lo) / maxf(lo, 0.001)
 
 
 func _free_scene(n: Node) -> void:
@@ -104,21 +185,36 @@ func _teleport(station_idx: int) -> void:
 	if away.length() < 0.001:
 		away = Vector3(0.0, 0.0, 1.0)
 	away = away.normalized()
-	var p: Vector3 = st - away * (float(_world.STATION_PASS_RADIUS) - 0.5)
+	_face_station(station_idx, float(_world.STATION_PASS_RADIUS) - 0.5, away)
+	_world._last_global_pos = _world._player.global_position
+	_world._has_last_pos = true
+	_world._nearby_station_idx = -1
+	_world._nearby_shop_idx = -1
+	_world._interact_cooldown = 0.0
+	_world._recheck_armed = true
+	_world._nearby_station_dist = 999.0
+	_world._nearby_shop_dist = 999.0
+
+
+## 把车摆到「站心往外 dist 米」的位置，并且**车头对准站**。
+##
+## 对准这一步是定妆照的前提，不是修饰：相机在车后方沿车头方向看，
+## 车头歪着的时候站根本不在画面里——`05c_prompt_贴脸` 曾经拍到一片草地和树行，
+## 而它要证明的恰恰是"站贴到脸上时那行提示字不许掉出屏外"。
+func _face_station(station_idx: int, dist: float, away := Vector3.INF) -> void:
+	var st: Vector3 = _world._stations[station_idx].position
+	if away == Vector3.INF:
+		var road := _nearest_centerline(st)
+		away = Vector3(st.x - road.x, 0.0, st.z - road.z)
+		if away.length() < 0.001:
+			away = Vector3(0.0, 0.0, 1.0)
+		away = away.normalized()
+	var p: Vector3 = st - away * dist
 	p.y = _world._get_terrain_height(p.x, p.z)
 	_world._player.global_position = p
 	# Player3D 的前方是 -basis.z，所以要车头指向站，角度得取反再转半圈
 	_world._player.global_rotation = Vector3(0.0,
 			atan2(st.x - p.x, st.z - p.z) + PI, 0.0)
-	# 相机必须跟上，否则拍到的是"相机还停在传送前"的画面。
-	# 关键不在 set_camera_locked，而在 set_can_move：Player3D._update_camera
-	# 只在 _physics_process 的 `if not _can_move: return` 之后才跑，
-	# 玩家一旦不能移动，相机就永远不更新。序章把 _can_move 设成 false，
-	# 而本脚本从不把它放回 true —— 于是传送之后相机钉在原地，车在画面里
-	# 缩成一半大（量过：107px vs 正常 226px）。
-	# 下面 run() 里在序章之后统一把玩家放回"能骑"的状态。
-	_world._last_global_pos = _world._player.global_position
-	_world._has_last_pos = true
 	_world._nearby_station_idx = -1
 	_world._nearby_shop_idx = -1
 	_world._interact_cooldown = 0.0
@@ -137,6 +233,47 @@ func _nearest_centerline(p: Vector3) -> Vector3:
 				bd = d
 				best = q
 	return best
+
+
+## 挪到离所有「还欠一次到访」的碎片驿站都最远的路面上。
+##
+## 反派戏的落点闸（`World3D._too_close_to_target()`）就是拿这个距离判的，
+## 所以拍反派戏的那一屏必须站到它真的会起播的地方——否则拍出来的是"没触发"
+## 的空画面，而那正是这一屏唯一需要看的东西。
+func _teleport_open_road() -> Vector3:
+	var best := Vector3.ZERO
+	var best_d := -1.0
+	for line in _world._road_builder.get_all_centerlines():
+		for p in line:
+			var d := 1e9
+			for i in _world._stations.size():
+				if not _gm.fragment_station_needs_visit(i):
+					continue
+				var sp: Vector3 = _world._stations[i].position
+				d = minf(d, Vector2(p.x - sp.x, p.z - sp.z).length())
+			if d > best_d:
+				best_d = d
+				best = p
+	var pos := Vector3(best.x, _world._get_terrain_height(best.x, best.z), best.z)
+	_world._player.global_position = pos
+	_world._last_global_pos = _world._player.global_position
+	_world._has_last_pos = true
+	_world._nearby_station_idx = -1
+	_world._nearby_shop_idx = -1
+	_world._interact_cooldown = 0.0
+	_world._recheck_armed = true
+	_world._nearby_station_dist = 999.0
+	_world._nearby_shop_dist = 999.0
+	return pos
+
+
+func _push_space() -> void:
+	for pressed in [true, false]:
+		var ev := InputEventKey.new()
+		ev.keycode = KEY_SPACE
+		ev.physical_keycode = KEY_SPACE
+		ev.pressed = pressed
+		Input.parse_input_event(ev)
 
 
 ## 「下一处」的方向箭头必须真的在指方向，而不只是显示站名和距离。
@@ -311,6 +448,35 @@ func _run() -> void:
 	_check_bike_on_screen()
 	await _snap("04_ride_骑行中")
 
+	# ---- 04b 反派戏打断：入场提示 + 镜头收束 ----
+	# 这一屏以前一张图都没有：`lookdev_journey` 开头就把 `seen_villain` 顶到 3
+	# 把三场全跳过去了，于是新增的入场提示只有数字守着、没有图守着。
+	# 提示是一句"手机响了。"——它压在玩家正看着的骑行画面上，
+	# 位置/底板/和顶栏的关系只有看图才知道。
+	for i in [0, 1, 2, 3]:
+		_gm.on_station_pass(i)
+	var open_v: Vector3 = _teleport_open_road()
+	_world._villain_armed = [true, true, true]
+	# 断言必须等它真的起播：`_try_villain_scene()` 是在 `_physics_process` 的
+	# 末尾判的，瞬移完同一帧去读必然还读不到。
+	var t_v := Time.get_ticks_msec()
+	while not _world._villain_playing and Time.get_ticks_msec() - t_v < 3000:
+		await process_frame
+	_ck("反派戏真的起播了（不然这一屏拍的是空画面）",
+			_world._villain_playing, "位置 %s" % str(open_v))
+	await create_timer(1.0).timeout
+	await _snap("04b_villain_打断入场")
+	# 整场推完，把相机和操作权还回去——不然后面每一屏都停在被冻住的镜头上。
+	var guard_v := Time.get_ticks_msec()
+	while _world._villain_playing and Time.get_ticks_msec() - guard_v < 20000:
+		_push_space()
+		await process_frame
+		_push_space()
+		await process_frame
+	_ck("反派戏推完后相机锁还回去了", not _world._player.is_camera_locked(),
+			"locked=%s" % str(_world._player.is_camera_locked()))
+	await create_timer(0.5).timeout
+
 	# ---- 05 靠近碎片驿站：地面提示 ----
 	_teleport(4)
 	await create_timer(1.0).timeout
@@ -319,11 +485,12 @@ func _run() -> void:
 	_check_bike_on_screen()
 	await _snap("05_prompt_打卡提示")
 
-	# 05c 贴到 1.2m：站点的投影被推到画面下半，提示文字最容易掉出屏外。
+	# 05c 贴到墙外最近的那一点：站点的投影被推到画面下半，提示文字最容易掉出屏外。
 	# 只拍可送达机位那张的话这一屏永远看不出来，而那恰恰是玩家最该读到按键提示的一刻。
-	# 所以这一张是**故意的**极端机位：玩家最近只能到 6m（离路 18m - 软边界 12m），
-	# 这里比那还近 4.8m，是压力测试不是玩家视角，别拿它当"到站长什么样"。
-	_world._player.position = _world._stations[4].position + Vector3(0, 1.0, 1.2)
+	# 「最近」按 `station_keepout_radius()` 算——车骑不进亭子的占地，
+	# 这一张就是玩家真能停到的极限机位，不是硬写的 1.2m 那种到不了的姿势。
+	var r_close: float = _world.station_keepout_radius(4)
+	_face_station(4, r_close + 0.6)
 	_world._last_global_pos = _world._player.global_position
 	await create_timer(1.0).timeout
 	_ck("贴脸时提示圈还在", _world._check_in_prompt.visible)
@@ -436,7 +603,7 @@ func _run() -> void:
 	_check_bike_on_screen()
 	# 正午那一张要和黄昏那张**同一个机位**，否则两帧之间混进了机位差，
 	# 看的人分不清哪些变化是天色给的、哪些是视角给的。
-	await _snap("12b_day_正午")
+	var img_day: Image = await _snap("12b_day_正午")
 	# 转场 9 秒（DayCycle.FADE_SEC），按墙钟等 —— 这台机器帧数不等于秒数
 	await create_timer(11.0).timeout
 	var dusk_t: float = float(_world._day_cycle.get_t())
@@ -444,7 +611,51 @@ func _run() -> void:
 			"t=%f" % dusk_t)
 	# 太阳压到 9° 之后影子该拉得很长，而且方向和正午那档差了一截。
 	# 这一屏不校验数字（verify_day_cycle.gd 已经逐条量过了），只看整张图凑不凑。
-	await _snap("12c_dusk_黄昏")
+	var img_dusk: Image = await _snap("12c_dusk_黄昏")
+
+	# ---- 12d 那条天带在像素上到底有没有层次 ----
+	#
+	# 这一族是本项目最典型的"数字全绿而画面是坏的"：`ProceduralSkyMaterial`
+	# 的每个旋钮都设了、`DayCycle` 的黄昏常量全对、`verify_day_cycle.gd` 逐条
+	# 量过颜色和方向——而天是一整片灰蓝纸。原因有两个，都是**只有像素能量到**的：
+	#   ① 场景的雾画天（`fog_sky_affect` 0.3 + 近白的雾色）；
+	#   ② 天空色在引擎里是辐照度、直接当线性值用，而那六个常量照着显示器写成
+	#      了 sRGB——`DAY_SKY_HORIZON` 渲出来接近纯白，再被 AGX 的高光肩去一次饱和。
+	# 而"天是蓝的还是灰的""黄昏有没有烧起来"这两件事，也没有任何一个常数能量。
+	_ck("正午那档的天在像素上是有层次的，不是「一整片」（带内纵向落差 ≥ 12%）",
+			_sky_gradient(img_day) >= 0.12,
+			"实测 %.0f%%  顶行 %s 地平线行 %s" % [_sky_gradient(img_day) * 100.0,
+			str(_sky_row(img_day, SKY_ROWS[0])), str(_sky_row(img_day,
+			SKY_ROWS[SKY_ROWS.size() - 1]))])
+	_ck("黄昏那档的天在像素上也是有层次的（上暗下亮）",
+			_sky_gradient(img_dusk) >= 0.12,
+			"实测 %.0f%%  顶行 %s 地平线行 %s" % [_sky_gradient(img_dusk) * 100.0,
+			str(_sky_row(img_dusk, SKY_ROWS[0])), str(_sky_row(img_dusk,
+			SKY_ROWS[SKY_ROWS.size() - 1]))])
+	# 下面两条问的是**色相**，取样行是 SKY_HUE_ROW 而不是 SKY_ROWS 的末行——
+	# 理由写在那个常量上：末行落在设计成近白的地平线霾上，量到的是霾不是天。
+	# 「正午到黄昏只有曝光变化」这句话的判据就在这里：如果黄昏只是把正午调暗，
+	# 那么两档的**红蓝比**会差不多。真的走到黄昏，那一行该由红压过蓝。
+	var day_row: Color = _sky_row(img_day, SKY_HUE_ROW)
+	var dusk_row: Color = _sky_row(img_dusk, SKY_HUE_ROW)
+	_ck("正午那档的天真的是蓝的（红明显低于蓝，不是被洗成灰白）",
+			day_row.r < day_row.b * 0.75,
+			"y 比例 %.2f  r=%.0f b=%.0f 比 %.2f" % [SKY_HUE_ROW, day_row.r * 255.0,
+			day_row.b * 255.0, day_row.r / maxf(day_row.b, 0.001)])
+	_ck("走到黄昏是换了颜色而不是只降了曝光（同一行由红压过蓝）",
+			dusk_row.r > dusk_row.b,
+			"正午 %s → 黄昏 %s" % [str(day_row), str(dusk_row)])
+	# 跨脚本的一条：顶栏衬底声明的最坏背景（verify_mood_mask.gd 第 9 节）还够用吗。
+	# 取 SKY_ROWS[0] 那一行，因为它正好落在衬底下沿（fy 0.086）之下几像素——
+	# 衬底自己的 alpha 在那里已经淡到接近 0，量到的基本就是裸天，
+	# 而"衬底底下有多亮"问的正是裸天。
+	var band_day: Color = _sky_row(img_day, SKY_ROWS[0])
+	var band_dusk: Color = _sky_row(img_dusk, SKY_ROWS[0])
+	var bg_lum: float = _wcag_lum(SCRIM_WORST_BG)
+	_ck("顶栏衬底声明的最坏背景还够用（衬底底下那一带真的比它暗）",
+			_wcag_lum(band_day) < bg_lum and _wcag_lum(band_dusk) < bg_lum,
+			"声明 %.3f（sRGB %s）  正午实测 %.3f  黄昏实测 %.3f" % [bg_lum,
+			str(SCRIM_WORST_BG), _wcag_lum(band_day), _wcag_lum(band_dusk)])
 
 	# ---- 13 集齐合成 ----
 	_gm.seen_villain = 3
@@ -455,6 +666,54 @@ func _run() -> void:
 	_world._on_all_collected()
 	await create_timer(1.2).timeout
 	await _snap("13_collect_集齐合成")
+
+	# ---- 13b 集齐二选一面板 ----
+	# 这一屏带的是玩家看得见的**字**（两个按钮 + 一句"这一趟已经跑通了"），
+	# 而尺寸对了不代表读得出来 —— 同 CLAUDE.md 里明信片背面那条。
+	# `_on_all_collected()` 演完 2.5 秒合成动画才弹面板，所以这里只能等墙钟。
+	var waited := 0.0
+	while not _world._synthesis_choice_open and waited < 8.0:
+		await create_timer(0.1).timeout
+		waited += 0.1
+	_ck("集齐面板弹出来了", _world._synthesis_choice_open,
+			"等了 %.1fs" % waited)
+	await create_timer(0.4).timeout
+	await _snap("13b_synthesis_集齐二选一")
+	# 按钮上的字读得出来吗？渲染完把面板中央那条带子切出来量对比度，
+	# 判据是"不是一片纯底色"——空 Label 和没排上版的 Label 都是那副样子。
+	_ck("集齐面板这一屏有字", _world._synthesis_panel.get_node_or_null(
+			"Panel/Margin/VBox/Hint").text != "",
+			"提示那行是空的，面板上只有两个没字的按钮")
+	# 选「再骑一圈」：这一屏拍的是**继续骑下去**的世界，也是判断
+	# 顶栏「再访 · 还差 2 次」在集齐之后长什么样的唯一机会。
+	_world._on_synthesis_choice(false)
+	await create_timer(0.6).timeout
+	_ck("选「再骑一圈」之后操纵权回到玩家手上", _world._player._can_move)
+	# 集齐是中局不是终局 —— 选完「再骑一圈」之后这一趟**没有**结束。
+	# 判据钉在这里而不是 13d：13d 那时已经刷满，`_all_done` 为 true 是对的，
+	# 拿它去守"集齐"会守错时刻、而看不出来这条是不是真的在守。
+	_ck("集齐之后这一趟没有结束（还能继续骑）", not _world._all_done,
+			"_all_done=%s" % _world._all_done)
+	await _snap("13c_after_再骑一圈")
+
+	# ---- 13d 五座都走满之后顶栏 ----
+	# 满访那一档本来**没有一张图**：`_on_all_maxed()` 锁死之后 2.5 秒就跳结算页，
+	# 而它给顶栏写的那句收尾话（`hud_all_done`）只活这 2.5 秒。
+	# 于是那一栏在所有定妆照里要么还是「再访 · 还差 2 次」，要么是整行空掉——
+	# 数字上（`verify_minimap.gd` §10）钉住了，图上没人看过。
+	for i in [4, 7, 10, 13, 14]:
+		_gm.check_in(i)
+		_gm.check_in(i)
+	_ck("五座都走满了", _gm.all_fragments_maxed())
+	# 刷满才是终局：`_all_done` 在这一刻才翻过去（2.5 秒后跳结算页）。
+	# 上面那句守的是"集齐不算"，这一句守的是"刷满确实算" —— 两个时刻缺一不可。
+	_ck("刷满这一趟才真的结束", _world._all_done, "_all_done=%s" % _world._all_done)
+	# 顶栏这一栏刷成什么，此刻才说得清
+	_ck("顶栏那一栏刷满后是收尾那句，不是空的",
+			str(_world._hud3d._next_label.text).strip_edges() != "",
+			"text=%s" % str(_world._hud3d._next_label.text))
+	await create_timer(0.6).timeout
+	await _snap("13d_maxed_走满顶栏")
 
 	# ---- 14 终局二选一 ----
 	_world.queue_free()

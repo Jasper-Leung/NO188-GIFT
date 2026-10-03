@@ -52,6 +52,17 @@ const DUSK_AZIM_SWING_DEG := 38.0
 # 不是因为有人在灯上打了个折。
 
 ## 白昼：天顶深蓝 → 地平线泛白，地面方向压成灰绿（别让天从草里透出来）。
+##
+## **这六个常量是按 sRGB 写的，交给 material 之前一律过一遍 `srgb_to_linear()`**
+## （见 `_apply()`）。天空色在引擎里是**辐照度**、直接当线性值用，不像普通材质
+## 那样帮你转一遍——所以 `DAY_SKY_HORIZON` 写成 (0.72, 0.85, 0.97) 这个"看着
+## 是淡青白"的数，渲出来是 sRGB(0.87, 0.94, 0.99)，**几乎就是白的**。
+## 而天上最亮的那一片进到 AGX 的高光肩之后会被再去一次饱和，于是整片天读成
+## **一张一整片的灰蓝纸**：实测骑行视角下（仰角 0~22.5°）从天顶到地平线只有
+## **8%** 的亮度差，而把那六个数原样换成线性值之后是 **37%**。
+## 可推广的一条：**凡是"我照着显示器调了个颜色，结果渲出来不是那个颜色"，
+## 先问那个颜色是不是要自己转色彩空间**——本工程已经栽过一次同族：
+## `FarRidge` 的顶点色（见 CLAUDE.md 已知陷阱里 AGX 那条）。
 const DAY_SKY_TOP := Color(0.27, 0.53, 0.95, 1.0)
 const DAY_SKY_HORIZON := Color(0.72, 0.85, 0.97, 1.0)
 const DAY_GND_HORIZON := Color(0.62, 0.70, 0.60, 1.0)
@@ -101,6 +112,10 @@ var _fill: DirectionalLight3D = null
 var _env: Environment = null
 var _sky_mat: ProceduralSkyMaterial = null
 var _ridge: FarRidge = null
+## 三处水。参数默认 null 是为了让老的调用点（工具脚本）不用跟着改，
+## 而"忘了传水"的表现是黄昏档的水仍然亮着——`set_tint` 里那个 null 判断
+## 就是为它留的。
+var _water: Node3D = null
 
 var _day_basis := Basis.IDENTITY
 var _dusk_basis := Basis.IDENTITY
@@ -114,10 +129,11 @@ var _ready_done := false
 ## 不在这里 get_node("../…") —— 万一以后这节点被挪进别的层级，跨层找节点
 ## 会在运行时报一串与本文件无关的 null。
 func setup(sun: DirectionalLight3D, fill: DirectionalLight3D, world_env: WorldEnvironment,
-		ridge: FarRidge) -> void:
+		ridge: FarRidge, water: Node3D = null) -> void:
 	_sun = sun
 	_fill = fill
 	_ridge = ridge
+	_water = water
 	if _sun == null or world_env == null or world_env.environment == null:
 		push_warning("DayCycle.setup(): 缺主光或环境，昼夜切换不会发生")
 		return
@@ -131,11 +147,11 @@ func setup(sun: DirectionalLight3D, fill: DirectionalLight3D, world_env: WorldEn
 	# Sky 同样是 sub_resource，所以整个换掉而不是就地改它的 material。
 	# 顺带把 `background_mode` 钉在 BG_SKY：白天的天就是靠它画的。
 	_sky_mat = ProceduralSkyMaterial.new()
-	_sky_mat.sky_top_color = DAY_SKY_TOP
-	_sky_mat.sky_horizon_color = DAY_SKY_HORIZON
+	_sky_mat.sky_top_color = DAY_SKY_TOP.srgb_to_linear()
+	_sky_mat.sky_horizon_color = DAY_SKY_HORIZON.srgb_to_linear()
 	_sky_mat.sky_curve = DAY_SKY_CURVE
-	_sky_mat.ground_horizon_color = DAY_GND_HORIZON
-	_sky_mat.ground_bottom_color = DAY_GND_BOTTOM
+	_sky_mat.ground_horizon_color = DAY_GND_HORIZON.srgb_to_linear()
+	_sky_mat.ground_bottom_color = DAY_GND_BOTTOM.srgb_to_linear()
 	_sky_mat.ground_curve = DAY_GND_CURVE
 	_sky_mat.sun_angle_max = DAY_SUN_ANGLE_MAX
 	_sky_mat.sun_curve = DAY_SUN_CURVE
@@ -228,11 +244,17 @@ func _apply(t: float) -> void:
 		_fill.light_color = (_day["fill_col"] as Color).lerp(DUSK_FILL_COL, t)
 		_fill.light_energy = lerpf(_day["fill_energy"], DUSK_FILL_ENERGY, t)
 	if _sky_mat != null:
-		_sky_mat.sky_top_color = DAY_SKY_TOP.lerp(DUSK_SKY_TOP, t)
-		_sky_mat.sky_horizon_color = DAY_SKY_HORIZON.lerp(DUSK_SKY_HORIZON, t)
+		# **lerp 在 sRGB 空间做、换算在最后做**：天空色之间那 9 秒的交叉淡入，
+		# 在 sRGB 里插是"两种天互相溶"，在线性里插中段会塌成一团发灰的泥。
+		# 反正常量是按 sRGB 写的（见上面那段），这样写连中间态都对。
+		_sky_mat.sky_top_color = DAY_SKY_TOP.lerp(DUSK_SKY_TOP, t).srgb_to_linear()
+		_sky_mat.sky_horizon_color = DAY_SKY_HORIZON.lerp(DUSK_SKY_HORIZON, t) \
+				.srgb_to_linear()
 		_sky_mat.sky_curve = lerpf(DAY_SKY_CURVE, DUSK_SKY_CURVE, t)
-		_sky_mat.ground_horizon_color = DAY_GND_HORIZON.lerp(DUSK_GND_HORIZON, t)
-		_sky_mat.ground_bottom_color = DAY_GND_BOTTOM.lerp(DUSK_GND_BOTTOM, t)
+		_sky_mat.ground_horizon_color = DAY_GND_HORIZON.lerp(DUSK_GND_HORIZON, t) \
+				.srgb_to_linear()
+		_sky_mat.ground_bottom_color = DAY_GND_BOTTOM.lerp(DUSK_GND_BOTTOM, t) \
+				.srgb_to_linear()
 		_sky_mat.ground_curve = lerpf(DAY_GND_CURVE, DUSK_GND_CURVE, t)
 		_sky_mat.sun_angle_max = lerpf(DAY_SUN_ANGLE_MAX, DUSK_SUN_ANGLE_MAX, t)
 		_sky_mat.sun_curve = lerpf(DAY_SUN_CURVE, DUSK_SUN_CURVE, t)
@@ -243,6 +265,8 @@ func _apply(t: float) -> void:
 		_env.fog_light_color = (_day["fog_col"] as Color).lerp(DUSK_FOG_COL, t)
 	if _ridge != null:
 		_ridge.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
+	if _water != null:
+		_water.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
 
 
 ## 白昼那一档的原始值。给回归读（"t=0 时场景没被动过"这条只有它能量）。

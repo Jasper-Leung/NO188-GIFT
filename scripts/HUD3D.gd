@@ -72,11 +72,16 @@ var _mood_label: Label = null
 var _lvbi_gain_text := ""       # 入账提示，非空时压过余额显示
 var _lvbi_gain_left := 0.0
 var _next_label: Label = null
+var _next_gap: Control = null   # 顶栏左半（状态）右半（导航）之间那个撑开的弹簧
 var _hint_label: Label = null   # 「为什么按了没反应」那行
 var _hint_left := 0.0
 var _pass_label: Label = null   # 路过非碎片驿时那一句风景话
 var _pass_holder: Control = null
 var _pass_left := 0.0
+var _cue_label: Label = null
+var _cue_name_label: Label = null
+var _cue_holder: Control = null
+var _cue_left := 0.0
 var _road_data: RoadData = null
 var _player: CharacterBody3D = null
 
@@ -86,7 +91,39 @@ var _player: CharacterBody3D = null
 ## 1.6:1，远低于正文可读线，逆光方向更糟。衬底不是"好看"，是这条信息在
 ## 天空那一档背景上根本读不出来。加一层往下淡出的暗条即可，不必做整块面板。
 const SCRIM_H := 62.0
-const SCRIM_TOP_ALPHA := 0.46
+
+## 顶栏实底段的不透明度，和它往下淡出之前的实底宽度比例。
+##
+## 这两个数不是调出来的，是算出来的。18px 正文要过 AA 的 4.5:1，而**顶栏背后最亮的
+## 背景是正午的天**（实测 `12b_day_正午.png` 衬底外的天空 ≈ sRGB(198,210,237)，
+## 相对亮度 0.642）——比顶栏那行金字（≈(245,200,126)，0.621）还亮。
+## 也就是说单靠调暗衬底色没用（衬底本来就接近黑），只有 alpha 能救：
+## 合成亮度 = a·0.0069 + (1-a)·0.642 ≤ 0.099 才够 4.5:1，解出来 **a ≥ 0.855**。
+## 0.46 那版实测只有 1.36:1（`04_ride` 1.22:1），字在天上等于没写。
+##
+## 宽度必须够盖住**整条文字行盒**，不只是字形：18px 的字在 `SCRIM_H`(62px)
+## 里占到 t≈0.23~0.61（行盒比字形高，下面那一截是降部留白）。纯 pow 渐变在
+## 那一段只剩 0.16~0.31 的 alpha，挡不住任何东西——所以是"先实底一段，
+## 再往下淡出"，不是一路渐变。留到 0.68 是给字号和 TopBar 内边距留余量：
+## `verify_mood_mask.gd` 第 9 节直接拿真实 Label 的 rect 来卡这条线。
+const SCRIM_TOP_ALPHA := 0.90
+const SCRIM_SOLID_FRAC := 0.68
+
+## 顶栏右半那排按钮占掉的宽度，以及状态栏和它之间要留的缝。
+##
+## `TopBar/HBox` 在 .tscn 里写死 `offset_right = 480`，也就是它**声称**自己只有
+## 468px 宽，而它五个标签的最小宽度加起来约 663px——于是最后那 195px 是**溢出**
+## 出去的，容器自己的 rect 一直是个谎。溢出本身不报错（`clip_contents` 默认关），
+## 真正的后果是排版权交给了"字有多长"：顶栏右端那 345px 的空档不是设计，
+## 是"没排满的余量"，而整条衬底一直铺到 1280，于是空档读成一条什么都没有的
+## 黑带——`z13_top.png` 里那块约 600px 的死区（那一帧"下一处"恰好是空的，
+## 于是空档整整翻倍）。
+##
+## 修法是让容器**真的**占满「左边缘 → 按钮排左边」这一段，中间塞一个撑开的
+## 弹簧，于是顶栏读成「状态（左）… 导航（右）… 按钮（最右）」三段，
+## 剩下的空档落在该落的地方，而不是全堆在导航后面。
+const TOP_RIGHT_W := 260.0     # 与 .tscn 里 TopRightHBox 的 offset_left 同一个数
+const TOP_RIGHT_GAP := 16.0
 
 
 ## 下一处目标提示。8 字环两个方向都能到全部 5 座碎片驿站，路又是自闭合的，
@@ -131,6 +168,7 @@ func _ready() -> void:
 	_setup_scrim()
 	_setup_blocked_hint()
 	_setup_pass_line()
+	_setup_cue_line()
 	_setup_mood_mask()
 	_boundary_warning = _create_boundary_warning()
 	add_child(_boundary_warning)
@@ -196,6 +234,12 @@ func _process(delta: float) -> void:
 			_pass_holder.modulate.a = maxf(_pass_left / 0.5, 0.0)
 		if _pass_left <= 0.0 and _pass_label != null:
 			_pass_label.text = ""
+	if _cue_left > 0.0:
+		_cue_left -= delta
+		if _cue_left < 0.5 and _cue_holder != null:
+			_cue_holder.modulate.a = maxf(_cue_left / 0.5, 0.0)
+		if _cue_left <= 0.0 and _cue_label != null:
+			_cue_label.text = ""
 	_update_next_label()
 	_update_mood_mask(delta)
 
@@ -224,7 +268,11 @@ func _update_next_label() -> void:
 		return
 	var t := _next_fragment_target()
 	if t.is_empty():
-		_next_label.text = ""
+		# 五座都刷满了，这一趟没有"下一处"可指。**这里原来写的是空串**，
+		# 于是顶栏右端那条标签整条消失，只剩衬底——而这正是玩家最该看着
+		# 那一栏的两秒：`_on_all_maxed()` 刚把「五座驿站都走满了」放到屏幕中央，
+		# 2.5 秒后就要跳去结算页。信息量最大的一刻，导航栏先哑了。
+		_next_label.text = Localization.t("hud_all_done")
 		return
 	var idx: int = t["idx"]
 	# 站名走 road_data.station_display_name()，和 World3D._station_name() 同一套口径
@@ -283,15 +331,23 @@ func _on_sfx_btn_pressed() -> void:
 	_update_buttons()
 
 
-## 三个音频开关的按钮文案。三档静音里 BGM 和音效原来共用一个字形「♪」和
-## 同一句话「♪ 开」，两个按钮在顶栏上长得一模一样 —— 玩家点第一个不知道
-## 静音的是音乐，点第二个也不知道，旁边还有一个全静音的 🔊 同样显眼。
-## 现在字形分家（♫ 音乐 / ♪ 音效 / 🔊 全部），字形之外再加一个 tooltip，
-## 因为"点开之前"玩家得先看得懂那是什么。
+## 三个音频开关的按钮文案。
+##
+## 这一族**不用符号来区分**，用的是字（`bgm_short` / `sfx_short`）。原来的
+## 版本给 BGM 和音效分了两个音乐符号（♫ / ♪）——它们在字体里是真的不一样
+## （单独放大渲染过，U+266B 那个横杠画得出来，`Font.has_char` 也报 true），
+## 而在顶栏那个字号上**那根横杠是亚像素的**：两个按钮读起来就是同一个东西。
+## 放大 5 倍的定妆照 `04_ride` 右上角能量出那一两根像素的差别，
+## 而玩家不会放大 5 倍去看一个 18px 的按钮。
+##
+## 教训可推广：**「两个字符在字体里长得不一样」不等于「玩家分得出来」**。
+## 靠字符长相传达区别时，判据是**在实际字号上**还剩多少差别，而那只有图能量；
+## 顺带一条同族的：`Font.has_char()` 只查 cmap，缺字形会静默回退，
+## 所以它绿着也不代表屏幕上画的是那个字——但**这一族连回退都没有**，
+## 两个码位都画得出来，差的只是那一笔。凡是拿细笔画当区分度的 UI，
+## 直接换成词。tooltip 那一条留着：「点开之前」玩家得先看得懂那是什么。
 const GLYPH_MUTE_ALL_ON := "🔊"
 const GLYPH_MUTE_ALL_OFF := "🔇"
-const GLYPH_BGM := "♫"
-const GLYPH_SFX := "♪"
 
 
 func _update_buttons() -> void:
@@ -301,9 +357,9 @@ func _update_buttons() -> void:
 	var sfx_off := AudioManager.is_sfx_muted()
 	_mute_btn.text = GLYPH_MUTE_ALL_OFF if AudioManager.is_muted() else GLYPH_MUTE_ALL_ON
 	_mute_btn.tooltip_text = Localization.t("mute")
-	_bgm_btn.text = "%s %s" % [GLYPH_BGM, off if bgm_off else on]
+	_bgm_btn.text = "%s %s" % [Localization.t("bgm_short"), off if bgm_off else on]
 	_bgm_btn.tooltip_text = Localization.t("bgm_mute")
-	_sfx_btn.text = "%s %s" % [GLYPH_SFX, off if sfx_off else on]
+	_sfx_btn.text = "%s %s" % [Localization.t("sfx_short"), off if sfx_off else on]
 	_sfx_btn.tooltip_text = Localization.t("sfx_mute")
 
 
@@ -346,14 +402,30 @@ func _apply_language() -> void:
 
 func _setup_economy_labels() -> void:
 	var box := $TopBar/HBox
+	# 容器得先说实话：它要占满「12px → 按钮排左边」这一整段。
+	# 不改这一条，弹簧没地方撑，`_next_label` 仍然是从 12px 起顺排出来的，
+	# 空档还是全堆在它后面 —— 而溢出那一段没有任何回归能量得到。
+	box.anchor_right = 1.0
+	box.offset_right = -(TOP_RIGHT_W + TOP_RIGHT_GAP)
 	_lvbi_label = _make_hud_label()
 	_mood_label = _make_hud_label()
 	_next_label = _make_hud_label()
 	# 和旅币/心神一个字号同一个色，别做成第二行——顶栏只有一条，
-	# 加行会把 1280 宽的屏挤爆。这一条的位置放在最右，离顶栏按钮最远。
+	# 加行会把 1280 宽的屏挤爆。
 	_next_label.add_theme_font_size_override("font_size", 16)
 	box.add_child(_lvbi_label)
 	box.add_child(_mood_label)
+	# 弹簧在心神和「下一处」之间，所以**变长变短的是弹簧**：站名再长、
+	# 「还差 N 次」再长，往左推的都是它，旅币和心神一个像素都不会动
+	#（那正是 CLAUDE.md 里"顶栏 HBox 里任何一个 Label 改字都会把整排标签横向推走"
+	# 那条陷阱要的形状）。`custom_minimum_size.x = 0` 是留给窄屏的：
+	# 1280 撑不开的时候它收到 0，行为和旧版一样（宁可溢出也不压字）。
+	_next_gap = Control.new()
+	_next_gap.name = "NextGap"
+	_next_gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_next_gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_next_gap.custom_minimum_size = Vector2(0.0, 0.0)
+	box.add_child(_next_gap)
 	box.add_child(_next_label)
 	_setup_lvbi_toast()
 	GameManager.lvbi_changed.connect(_on_lvbi_changed)
@@ -425,8 +497,12 @@ static func _make_scrim_image() -> Image:
 	var n := 32
 	var img := Image.create_empty(1, n, false, Image.FORMAT_RGBA8)
 	for y in n:
-		# pow 1.4：顶部保持满不透明度，往下尽快让路
-		var a := SCRIM_TOP_ALPHA * pow(1.0 - float(y) / float(n - 1), 1.4)
+		var t := float(y) / float(n - 1)
+		var a := SCRIM_TOP_ALPHA
+		if t > SCRIM_SOLID_FRAC:
+			# 实底段之后才淡出，pow 1.4 让它尽快给下方画面让路
+			var k := (t - SCRIM_SOLID_FRAC) / (1.0 - SCRIM_SOLID_FRAC)
+			a = SCRIM_TOP_ALPHA * pow(1.0 - k, 1.4)
 		img.set_pixel(0, y, Color(0.07, 0.08, 0.12, a))
 	return img
 
@@ -471,6 +547,9 @@ func show_blocked_hint(key: String) -> void:
 ## 绝不能做成可点的：交互一旦归它，就和新手引导/对白/小游戏抢同一个空格，
 ## 那正是"提示圈照画、按键全死、只能重开"那一族。纯展示，mouse_filter = IGNORE。
 const PASS_HOLD_SEC := 3.2
+## 入场提示停留。它得盖住 `World3D` 那一下镜头收束（`VILLAIN_CAM_PULL_SEC`
+## 的移动 + 定格），所以比 `PASS_HOLD_SEC` 短不了——提示先收、字后走。
+const CUE_HOLD_SEC := 2.6
 
 func _setup_pass_line() -> void:
 	# 底板挂在 CenterContainer 上而不是 Label 身上：Label 拉满屏宽时 stylebox 会
@@ -502,6 +581,94 @@ func _setup_pass_line() -> void:
 	_pass_label.text = ""
 	plate.add_child(_pass_label)
 	_pass_holder = holder
+
+
+## 「有人找你」的那一句，郑铎三场之前浮一次。
+##
+## 单独一套 holder，不复用 `PassLine`：两者都是"居中 + 底板 + 淡出"，复用的话
+## 一次打断正好撞上一句还没淡完的风景话，两条字挤在同一带里、还共用一个
+## `_pass_left` —— 谁后浮谁把谁掐掉。CLAUDE.md 那条"淡入淡出要挂在 holder 上、
+## 两处都 modulate 会相乘成 0"在这里同理：两条通道各自归各自。
+func _setup_cue_line() -> void:
+	var holder := CenterContainer.new()
+	holder.name = "CueLine"
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.anchor_left = 0.0
+	holder.anchor_right = 1.0
+	# 比风景话高、也更靠中间：这是一次**事件**，不是路边的 scenery，
+	# 摆低了会被读成又一句路过的风景话 —— 而玩家要的正是一眼分得开。
+	holder.offset_top = SCRIM_H + 96.0
+	holder.offset_bottom = SCRIM_H + 152.0
+	holder.modulate.a = 0.0
+	add_child(holder)
+
+	var plate := PanelContainer.new()
+	plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	plate.add_theme_stylebox_override("panel", _cue_box())
+	holder.add_child(plate)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	plate.add_child(vbox)
+
+	var name_lbl := Label.new()
+	name_lbl.name = "CueName"
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.add_theme_font_size_override("font_size", 20)
+	# 冷白偏蓝，和顶栏米金分开：这是"外面来的人"，不是这趟旅程自己在说话。
+	name_lbl.add_theme_color_override("font_color", Color(0.80, 0.86, 0.96))
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_lbl.text = ""
+	vbox.add_child(name_lbl)
+
+	_cue_label = Label.new()
+	_cue_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_cue_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_cue_label.add_theme_font_size_override("font_size", 17)
+	_cue_label.add_theme_color_override("font_color", Color(0.93, 0.93, 0.90))
+	_cue_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_cue_label.text = ""
+	vbox.add_child(_cue_label)
+
+	_cue_name_label = name_lbl
+	_cue_holder = holder
+
+
+func _cue_box() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	# 比 `_pass_box` 更实：这一屏背后可能是正午的天，而它要在那上面立住。
+	sb.bg_color = Color(0.04, 0.05, 0.09, 0.86)
+	sb.set_corner_radius_all(10)
+	sb.content_margin_left = 30.0
+	sb.content_margin_right = 30.0
+	sb.content_margin_top = 12.0
+	sb.content_margin_bottom = 12.0
+	return sb
+
+
+## 浮一句"有人找你"。`who` 是说话人，`what` 是那句入场的短句。
+func show_cue_line(who: String, what: String) -> void:
+	if _cue_label == null or what.strip_edges() == "":
+		return
+	if _cue_name_label != null:
+		_cue_name_label.text = who
+	_cue_label.text = what
+	_cue_holder.modulate.a = 1.0
+	_cue_left = CUE_HOLD_SEC
+
+
+## 立刻收掉入场提示。
+##
+## 单独一个方法而不是等 `_cue_left` 走完：对白一弹起来，那句提示就该让位，
+## 而它自己那条淡出还要 0.5s——两层底板叠着，字压在字上。
+func clear_cue_line() -> void:
+	_cue_left = 0.0
+	if _cue_holder != null:
+		_cue_holder.modulate.a = 0.0
+	if _cue_label != null:
+		_cue_label.text = ""
+	if _cue_name_label != null:
+		_cue_name_label.text = ""
 
 
 func _pass_box() -> StyleBoxFlat:

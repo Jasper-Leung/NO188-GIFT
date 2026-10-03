@@ -41,11 +41,54 @@ scripts/          GDScript 脚本
 						visibility_range 淡出；桌面 150m / Web·移动端 100m；驻留零重建）
   FarRidge.gd           远景山线：三层环形山脊（800/1350/1900m，纯几何零贴图，
 						顶点色烘空气透视），补地形边界之外什么都没有的平地平线
+  RoadSteles.gd         路边四块碑：前三块刻着「188」，第四块的字被人凿平了
+						（就是郑铎 villain_2_1 点名的"刻字的石头"）。CSG 图元 +
+						Label3D，零新 GLB 零纹理。落点离路心线 9m，避开驿站和
+						**行道树的视线**；碑面朝向由最近那段中心线算，不是世界原点
+  CrossingMark.gd       8 字自交点那块「路自此复」的碑。碑面上刻的不是字，是
+						**这条路自己的形状**——刻线由 `RoadData.points` 生成，
+						和 RoadBuilder 建沥青同一份数据，所以这张图不可能说谎。
+						**面只后仰 14°**（原来 40°，理由写的是"低头就正对着脸"，
+						可低头读得清的那一档恰恰是最躺的一档，见已知陷阱）；
+						`face_lift()` 是 **static 且算出来的**，写死高度会让题字
+						悄悄埋进石台
+  water_data.gd         三处水的唯一出处：`plan()` 按**真实自然地形**把三只碗
+						定下来（碗心 = 碗底足迹平均高程最低处，不是最低的那一点），
+						`depth_at()` 供 TerrainBuilder 挖碗。全场统一水位 -3.4，
+						压在 `_height()` 的高程下限 -3.0 之下——关得住水靠的是这条
+  Water.gd              三片水面。岸线是逐角度在**建出来的地形网格**上步进求交
+						（2m 步进 + 6 次二分），不是以碗心画圆；碗是椭圆，所以每个
+						角度的搜索上限是"沿这个方向到盆沿还有多远"而不是 radius
   road_data.gd          48 点 lemniscate 路径 + 16 驿站数据
   LayoutData.gd         res://layout.json 读写（编辑模式产物）
   LayoutEditor.gd       编辑模式主控制器
   EditorHUD.gd          编辑模式 UI
   Player3D.gd / HUD3D.gd / MiniMap.gd / CheckInPrompt.gd ...
+  MiniGameBar.gd       云/茶/竹三个小游戏共用的进度条。**门槛要画在条上**：原来三处
+						都把门槛写在了字里（"到 75% 算过" / "3 秒后完成" / "进度 0/5"），
+						却没有一处给它一个位置——玩家盯着一条填到头就赢的槽，看不出
+						还差多远，而那个差距正是这一屏的全部张力。刻痕跨在条**外**
+						（画在条里就成了"条上的一道纹"，和边框、分隔线分不开），
+						门槛之后那一截底色提亮；竹是**分格**而不是连续条——进度是
+						五件互相独立的事，一根填到 60% 的条读成"有一根被砍掉了 60%"，
+						实际是三根倒了、两根还立着，当前那格描金边。几何全是纯函数
+  MiniGameChrome.gd     四个小游戏共用的「取消」按钮。**它不穿警报红**：原来
+						云/茶/琴三处各画一份 `fill(0.4,0.3,0.3) + border(0.8,0.3,0.3)`，
+						而全工程真正在报警的红是 `HUD3D.set_boundary_intensity()` 那圈
+						边界警告和竹子的砍伐窗口倒计时——玩家学会「红 = 出事了」之后，
+						再在角落里看见一块红，读出来的是「取消要付代价」，而它不要付
+						（ESC 也能按，驿站还能再来一次）。现在是一块**不透明**的中性
+						深灰小片 + 暖灰边 + 米白字：不透明是刻意的，五个小游戏背景
+						亮度差得远，半透明底板的对比度随背景漂。禽原来**留了热区却
+						没画**，右下角是一块点得着、读不出是什么的地方
+  SynthesisPanel.gd     集齐时的二选一面板：「收下明信片 · 结束这一趟」/「再骑一圈 ·
+						刷到完满」。量出来的下限是 3.1 分钟（`tools/play_newcomer.gd`，
+						五个小游戏的答案注入成功，所以那是**下限**不是全程），画面由
+						`HUDLayer/SynthesisPanel`
+						这个静态节点承载，面板自己只管显隐与回调。ESC 收它（走 `pause`
+						不是 `ui_cancel`，本工程 InputMap 里没有后者）。**收面板的责任在
+						`World3D._on_synthesis_choice()` 那一处**，不是散在按钮回调里——
+						`synthesis_choice` 是公开信号，定妆照脚本和以后的自动导览都走不到按钮
   Localization.gd       i18n
 
 assets/
@@ -89,10 +132,38 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						+ **三次到访轮换五件乐事**：首次到访拿到的还是这座驿站自己的那件
 						（拿真实的 road_data 逐格对拍，不许靠抄一份表蒙对）、同一座连着
 						三次不重样、15 局里每件正好 3 次）
+						+ **第 6g 节三局小游戏的画读不读得出自己的标题**（云的轮廓不是
+						多边形：尖角不到顶点数的三分之一、八边形是 8/8，且底边是平的；
+						竹身是收分的不是 12px 等宽条、竹节从下往上排、砍倒那截横向
+						伸进自己那一列；琴有 13 个徽位、排在中间两根弦的空档里、
+						不铺满全长，标题点了名「古琴」）——四处都做过删除突变
+						+ **第 6h 节进度条把门槛画出来了**（刻痕跨在条**外**、落在条
+						**里**、比条高、字里报的数和条上刻的是同一个、门槛不贴两端；
+						茶另报一句还差几秒；竹 5 格不叠且占满整条、格缝按宽度取
+						所以换分辨率还是同一个比例；**刻痕那个数字放得下**——
+						`get_string_size()` 量的框宽 ≥ 字要的那条）。前三条是**读源码
+						文本**的：几何量的是纯函数，量不到画笔有没有真的去调它
+						+ **第 6i 节取消按钮不穿警报红**（三档色都读作中性：饱和度
+						≤0.25 且红通道比另两路最多高 0.10，而产品里那圈边界警告红
+						是 0.84 / 0.50——**拿真警报当尺子**，不是拿"不是那个红"当
+						判据；底板不透明；「取消」在**自己那块底板**上 ≥4.5:1、
+						边框对底板 ≥3.0；**字形盒**整个在按钮之内；按钮在屏内、不贴
+						边、换 1080p 仍贴右下；四个画笔都调共用函数、热区没抄第二份
+						矩形。又是四条**读源码文本**的
   verify_interact_latch.gd 交互闩锁 / 对白抢占回归（郑铎在播时按空格不许开打卡、
 						setup() 顶掉一轮对白必须放出旧等待者、被顶掉的郑铎戏自己清
 						_villain_playing、回访不再重播小游戏/谎报碎片、
-						**反派戏期间脚下的圈不许还在推销打卡**、铺子仍能开；
+						**反派戏期间脚下的圈不许还在推销打卡**、铺子仍能开、
+						**驿站占地不许骑进去**（半径全部小于打卡半径、从站心放开要真
+						被摆出去、满速 15m/s 撞 3 秒钻不进去、撞完车要慢下来）、
+						**第 9 节反派戏的落点与排队**（贴着碎片站不起播且 armed 留着、
+						骑开就放、入场提示带角色名、镜头收束、整场推完三样都还回去、
+						阈值一口气冲过时一次只放一场、再骑两站才轮到下一场）、
+						**第 10 节集齐二选一面板**（走真实 `check_in()` 推到集齐 →
+						面板弹出来且世界冻住、两个按钮都在屏内不叠且都有焦点、
+						面板开着时脚下的圈不画、「再骑一圈」把操纵权和相机还回去而
+						`_all_done` 仍是 false、回访不重弹、**直接 `emit()` 信号也收得掉
+						面板**；末尾另有两条"这一节真的跑完了"的钉子）；
 						第 6 节靠注入真空格驱动对白推进，走 `Node._input()`，带不带 --headless 都跑得过）
   verify_bamboo_world.gd 真实 World3D 端到端：打卡→小游戏→空格不泄漏成驿站交互
   verify_mini_game_keys.gd 竹/琴/茶/禽/云在"只有 physical_keycode"的键盘事件下仍可玩（**不能加 --headless**）
@@ -105,6 +176,11 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						（**不能加 --headless**：headless 不做焦点路由）
   verify_stations.gd      16 驿站 → GLB 配置一致性（model_idx 映射、GLB 存在、
 						名字/color/event 完整、碎片顺序、无占位路标名）
+						+ **末节「站名牌」**：牌子挂在**量出来的**屋顶上方
+						（`World3D.label_y_for()` 是 static，无头回归直接调它）、
+						净空 ≥1m、字身在 18m 那一档 ≥12px，
+						外加两条**读源码文本**钉住画笔真的调了那个函数 / 字号
+						走的是常量而不是又一个字面量（四条都做过删除突变）
   verify_story.gd         故事层三副本对拍：Localization.STRINGS 中英 key 集合逐字相同
 						（不许只在一侧存在 / 不许空串 / 不许中英同字）、反派台词 key 中英都齐、
 						五座碎片站身份与顺序、`Postcard.FRAGMENT_COLS` 与
@@ -116,7 +192,12 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						结构上不被动、导入缓存没被写脏）
   verify_mood_mask.gd     心神遮罩 + 顶部经济栏回归（遮罩层级/两档透明度、骑行档
 						永远可读、遮罩只随心神不走灯笼、系数传到草皮与行道树、
-						入账 toast 不重排顶栏、叙事脉冲冲上/退回）
+						入账 toast 不重排顶栏、叙事脉冲冲上/退回、
+						**第 9 节顶栏衬底在最坏背景（正午的天）上 ≥4.5:1 且实底段
+						盖住整条文字行盒**、
+						**第 10 节顶栏不许留死区**（HBox 一直伸到按钮排左边 16px、
+						「下一处」和按钮排之间没有空档、塞一串长字进「下一处」
+						挪不动旅币/心神也挪不动它自己的右沿））
   verify_minimap.gd       小地图碎片站回归（**沿途 321 个采样点上小地图高亮的
 						必须就是顶栏「下一处」报的那颗**；判据统一走
 						GameManager.fragment_station_needs_visit()、**收过 ≠ 不用再去**
@@ -124,7 +205,9 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						普通驿站不冒充目标、顶栏那份 MAX_VISITS 副本不许漂；
 						第 9/10 节走真实 check_in()：**集齐是中局不是终局**，
 						集齐后整圈三处指示器仍一致且顶栏不空、站到每座碎片站前
-						顶栏与脚下的圈报同一个"还差 N 次"、刷满了才 _all_done）
+						顶栏与脚下的圈报同一个"还差 N 次"、刷满了才 _all_done；
+						第 10 节末尾另钉**刷满之后顶栏那一行不是空的**，
+						报的是 `hud_all_done` 那句收尾）
   verify_far_ridge.gd     远景山线材质回归（三层都 disable_fog、半径都在地形之外、
 						颜色按距离递淡）—— 颜色本身只有 lookdev_horizon.gd 能判
   lookdev_horizon.gd      远景山线四张定妆照：路面视角 / 地形高点 / 逆光 / 高空
@@ -132,20 +215,117 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
   verify_day_cycle.gd     昼夜切换回归（第三圈门槛、太阳**方向**跟着降、
 						ProceduralSky 天色真的走了、白昼档没被顺手改掉、
 						dusk_began 只发一次；顺带断言"场景自带的天空是空的"）
-  lookdev_journey.gd      玩家视角 21 屏流程实拍（标题→操作说明→序章→骑行→打卡提示
+						**外加"天为什么曾经是一整片"那两条成因断言**：`fog_sky_affect`
+						必须为 0（场景雾不许画天），且白昼那档在**线性空间**里的纵向反差
+						≥ 0.50（常量是按 sRGB 写的，换算前按 sRGB 算出 0.39，看着
+						已经很够，而 AGX 压的是线性那一头，画面上是一片平）
+  probe_water.gd         一次性探针：逐只碗报自由板 / 水面盖住碗的百分比 /
+						各方向水面半径 / 有几个角找不到岸。**改碗的参数先跑它**
+  verify_water.gd         三处水回归（水体挂在那三座名字承诺了水的站上、水面
+						压在土里、**每个顶点**底下都是湿的、水不压路、
+						碗没压到行道树、**水面盖住碗的一半以上**、全场统一水位）
+  lookdev_water.gd       三处水定妆照：三处水边平视 + 湖湾俯瞰 + 正午/黄昏同机位
+						A/B（**不能加 --headless**、**不能加 --quit-after**）。
+						每张拍两遍：一遍把水换成不受光的洋红量几何、一遍真材质量观感
+  lookdev_stations.gd     驿站布局定妆照 23 张：5 座代表驿站俯拍 + 全路线高空 +
+						骑行视角一张 + **十六座站逐个从骑行视角拍**
+						（**不能加 --headless**、**不能加 --quit-after**）。
+						第 08 段量的是**每一座站在骑行那一档有没有报出自己的名字**
+						——16 座站只有 12 个模型、三对还是同一个 GLB，
+						而站心离路心线 18m、`STATION_PASS_RADIUS` 又是 15m，
+						所以这一档就是玩家在路上看它们的全部视角。
+						取样框**一处都不问 `Label3D` 节点**（见陷阱清单里那一条）
+  check_all.sh            **一条命令跑完全部无头回归，打印一张表**（改完东西
+							不知道该跑哪几条时跑这个；它认 7 条要开窗口的，不列进
+							默认轮次）。判据是「有没有 [FAIL]」加「有没有打出断言」
+							两件事，**不信退出码**——抛异常的回归退出码是 0。
+							跑之前会把 `res://layout.json` 存一份、跑完原样还回去
+							（回归往这个产品文件里写测试数据过一次，见陷阱清单）。
+							`--window` / `--lookdev` 两个子模式
+  verify_road_steles.gd   路碑回归（四块碑都建出来了、刻的真是 188、落点不压沥青
+						也不糊在驿站上、**石板正面朝着路且字在正面那块宽板上**、
+						朝向不是按世界原点算的、四句浮字中英都在、
+						**骑到路到碑的视线上没有行道树**、路过只浮一次停着不重弹、
+						路过碑不发旅币不进 _nearby_* 不画打卡圈）
+  verify_crossing_mark.gd 交叉点「路自此复」那块碑的回归（40 条）。落点、题字、
+							刻线、**刻线刻的真是这条路**——逐点量**刻出来的**顶点与
+							环路重合（不是量数据源，量数据源的话把刻线换成一个圆
+							全绿）、**刻出来的是个 8**（两瓣 x 区间交叠、
+							z 区间只在交叉点相接）、**石台没有把题字和下瓣吃掉**
+							（量的是离**石台顶**多高，不是离地 y=0）、碑面心在人眼
+							那一档。四个变异都做过：朝向反 180° / 刻线换成圆 /
+							落点挪到沥青上 / 写死旧的那个 face_lift
+  lookdev_crossing.gd     交叉点 9 屏定妆照：200m 俯视 / 50m 斜看合并处 /
+							骑进去 / 骑出去 / 垂直俯拍 **+ 碑的四张**（碑前低头 /
+							正对碑面 / 骑行眼高 / 高空）
+							（**不能加 --headless**、**不能加 --quit-after**——
+							刻线是自己拼的 ArrayMesh、题字是 Label3D，
+							headless 下两者一笔都不落盘，而"刻出来的是不是个 8"
+							和"字画没画出来"只有图能判）
+  lookdev_steles.gd       路碑定妆照：三块完好碑的近景 / 被凿平那块 / 隔着路面 / 俯视
+						（**不能加 --headless**、**不能加 --quit-after**——
+						碑面的「188」是 Label3D，headless 不生成字形，
+						"字到底画没画出来"只有这里能判）
+  lookdev_journey.gd      玩家视角 25 屏流程实拍（标题→操作说明→序章→骑行→
+						**04b 反派戏打断的入场提示与镜头收束**→打卡提示
 						→**贴脸 1.2m（提示文字最容易掉出屏外）**→**回访「再访 · 还差 N 次」**
 						→**路过风景驿浮的那一句**→驿站对白→5 个小游戏→驿铺→
-						**正午/黄昏同机位两张**→集齐
+						**正午/黄昏同机位两张**→集齐→**集齐二选一**→**再骑一圈**
+						→**13d 五座都走满之后顶栏**（那一档只活 2.5 秒，
+						`_on_all_maxed` 锁死到跳结算页之间，所以必须在这窗口里拍）
 						→终局二选一→明信片→背面写字），存 user://lookdev_journey/
 						（**不能加 --headless**、**不能加 --quit-after**）
+						第 13 节自己上膛第 0 场反派戏——因为整份脚本末尾才把
+						`seen_villain` 顶到 3，中间那一段本来一场都拍不到，
+						而入场提示是玩家看得见的字，不该只有数字守着
+						**12b/12c 之后那五条量的是天带的像素**，而天色是本工程
+						最典型的"数字全绿而画面是坏的"：`ProceduralSkyMaterial`
+						每个旋钮都设了、`DayCycle` 的常量全对、`verify_day_cycle.gd`
+						逐条量过颜色和方向——而天是一整片灰蓝纸。五条各管一件：
+						纵向落差（≥12%，量的是"有没有层次"）、正午那行是不是蓝
+						（**取样行是 `SKY_HUE_ROW` 而不是 `SKY_ROWS` 的末行**——
+						末行落在设计成近白的地平线霾上，量到的是霾不是天）、
+						黄昏那行红有没有压过蓝（量的是"换了颜色"而不是"降了曝光"），
+						以及衬底底下那一带比 `verify_mood_mask` 第 9 节声明的最坏背景
+						暗不暗（跨脚本的一条：那边无头、量不到像素）
   verify_economy.gd       旅币/背包/心神/存档回归 + 预算按公式重算 + **里程不许出现在
 						任何玩家可见文案里**（含中文「公里」与英式 kilometre）
   verify_shop_panel.gd / verify_shop_world.gd  驿铺面板 / 真实 3D 世界里的购买链路
   verify_postcard_ending.gd 明信片纸面分级 + 终局二选一 + **重新开始前的「这一趟」回执**
 						（keep/break 的后果必须在**正面**上、**回执每一条都要对着存档逐字核对**）
-  lookdev_postcard.gd      明信片 18 张定妆照（四档纸面/满配/背面三态/蜡封三态/未竟缺格
-						/二选一/揭示/**回执中英各一张**）
+						+ **第 3c 节正面顶部那张路线图**（16 驿全在框内、五座碎片站不叠点、
+						买了信封方框要让开折角、图上那几行字现算自存档）
+						+ **第 3d 节抬头右半那列五件乐事**（右沿不留死区 / 不压左列的字 /
+						每行放得下——次数是右对齐画的，`draw_string` 的宽度是**裁切宽度**，
+						字比列宽整段被切而尺寸断言全绿；中英 × 900/1920 四种组合，
+						外加一条读源码文本的「画笔真的调了 `_draw_joys_column`」）
+						+ **第 3e 节背面正文**（字号是**按这块纸自动定的**，判据量的是
+						「卡片字号 × 预览宽 / 1920 ≥ 12px」这个玩家在编辑器里真的
+						读到的高度；另含一条读源码文本的「画笔真的调了
+						`_message_font_size`」——把 `var font_size := 36` 写回去，
+						几何那十几条全绿而预览里那行字又变回 8px）
+  lookdev_postcard.gd      明信片 19 张定妆照（四档纸面/满配/背面三态（含**写满 200 字
+						那一档字号**）/蜡封三态/未竟缺格/二选一/揭示/**回执中英各一张**）
 						（**不能加 --headless**、**不能加 --quit-after**）
+  measure_cold_start.gd    冷启动逐段墙钟：按「开启旅程」→ 世界起来 → 操作说明 → 能动。
+						跑两遍：一遍连打（量机器强加的等待）一遍人读节奏（量内容长度）。
+						判据钉的是 `GiftBox` 的**常量表**不是墙钟——把过场调慢一秒，
+						墙钟那条照样绿。**不能加 --headless**
+  play_newcomer.gd        以「完全不了解这个游戏」的玩家身份真玩一遍，量**一趟有多长**：
+						从点「开启旅程」到集齐二选一面板弹出来。它跑的是玩家的那条路
+						（`StartBtn` → 操作说明 → 序章 → 沿路骑行 → 打卡 → 对白 → 小游戏），
+						油门转向全走真按键事件。**不能加 --headless**。
+						五条是这套尺子的量法陷阱，见下面「已知陷阱」里那几条；
+						五个小游戏的答案是 `FORCE_MINI_GAME_SUCCESS` 注入的成功，
+						所以报出来的是这一趟的**下限**（现在 186.6 秒），不是全程
+  verify_demo_path.gd      评审那条 90 秒演示路径（**不能加 --headless**：演示走
+						`Input.parse_input_event`，dummy display server 不做焦点路由）。
+						两节：第1节秒级（`enter_demo` / `fill_finished_run` 摆出来的存档
+						必须真的算成完满评级、`reset` 收回演示模式、标题页中英按钮的秒数
+						不许和 `DEMO_BUDGET_SEC` 漂）；第 2 节真的点「演示 · 90 秒」，
+						真的骑，量累计里程 / 到过几驿 / **小游戏有没有真的弹出来**——
+						后一条是唯一能证伪「DemoDirector 一行都没执行」的判据。
+						断言总数钉在 `EXPECTED_CKS`，中途抛错会静默少跑一半而汇总照样全绿
   web_smoke.gd + .tscn     **Web 导出实测用，不是产品的一部分**。设成主场景导出 Web，
 						在浏览器里打开两遍：第一遍走真实 `check_in()` 写盘 + 导 PNG，
 						第二遍读回。量的是三件桌面回归永远量不到的事——
@@ -261,6 +441,17 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 # 不能加 --headless、不能加 --quit-after
 "$GODOT" --path . --script tools/lookdev_horizon.gd
 
+# 三处水：先跑探针看碗摆得对不对（自由板 / 盖住碗的百分比 / 各方向半径），
+# 再跑回归。改 BASIN_SHAPES / WATER_LEVEL / _best_site 之后探针必须先跑
+"$GODOT" --headless --path . --script tools/probe_water.gd
+
+# 三处水回归（水压在土里、每个顶点底下都是湿的、不压路、盖住碗的一半以上）
+"$GODOT" --headless --path . --script tools/verify_water.gd
+
+# 三处水定妆照：三处水边平视 + 湖湾俯瞰 + 正午/黄昏同机位 A/B，
+# 存到 user://lookdev_water/。不能加 --headless、不能加 --quit-after
+"$GODOT" --path . --script tools/lookdev_water.gd
+
 # 玩家视角 17 屏流程实拍，存到 user://lookdev_journey/
 # 改 HUD / 标题页 / 商店 / 明信片 / 任何一屏的玩家可见文字后跑这个
 # 不能加 --headless、不能加 --quit-after
@@ -272,6 +463,21 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 # 明信片 18 张定妆照（四档纸面 / 背面三态 / 蜡封三态 / 未竟缺格 / 二选一 / 揭示 / 回执中英）
 # 存到 user://lookdev_postcard/。不能加 --headless、不能加 --quit-after
 "$GODOT" --path . --script tools/lookdev_postcard.gd
+
+# ---------------------------------------------------------------- 一条命令全跑完
+# 34 条无头回归 + 7 条要开窗口的（不列进默认轮次，因为没跑的必须明写"没跑"）。
+# 不确定该跑哪几条时跑这个；它打印一张给评审看的表。
+bash tools/check_all.sh
+bash tools/check_all.sh verify_water verify_story   # 只跑指定的几条
+bash tools/check_all.sh --window                   # 要开窗口的那 7 条
+bash tools/check_all.sh --lookdev                  # 出图看观感（同样要开窗口）
+
+# 冷启动逐段墙钟（连打一遍 + 人读一遍）。不能加 --headless
+"$GODOT" --path . --script tools/measure_cold_start.gd
+
+# 评审那条 90 秒演示路径（约 90 秒，秒级那节 + 真骑一遍）。
+# 不能加 --headless：演示走 Input.parse_input_event，dummy display server 不做焦点路由
+"$GODOT" --path . --script tools/verify_demo_path.gd
 ```
 
 ### 编辑模式（关卡布局工具）
@@ -325,8 +531,22 @@ echo. > .editor_mode
 - 修改 `assets/shaders/asphalt.gdshader` 前先在 headless 跑 `verify_road_height.gd` + `verify_crossing.gd`
 - 修改 `scripts/TerrainBuilder.gd` / `assets/shaders/terrain_grass.gdshader` 前先跑 `verify_terrain_shader.gd` + `verify_road_height.gd` + `verify_crossing.gd`
 - 修改 `scripts/road_data.gd` / `scripts/RoadBuilder.gd` 前先在 headless 跑 `verify_8_shape.gd`
-- 往 `Localization.gd` 加/删 key、改中英任何一侧的文案、改 `road_data.stations` 的站名或
-  `event`、动 `Postcard.FRAGMENT_COLS` / `FragmentBar.FRAGMENT_COLORS` / `World3D` 的反派台词前
+- 改 `World3D` 的站名牌（`STATION_LABEL_PIXEL_SIZE` / `_FONT_PX` / `_FONT_PX_SMALL` /
+  `_CLEAR` / `_INK` / `_HALO` / `_HALO_PX` / `_add_label()` / `label_y_for()`）前跑
+  `verify_stations.gd` 末节 + `lookdev_stations.gd` 看那 16 张 `ride_*`。
+  **字高是个乘积**（`font_size × pixel_size` 折成米 × 18m 上的每米像素），
+  盯住任何一个因子都量不到玩家读到的那行字有多高——`pixel_size` 原来写死
+  0.002、48 的字号合起来只有 9.6cm，18m 上 3.3px，而**没有任何一条断言会红**。
+  连带两条：牌子高度是 `label_y_for()` 从**量出来的**屋顶顶反解的（写死一个数
+  的话，改一次模型尺寸牌子就埋进亭子里），而 `STATION_GLB_CONFIG` 里那个
+  `label_y` 现在**一个读者都没有**，别再拿它当高度的出处。
+  **写完先证明它会红**：`STATION_LABEL_PIXEL_SIZE` 退回 0.002 →
+  `lookdev_stations` 的「牌子上都真的画出了字」当场红（框缩到 12×4px、笔画 0~6 根）。
+  **别拿 halo 加粗当突变**——`outline_size` 从字身向外膨胀而墨核永远画在最上层，
+  加粗到 60 也一笔不少（详见陷阱清单）
+- 往 `Localization.gd` 加/删 key、改中英任何一侧的文案、改 `road_data.stations` 的站名、
+  `event` 或 `dialogue` / `dialogue_en`（**中英是两份手抄的数组，句数必须一起改**）、
+  动 `Postcard.FRAGMENT_COLS` / `FragmentBar.FRAGMENT_COLORS` / `World3D` 的反派台词前
   跑 `verify_story.gd`。它守的是**三处互相对不上的副本**：`Localization.STRINGS`（玩家读到的字）、
   `road_data` / `Postcard`（碎片身份）、`3D_RIDE_DESIGN.md`（下一个人的唯一入口）。
   改 `3D_RIDE_DESIGN.md` 本身也要跑——这一族里只有它会把文档钉在代码上，
@@ -337,6 +557,19 @@ echo. > .editor_mode
 - 修改 `scripts/TreeScatter.gd` 前先跑 `verify_tree_scatter.gd`；改间距/离路/淡出参数后还要跑 `lookdev_trees.gd` 看图（`CELL` 必须和 `GrassScatter.CELL` 一致，两套流式共用同一张格子）
 - 修改 `assets/shaders/grass.gdshader` 的 `card_width` / `card_height` / `blade_count` / 循环上限 / `blade_base` / `blade_tip` 前先跑 `verify_grass_scatter.gd` 的"草皮着色器：形状与颜色"一节（它把这些值从**文本**里读出来，卡片高宽比、绝对尺寸、叶数、循环上限 vs `blade_count`、绿-红通道差、纯文本断言），再跑 `lookdev_grass.gd` 看图（`--headless` 的 dummy renderer **不编译着色器**，语法错和观感错在无头下都会静默通过）。看图时记住 `lookdev_grass.gd` 的相机必须站在草环圆心
 - 修改 `scripts/mini_games/*.gd` / 打卡流程前先跑 `verify_mini_game.gd` + `verify_bamboo_world.gd` + `verify_mini_game_keys.gd` + `verify_bamboo_done.gd` + `verify_mini_game_fail.gd` + `verify_checkin_all5.gd`
+- 改**云/琴/竹的画**（`MiniGameCloud.CLOUD_CIRCLES` / `fit_scale()` / `area_rect()`、
+  `MiniGameZither.headgear_poly()` / `head_anchor()` / `foot_polys()` / `foot_anchor()`、
+  `MiniGameBamboo.stalk_poly()` / `node_fracs()` / `leaf_poly()` / `LEAVES` / `STALK_W_*` /
+  `SPACING` / `FALL_REACH_FRAC`）前跑 `verify_mini_game.gd` **第 6g 节** +
+  `lookdev_journey.gd` 看那三张 `minigame_云` / `minigame_琴` / `minigame_竹`
+  （**`--headless` 根本不调 `_draw`**，几何里写错一个构造在无头下永远是绿的）。
+  两条做法是这一族能测住的原因：①**判据量的是画笔真的摆的那一处**——锚点抽成
+  `head_anchor()` / `foot_anchor()`，画和回归调同一个函数；测试里把算式抄一遍的话，
+  改画不动测、测会一直绿。②**形状参数是一张表**（`CLOUD_CIRCLES` / `LEAVES`），
+  画笔和回归读同一张，而回归量的是**多边形自己的几何**（叶的最大垂直宽度 =
+  2×面积 ÷ 最长边）而不是表里那个宽度字段——表对了而画笔没照着画，那一条就该红。
+  量「不许越过某条边界」的量要从那条边界反解（竹子砍倒那截的横向伸出按 `SPACING`
+  反解），按窗口高度取百分数的话 720p 量着刚好、1080p 就压上去了
 - 改 `OnboardingGuide` 的 `_build_ui()`（尤其焦点）/ `ShopPanel._button()` / `_grab_first_focus()` / `_refresh()` / `GameManager._bind_ui_accept_to_physical()`，或**任何一个 Button 的键盘可达性**前跑 `verify_panel_keyboard.gd`（**不能加 --headless**）。它量的是"冷启动 → 收掉操作说明 → 推完序章 → 驿铺买成一件"，不是量某一个函数；两种按键事件形状各测一遍，只测一种的话另一半坏了照样全绿
 - 改 `MiniGameCloud.PATH_POINTS` / `_update_draw()` / `_next_seg` 前跑 `verify_mini_game.gd` 第 7 节（**完成度只能来自"描过"**：原地晃 60 次只记一段的 13%，够不着 75% 的及格线；顺次描完和一甩到底都得能描完——甩过去的那几段要一起记上，否则光标卡死在没描到的那段上，后面整条云再也描不完）。顺手也跑 `verify_mini_game_keys.gd` 的云那一局：它当初的绿**是靠这个漏洞**刷出来的，修好漏洞后如果它变红，先看它是不是还踩在原地
 - 改 `MiniGameCloud._gui_input_key()` 的挪光标 / `KEY_STEP` 前跑 `verify_mini_game_keys.gd`（到达判据必须 ≥ `KEY_STEP`，否则 12px 的整步走会在目标两侧横跳、`_cloud_t` 永远不前进）
@@ -345,6 +578,10 @@ echo. > .editor_mode
 - 改 `World3D._do_check_in()` 里 `is_first_visit` 的两处分支（对白 / 小游戏）前跑 `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`。**对话仍然只在首次到访，乐事每一趟都有**——两者的门不一样：驿站的开场白是自我介绍，回访再念一遍会冲掉顶栏那 3 次的进度感；而完满评级要的正是三次，一次都不给就把最强的重玩钩子空着
 - 改 `scripts/mini_games/MiniGameBackdrop.gd`（`THEMES` 配色 / 五个主题常量）或任何一个小游戏里 `MiniGameBackdrop.draw_scene(...)` 那一行前跑 `verify_mini_game.gd` 第 6 节 + `lookdev_journey.gd` 看 5 张 `minigame_*.png`。第 6 节只核对**引对了没有**（读源码文本），景好不好看只有图能判——"五个乐事共用一片黑幕"正是原来的毛病，而它在无头下永远全绿
 - 改 `MiniGameZither._board_rect()` / `_string_rects()` / `_draw_string_h()` 前跑 `verify_mini_game.gd` 第 6 节的琴弦那几条 + `lookdev_journey.gd` 看 `minigame_琴`。判据是**命中区宽 > 高**：古琴的弦平行于长轴，旧版把四根弦竖着插在一条又宽又短的琴身上，那不是琴。注意几何必须抽成 `_string_rects()` 这种不碰画笔的纯函数让回归直接调——`_note_rects` 是在 `_draw()` 里填的，headless 读它只会读到空数组
+- 改 `MiniGameCloud.CLOUD_CIRCLES` / `cloud_outline()` / `OUTLINE_SAMPLES` / `FLAT_Y` / `MiniGameBamboo.SPACING` / `stalk_poly()` / `node_fracs()` / `fall_len()` / `MiniGameZither.HUI_*` / `headgear_poly()` / `foot_polys()` / `mg_zither_title` / `mg_bamboo_intro` 前跑 `verify_mini_game.gd` **第 6g 节** + `verify_story.gd`（改了文案）+ `lookdev_journey.gd` 看 `minigame_云` / `minigame_竹` / `minigame_琴`。三处都做完了删除突变（轮廓换回八边形 → 尖角/平底两条红；竹身退回等宽 + 砍倒那截改回按高度取长 → 两条红；徽减到 7 个 / 从 0 起排 → 两条红）。**轮廓的采样数不能随手调小**：`OUTLINE_SAMPLES` 决定相邻两点的间距，间距必须 > `KEY_STEP`(12px)，否则键盘光标整步走会在两点之间横跳，而第 6g 节量的是间距、`verify_mini_game_keys.gd` 量的是走不走得完
+- 改 `MiniGameBar.gd` 的任何一处（`rect()` / `threshold_x()` / `tick_span()` / `tick_label_rect()` / `TICK_OVERHANG` / `TICK_LABEL_*` / `PIP_GAP_FRAC` / `pip_*`），或 `MiniGameCloud` / `MiniGameTea` / `MiniGameBamboo` 里那三行 `draw_bar(...)` / `draw_pips(...)` 之前跑 `verify_mini_game.gd` **第 6h 节** + `lookdev_journey.gd` 看那三张 `minigame_*.png`。第 6h 节里有**三条是读源码文本**的（和核 `MiniGameBackdrop.<THEME>` 同一个办法）：几何断言量的是那几个纯函数，而**量不到画笔有没有真的去调它们**——把画笔那一行的门槛换成字面量，几何照样全绿
+- 同一族里有一条**图先发现的、数值量不到**的坑：`draw_string` 的宽度参数是**裁切宽度**。刻痕下面那个「75%」第一版给了 28px，而 16px 的它实测要 32px——多出来的半个百分号被切掉，图上只剩「75」，而**标签框一直是 28px，量尺寸的任何断言都看不出问题**。所以判据钉的是 `get_string_size()` 给这串字的宽度 ≤ 框宽（改字体、改字号、改标签文案之后这条会自己变红）。同族的第二条：`TICK_LABEL_DY` 必须 > `TICK_OVERHANG`，否则刻痕的下半截从那串字里穿过去
+- 改 `MiniGameChrome.gd` 的任何一处（`cancel_rect()` / `label_rect()` / `draw_cancel()` / `FILL` / `BORDER` / `LABEL` / `CANCEL_*` / `BASELINE_UP`），或**四个小游戏里那个取消按钮**的画法与热区之前跑 `verify_mini_game.gd` **第 6i 节** + `lookdev_journey.gd` 看那四张 `minigame_*.png`。三条要记住的：①**判"它不该像警报"要拿真警报当尺子**——产品里 `HUD3D.set_boundary_intensity()` 那圈边界警告红（0.84 / 0.50）就是尺子，写成"不是 `Color(0.8,0.3,0.3)`"是拿自己测自己；②**底板必须不透明**，五个小游戏背景亮度差得远，半透明底的对比度随背景漂，而"五屏上都读得出来"只有底板自己说了算才立得住；③`draw_string` 的 position.y 是**基线**不是行盒顶，所以"基线在按钮高度的 68%"会让 22px 的字身从按钮顶沿探出去——**量行盒量不出来**（框还在按钮里，探出去的是字形），要量就得用字体真实的 ascent/descent 算字形盒，画笔和回归读同一个盒子
 - 改 `scripts/AudioManager.gd` 或 `scripts/mini_games/*.gd` 里的发声前先跑 `check_all_scripts.gd` + 上面那 6 条；新加了 sfx 还要跑一次 `--headless --editor --quit-after 60` 生成 `.import`
 - 改任何一屏玩家可见的东西（HUD / 标题页 / 新手引导 / 商店 / 驿铺 / 明信片 / 结算）前跑 `lookdev_journey.gd` 看图
 - 改 `EndCard._export_two_images_web()` / `GameManager.SAVE_PATH` / `_save_game()` / `_load_save()`
@@ -354,33 +591,158 @@ echo. > .editor_mode
   桌面回归永远量不到这一层：`user://` 在 Web 上是 IDBFS，而落盘是异步的，
   刷新页面会走 beforeunload 的同步路径把问题盖掉
 - 改 `scripts/FarRidge.gd` 的层数 / 半径 / 颜色前跑 `lookdev_horizon.gd` 看图（AGX 会把中间调提亮去饱和，填色要反着调，见已知陷阱）
+- 改 `scripts/water_data.gd`（`BASIN_SHAPES` / `WATER_LEVEL` / `_best_site` / `_footprint_mean`）、`scripts/Water.gd`（`_shoreline` / `MIN_RADIUS`）或 `TerrainBuilder` 的 `_height()` / 高程 clamp 之前，先跑 `probe_water.gd` 再跑 `verify_water.gd`，改完着色器再跑 `lookdev_water.gd` 看图。`WATER_LEVEL` 一旦高于地形下限 -3.0，"关得住水"这个前提当场失效，而症状是几十度角在两倍盆沿之外还没露出岸——数字全绿、图上一片蓝纸
 - 改顶栏 / `scripts/shop_data.gd` 的解锁门 / `World3D.VILLAIN_SCENES` 的触发条件前跑 `verify_economy.gd`（含「里程不许出现在任何玩家可见文案里」扫描）+ `verify_shop_panel.gd` + `verify_shop_world.gd` + `lookdev_journey.gd` 看顶栏
 - 改 `HUD3D._next_fragment_target()` / `_arrow_glyph()` 前跑 `lookdev_journey.gd`（它带一条几何断言：车头正对 → ↑、背对 → ↓、正右方 → →，只测 static 那个函数等于拿自己测自己）；方位用 `a(v) = atan2(v.x, -v.z)`，8 字环自闭合、两个方向都到得了全部 5 站，箭头必须真的随车头转
+- 改 `HUD3D._update_buttons()` 那三个音频开关的文案 / `Localization` 的
+  `bgm_short` / `sfx_short` 前跑 `verify_mood_mask.gd`（它量的是"三个按钮在
+  玩家看得见的意义上分得开"，不是"三个字符串不相等"——后者一直是绿的而产品
+  一直是坏的）+ `lookdev_journey.gd` 看 `04_ride` 的右上角。
+  判据钉的是"区分用的字符是字不是符号"：**只要那个区分落在符号的一根细笔画上，
+  在 18px 上就没有区分**，而 `Font.has_char()` 查 cmap 查不出来
 - 改 `HUD3D.MOOD_REST_SCALE` / `set_mood_pulse()` / `_setup_mood_mask()` 或 `World3D` 里推 `set_mood_pulse` 的那一行前跑 `verify_mood_mask.gd`（骑行档必须**永远**低于 0.20 可读上限，叙事档才允许冲到 `MOOD_MASK_MAX`）
+- 改 `HUD3D.SCRIM_H` / `SCRIM_TOP_ALPHA` / `SCRIM_SOLID_FRAC` / `_make_scrim_image()` 或 `_make_hud_label()` 的字号/颜色前跑 `verify_mood_mask.gd` 第 9 节（纯算术：在**声明的最坏背景**上逐行合成再算 WCAG，文字带从真实 Label 的 rect 换算）+ `lookdev_journey.gd` 看 `04_ride` / `12b_day_正午` / `12c_dusk_黄昏` / `13_collect_集齐合成`。第 9 节能证明"算出来够"，"看起来是不是一条黑带"只有图能判
 - 改 `MiniMap._next_frag_idx()` / 未收碎片站的画法前跑 `verify_minimap.gd`（小地图高亮的那颗必须就是顶栏"下一处"报的那颗；这是继 `CheckInPrompt` 之后第三个会说"下一处在哪"的地方，判据一漂移玩家就骑错且无从察觉）
 - 改 `scripts/DayCycle.gd` 的任何一档颜色 / 太阳角度 / `FarRidge.set_tint()` 前跑 `verify_day_cycle.gd`（量的是数字）+ `lookdev_journey.gd` 看 `12b_day_正午` 与 `12c_dusk_黄昏` **那两张同机位的 A/B**（量的是观感）。少一张就没法判断"天到底变了没有"——两处只查一个都曾经全部通过而画面纹丝不动
+- 改 `DayCycle` 那六个 `DAY_SKY_*` / `DAY_GND_*` 常量、`_apply()` 里那几行 `.srgb_to_linear()`，或 `World3D.tscn` 里 `Env_sky` 的 `fog_sky_affect` 前跑 `verify_day_cycle.gd`（它守着 `fog_sky_affect == 0` 和线性空间的纵向反差 ≥ 0.50，两条都是**成因**而不是结果）+ `lookdev_journey.gd` 那五条天带像素断言。**那六个常量是按 sRGB 写的**，交给 `ProceduralSkyMaterial` 之前必须过一遍 `Color.srgb_to_linear()`——天空色在引擎里是辐照度、直接当线性值用，不像普通材质那样帮你转一遍；写成"看着对"的那一档渲出来是接近纯白的一整片灰蓝纸。`lerp` 也要**在 sRGB 空间做、换算放最后**（`DAY_X.lerp(DUSK_X, t).srgb_to_linear()`），否则那 9 秒交叉淡入在中段塌成一团发灰的泥
 - 改 `GameManager.fragment_station_needs_visit()` / `all_fragments_maxed()` / `fragment_slot_visits_left()` / `MAX_VISITS_PER_STATION` / `HUD3D._update_next_label()` / `FragmentBar._draw_visit_pips()` / `CheckInPrompt._label()` 的回访分支前跑 `verify_minimap.gd` + `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`（完满是全游戏最强的重玩钩子，三处「还差 N 次」必须同数；任一处退回 `is_collected` 就会把已收的站从导航上摘掉）
 - 改 `FarRidge.LAYERS` / `_build_layer()` 的材质前跑 `verify_far_ridge.gd` + `lookdev_horizon.gd` 看图（`disable_fog` 被谁删掉的话三层会塌成一条没有纵深的白带，标志位那关拦得住，颜色那关只有看图）
+- 改 `CrossingMark.gd` 的任何一处（`FACE_W` / `FACE_H` / `FACE_TILT_DEG` / `PLINTH_H` / `PLINTH_CLEAR` / `TRACE_BOX` / `TEXT_Y` / `TEXT_PIXEL` / `TRACE_W` / `face_lift()` / `_quad()` 的缠绕顺序）前跑 `verify_crossing_mark.gd` + `lookdev_crossing.gd` 看 `5_mark` 与 `6_face`。**这族回归有三条只靠图才成立的判据**：缠绕方向（发反了整条刻线是背面、正面看一片空白，而带子/法线/包围盒/逐点对拍全绿——回归靠"法线是 +Z"那条兜底，兜不住的是"看起来粗细对不对"）、刻线在石板上**读不读得出是个 8**（数字量得到两个瓣交叠 0.25，量不到"腰上那两个鼓包会不会把交叉糊掉"）、以及**题字画没画出来**（Label3D，headless 一笔不落盘）。而 `TRACE_BOX` 与 `TEXT_Y` 必须**一起动**：两者抢的是同一块石板，只动一个就会有一边被石板边沿或石台吃掉
 - 改顶栏的经济标签（`_lvbi_label` / `_lvbi_toast` / `_setup_economy_labels`）前跑 `verify_mood_mask.gd` 第 7 节（它断言入账时余额/心神/"下一处"三个标签的横坐标一个像素都不许动）
+- 改 `HUD3D.TOP_RIGHT_W` / `TOP_RIGHT_GAP` / `_setup_economy_labels()` 里那个撑开的弹簧 `_next_gap`（`NextGap`）/ `_update_next_label()` 的空分支 / `Localization` 的 `hud_all_done` 前跑 `verify_mood_mask.gd` **第 10 节** + `verify_minimap.gd` **第 10 节末尾** + `lookdev_journey.gd` 看 `04_ride` / `13c_after_再骑一圈` / `13d_maxed_走满顶栏`。这一族判据量的是**"顶栏右端离按钮排还有多远"**这个玩家读得出的量：`.tscn` 给 `TopBar/HBox` 写死 `offset_right = 480`（468px 宽），而它那五个标签要 ~663px，于是 ~195px 静默溢出（`clip_contents` 默认 false，没有任何回归看得见）——而"顶栏排到哪"从此由**文字有多长**决定，右端因此永远悬在半路，读成一条几百像素的黑带。修法是让容器说实话（`anchor_right = 1.0` / `offset_right = -(TOP_RIGHT_W + TOP_RIGHT_GAP)`）并把长度变化全交给**心神和「下一处」之间那个弹簧**；顶栏右端于是钉死在按钮排左边 16px，无论那行字多长多短。**"刷满"那一档原来写的是空串**——`fragment_station_needs_visit()` 五座都还清就直接返回空字典，而那正是玩家最该看着那一栏的 2.5 秒（`_on_all_maxed` 锁死到跳结算页之间）；现在写 `hud_all_done` 那句收尾。**写完先证明它会红**：`offset_right` 改回 480 时第 10 节那两条红、空分支改回 `""` 时 `verify_minimap` 那两条红
 - 改 `World3D._push_mini_game_chrome()` / `_pop_mini_game_chrome()` 前跑 `lookdev_journey.gd` 看 5 张 `minigame_*.png`（遮罩不透明 + 运行时藏 HUD，靠的是这对成对方法，漏掉一头就有一屏写着"两层同时存在"）
 - 改 `DialoguePopup.setup()` / `World3D._can_start_check_in()` / `_do_check_in()` / `_play_villain_scene()` / `CheckInPrompt._label()` 前跑 `verify_interact_latch.gd`（这五处任何一个漏了都能把游戏变成"提示圈照画、按键全死、只能重开"）
 - 改 `World3D._physics_process()` 里那张"这些状态下一律不算 `_nearby_*`"的早退单、或 `CheckInPrompt._prompt_target()` / `_interact_blocked_reason()` 前跑 `verify_interact_latch.gd` 第 6 节。这张单子上每多一个状态，那个状态下脚下的圈就该同时收掉——`CheckInPrompt._prompt_target()` 只读 `_nearby_*`，它不知道 `_villain_playing`，单子漏一格就是"圈还在推销一个按不出来的交互"。注意 `lookdev_journey.gd` 在这里帮不上：它开头就设 `_gm.seen_villain = 3` 把三场反派戏全跳过去了，所以这一段没有任何定妆照可看，只能量数字）
 - 改 `CheckInPrompt._label_pos()` / `_draw()` 里的底板前跑 `verify_interact_latch.gd` 第 5 节 + `lookdev_journey.gd` 看 `05c_prompt_贴脸`（贴着站停下时站点的投影已经压到屏底，提示文字是往圈上方翻的，底下又是全屏最忙的一块——数字对了图上仍可能读不出来）
+- 改 `World3D._apply_station_keepout()` / `STATION_KEEPOUT_PAD` / `_measure_station_aabb()` / `Player3D.damp_speed()` 前跑 `verify_interact_latch.gd` 第 8 节 + `lookdev_journey.gd` 看 `05c_prompt_贴脸`。**调 `STATION_KEEPOUT_PAD` 时先问一句"半径还小于 `STATION_PASS_RADIUS` 吗"**：墙一旦比打卡圈大，玩家被挡在圈外，顶栏「下一处 … Nm」永远减不到 0、脚下的圈永远不亮，而这两样在别的回归里全是绿的
+- 改 `World3D.VILLAIN_SCENES` / `_try_villain_scene()` / `_too_close_to_target()` / `VILLAIN_MIN_STATION_GAP` / `VILLAIN_MIN_TARGET_DIST` / `_villain_camera_cue()` 或 `HUD3D.show_cue_line()` 前跑 `verify_interact_latch.gd` 第 9 节 + `lookdev_journey.gd` 看 `04b_villain_打断入场`。第 9 节量的三件事各自会红：落点闸（贴着碎片站起播）、排队闸（一次只放一场）、收尾三件套（`_villain_playing` / 相机锁 / `look_at` 都还回去）。**写完先证明它会红**：把两道闸删掉跑一遍，两道都必须变红——闸二第一版删了还是绿的，因为它自己的前提（驿数顶到 12）从来没成立过
+- 改 `Player3D.CAM_BACK` / `CAM_UP` / `CAM_SIDE` / `_villain_camera_cue()` 的收束量前跑 `lookdev_journey.gd` 看 `04b_villain_打断入场`（入场那一下镜头只往后 2.2m、往上 3.1m，量小了读成"没发生"，量大了玩家以为游戏卡了——这两个数只有图能判）
+- 改 `World3D._physics_process()` 里调 `_apply_*` 的那几行、或任何"每帧推位置"的地方前跑 `verify_interact_latch.gd` 第 8 节（推出和回弹的先后会互相抵消：先回弹后推出的话，车贴着一座站骑的时候会被路边界往里推、被站推出往里推，两股力在同一点上打架）
 - 改 `Postcard.FRAGMENT_COLS` / `_draw_fragment_icon()` / `VARIANT_LAYOUTS` 前跑 `verify_postcard_ending.gd` 第 3b 节 + `lookdev_postcard.gd` 看明信片正面（颜色/图标/标签三者同序，且 `Postcard.FRAGMENT_COLS` 与 `FragmentBar.FRAGMENT_COLORS` 逐值相同；缩略图和存档 PNG 是同一份，错了就是玩家带走的那张错了）
+- 改 `Postcard.MAP_BAND_FRAC` / `_layout_map()` / `_map_inner()` / `_map_project()` / `_draw_map_caption()` 前跑 `verify_postcard_ending.gd` 第 3c 节 + `lookdev_postcard.gd` 看 `05_tier3_满配`（投影抽成了不碰画笔的纯函数，所以「16 驿有没有被框裁掉」「买了信封方框有没有让开左上角的折角」在 headless 下判得了；折角是 `min(w,h) × 0.16` 的一条等腰直角，方框照旧贴着左边上角放就会被削掉框线和路各一角——**两处都是定妆照先发现的，尺寸断言当时全绿**）
+- 改 `Postcard._caption_col_w()` / `_joys_column_rect()` / `_draw_joys_column()` / `Localization` 的 `postcard_joys_title` / `postcard_visit_n` 前跑 `verify_postcard_ending.gd` **第 3d 节** + `lookdev_postcard.gd` 看 `05_tier3_满配` / `09_未竟_三碎片缺格`。第 3d 节量的三件玩家读得出来的事：抬头**右沿不留死区**（这一列真的排到右边去，不许只是换了个地方继续空着）、**不压左边那一列的字**、**每一行放得下**——最后一条是必须的，因为次数是**右对齐**画上去的，而 `draw_string` 的宽度参数是**裁切宽度**，字比列宽就整段被裁掉而尺寸断言照样全绿。中英 × 900/1920 四种组合都过，因为英文那一列长一截。**另有一条是读源码文本的**：`_draw_map_caption` 的函数体里必须真的有 `_draw_joys_column(` —— 几何函数对不对和画笔有没有去调它是两件事，把那一行删掉几何断言全绿而图上重新变成空白的纸（`--headless` 一笔都不落盘，纯函数量不到调用点）。**写完先证明它会红**：删掉画笔里那一行 → 1 条红；右沿退回 `w * 0.62` → 4 条红（4 个组合各一条）；图例那一项不加上两个圆点那 44k → 4 条红
 - 改打卡流程的"这站还欠我一块碎片吗"判据前跑 `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（`station_has_fragment(i)` 是站的静态属性、`is_collected(i)` 才是玩家进度；拿前者当前者会让回访重播小游戏并谎报"获得碎片"，而 HUD 的"下一处"早就把这站摘掉了，两边对不上）
 - 改 `World3D._tint_station_roofs()` / `STATION_ROOF_TINT` 前跑 `verify_station_roof.gd` + `lookdev_journey.gd` 看 `04_ride`（填色要过 `linear_to_srgb`，写错方向屋顶比墙暗 30 倍，数字还是"暖的"，只有比值看得出来）
 - 改 `GameManager.check_in()` 里那两个闩锁 / `all_fragments_maxed()` / `_load_save()` 末尾的补齐 / `World3D._on_all_collected()` / `_on_all_maxed()` / `_spawn_synthesis_animation()` / `PostcardVariant.compute_variant()` 前跑 `verify_minimap.gd` 第 9/10 节 + `verify_postcard_ending.gd` §3b + `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（"集齐"与"走完"是两个时刻，判据只能有一个）
+- 改 `SynthesisPanel.gd` 的任何一处 / `World3D._synthesis_choice_open` / `_on_all_collected()` 的尾巴 / `_on_synthesis_choice()` / `HUDLayer/SynthesisPanel` 节点前跑 `verify_interact_latch.gd` **第 10 节** + `verify_minimap.gd` 第 9 节 + `verify_demo_path.gd` 第 1 节 + `lookdev_journey.gd` 看 `13b_synthesis_集齐二选一` 与 `13c_after_再骑一圈`。三件事一条都不能省：**第 10 节量面板本身**（两个按钮都在屏内不叠、都有 `focus_mode`、ESC 收得掉、`_all_done` 没被顺带翻过去）；**`verify_minimap` 第 9 节现在必须先选「再骑一圈」再逐站核对脚下的圈**——它原来直接接着扫，扫的时候面板还开着，`_nearby_*` 早被清成 -1，十条断言一起红，而那个红是**新行为的正确结果**，不是产品坏了；**`verify_demo_path` 第 1 节**守着 90 秒演示不被这个面板打断（`fill_finished_run()` 走直写字段不发信号，而刷满的碎片站被 `is_station_exhausted` 挡在 `_nearby_station_idx` 之外，演示里根本打不了卡）
 - 改 `Localization.gd` 里 `revisit_note` / `touch_revisit_button` / `collecting_message` / `revisit_available` / `synthesis_done_message` / `finish_run` 前跑 `verify_economy.gd`（文案扫描）+ `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`。前三句曾经一起写着"再歇一脚"——集齐之后唯一还在对玩家说的话是劝他别再跑了
 - 改 `PausePanel.gd` / 暂停面板按钮 / `go_to_end_card()` 的触发条件前跑 `verify_minimap.gd` 第 8b 节（出口在不在、零碎片时在不在、收工时评级按走过的算）+ `verify_postcard_ending.gd`（EndCard 得接得住非完满档）
 - 改 `EndCard._show_ending_choice()` / `_seed_back_text()` 前跑 `verify_postcard_ending.gd`（`keep`/`break` 的后果必须落在**正面**：留门=背面写上那句、放手=背面留白且封口的蜡掰开，两张卡片的正文必须**就是**真正会发生的那件事本身，不能另写一段描述——否则又变回"承诺一个差别、实际只改一句话"）
 - 改 `EndCard._refresh_back_thumb()` / `_grab_back_thumb()` 前跑 `verify_postcard_ending.gd`（SubViewport 回读要等两帧；节流按累计 delta 掐，headless 跑两帧等不到 0.12s，测试里必须等墙钟）+ `lookdev_journey.gd` 看 `16_postcard_back`（要打完字再拍，只拍初始帧看不出缩略图跟不跟得上）
 - 改 `EndCard._show_back_editor()` 的布局（输入框高度 / 按钮摆法 / `THUMB_BTN_*`）前跑 `verify_postcard_ending.gd` 第 3 节（量控件几何：两个按钮不叠、都在屏内、缩略图 ≥400px 宽且不遮按钮）+ `lookdev_journey.gd` 的 `16_postcard_back`——那一屏现在带**像素级**断言（暗像素占比 + 落在几条横带上 + 明暗跨度），因为尺寸对了不代表里面真有字，SubViewport 回读到空帧时预览就是一块纯色、尺寸一模一样
+- 改 `PostcardBack._message_box()` / `_wrap_text()` / `_message_font_size()` / `_draw_message()` / `_wrap_line()` / `FONT_MIN` / `FONT_MAX` / `LINE_GAP` 前跑 `verify_postcard_ending.gd` **第 3e 节** + `lookdev_postcard.gd` 看 `07_背面_留门_写上了那句` 与 `07b_背面_写满200字`（**成对看**：字号是按这块纸自动定的，字最少和写满是两种排版，只看 07 那一张，"字变大了"看着像只是把默认那句排好看了）+ `lookdev_journey.gd` 的 `16_postcard_back`。第 3e 节量的**不是**字号本身，是**玩家在编辑器那一屏上读到多高的一行字**：卡片在 SubViewport 里按 1920 宽画完再缩到预览上，所以是「卡片字号 × 预览宽 / 1920」这个乘积——卡片上写死 36px 时预览里那行只有 8.5px，而"预览宽 ≥400px"和"字号 = 36"**两条断言当时都是绿的**。三条别的：**每一行都在 `max_w` 之内**（原来的 `_wrap_line` 是"先把字放进去再看超没超"，只在空格处检查的西文会冲出去**一整个词**才收尾，实测一行 1969px vs 框宽 1792px）；**字号是放得下的最大号**（少了这条，把 `LINE_GAP` 或 `FONT_MAX` 调小到"还更空"照样全绿——和第 3d 节那条「`_caption_col_w` 没有算窄」同一个坑）；**读源码文本**钉住画笔真的调了 `_message_font_size`。**写完先证明它会红**：画笔里写死 `36` → 2 条红；`FONT_MAX` 84→40 → 5 条红；`LINE_GAP` 10→30 → 1 条红
 - 改 `EndCard._on_restart_pressed()` / `_recap_lines()` / `_recap_worth_showing()` 前跑 `verify_postcard_ending.gd` 第 8 节 + `lookdev_postcard.gd` 看 `12_回执` / `12b_recap_EN`（回执**每一条都要对着存档逐字核对**——编一条玩家没做过的事，第二趟发现根本没有，比不弹更伤；而 `go_to_gift_box()` 会 reset，所以回执只能赶在 reset 之前现算，不许另存快照）
 - 改 `World3D` 里那段路过驿站的话（`STATION_PASS_RADIUS` / `_pass_inside` / `HUD3D.show_pass_line`）前跑 `lookdev_journey.gd` 看 `05b_pass`（16 站里有 11 座的 `text` 一直只写在 road_data 里没人读；边沿触发要靠 `_pass_inside`，只判距离会让玩家停在圈里每秒重弹一次）
 - 改 `MiniGameTea` / `MiniGameZither` / `MiniGameBamboo` 等五个小游戏里的输入处理前跑 `verify_mini_game.gd` 第 5 节（五个都必须能用 ESC 取消 —— 取消按钮是 `_draw()` 画的假按钮，键盘点不到，茶最糟：既放弃不了又失败不了，键盘玩家唯一出路是干等 30s 超时）。注意 ESC 的插入位置各不相同：琴要放在示范阶段的早退之前、竹要放在 1.6s 成功停留之后（那一下不许跳）
 - 改五个小游戏里的**提示文案**或 `MiniGameBird.SHOW_DURATION` / `countdown_fraction()` 前跑 `verify_mini_game.gd` 第 6 节（先量机制、再拿文案对答案）+ `lookdev_journey.gd` 看 5 张 `minigame_*.png`。这一节的判据是"字和代码不许互相拆台"，所以改文案时不能只改文案——先确认代码到底怎么做的
+- 改 `GiftBox` 那五个过场常量（`BOX_OUT_SEC` / `ROAD_IN_SEC` / `ROAD_HOLD_SEC` / `ROAD_OUT_SEC` / `SWITCH_DELAY_SEC`）前跑 `verify_story.gd` 第 5 节 + `measure_cold_start.gd`。这五段是冷启动里**唯一**一段纯机器等待，而墙钟判据太粗：把过场调慢一秒，总时长那条（4.6s < 20s）照样绿，只有常量那条会红
+- 改 `DemoDirector.gd` 的任何一段（`RAIL_LEAD` / `APPROACH_ARC` / `PRESS_DIST` / `MINIGAME_LINGER_SEC` / `_steer()` 那一整套）前跑 `verify_demo_path.gd`（**不能加 --headless**）。这一族回归断言的是**演示真的骑了**：累计里程、到过几驿、以及小游戏有没有真的弹出来。只断言「62 秒后到了结算页」的话，`DemoDirector` 一行都不执行、驾驶员在起点站到时间到，照样全绿
+- 改 `GameManager.enter_demo()` / `fill_finished_run()` / `demo_mode` 或标题页那个「演示 · 90 秒」按钮前跑 `verify_demo_path.gd` 第 1 节（秒级）。`fill_finished_run()` 走的是**直写字段**而不是 `check_in()`：后者会把 `all_fragments_maxed_reached` 闩锁翻过来，于是 `World3D._on_all_maxed()` 当场锁死操纵权、2.5 秒后自己跳去结算页——而那时候演示还在半路
 
 ## 已知陷阱
+
+- **想量一块 3D `Label3D` 在屏上占多大，两条路都是错的，第三条才对**：
+  ①按 `outline_size × pixel_size` 反推——**描边并不按那个算米铺开**，
+  手算出来的框比真牌子高出三倍，一头顶进亭子的屋顶、另一头顶进天；
+  ②改问节点自己的 `Label3D.get_aabb()`——它给的是一个**立方体**，
+  三条边都等于那一行字的**总宽**（"起程驿楼" 4 个字 → 2.30m，
+  "花房·禽语湖湾" 7 个字 → 3.66m，y 与 z 和 x 一模一样）；
+  ③按 `global_transform` 投 8 个角——可是 **`billboard` 是在顶点着色器里转的，
+  节点的 `global_transform` 根本没跟着转**，于是牌子是**侧着**看的，
+  同一批四字站量出来的横向宽度有 8px / 27px / 38px / 75px 四种
+  （16m 外那栋楼的角度差一点就整块侧过去），竖直方向还被透视拉长近三倍。
+  **唯一对的那条**：宽度用 `Font.get_string_size()`、高度用 `Font.get_height()`，
+  都按 `pixel_size` 折成米，两根轴取**相机的 right/up**（billboard 永远正对着
+  相机），从 `g.global_position` 四周对半开。量出来的尺寸对得上算式
+  （4 字 → 74×22px、3 字 → 56×22px、7 字 → 118×22px）才算数。
+  另外 `get_font()` 在没显式设过字体时返回 **null**，要退回
+  `ThemeDB.fallback_font`——`GameManager._ready()` 已经把它换成项目的 LXGW，
+  所以那正是绘制时用的那一份。**三条错路都被同一件事判了死刑**：
+  把描边加粗到 60（一个字糊成一坨奶油）时判据照样全绿——量的是
+  "这块地方够不够有结构"，不是"这块地方有没有字"。可推广的一条：
+  **节点的包围盒不是它画出来的那块面**，凡是要量"玩家看得见的那一块"，
+  先想清楚那块面到底由什么定义
+
+- **`outline_size` 改多大都不会盖住字**：它是从字身**向外**膨胀的，而墨核
+  （`modulate` 那个颜色）永远画在最上层。实测 22px 的字身配
+  `outline_size = 60`，墨核还剩约 2px 宽的一根根竖线，一个字也没糊掉——
+  字符图打出来看得很清楚。所以**"把描边加粗"当不了任何判据的突变**，
+  它压根不改变"墨够不够多"这件事。想让字真的糊掉得改 `pixel_size`
+  （小到字核掉到 1px 以下）或 `modulate` 本身
+
+- **`Input.parse_input_event()` 的按下和松开必须分在两帧里**：挤在同一帧的话，
+  `World3D._physics_process` 里那条 `Input.is_action_just_pressed("interact")`
+  判定时这一帧已经松手了，于是打卡分支一次都进不去——车停在站前、空格按了
+  十几下、世界一点反应都没有，**控制台一行红字都没有**。`DemoDirector._send_space()`
+  第一版就是这么写的，62 秒里按了十几次空格、碎片 0 块，看起来像"演示不会打卡"。
+  判据：注入的按键要按住若干帧（`DemoDirector` 用 80ms）再松。
+  同族的另一头见下一条——`parse_input_event` 和 `root.push_input` **不许同时用**，
+  两条路都走会让一次按键被 `_gui_input` 收到两遍
+
+- **16 座站全都摆在离中心线 18m 处，而 `STATION_PASS_RADIUS` 是 15m**：
+  也就是说**贴着中心线骑，一座站既"路过"不了也靠不近**——`on_station_pass()`
+  和 `_nearby_station_idx` 用的是同一个半径。实测一整圈里离最近一座碎片站的
+  最近距离是 21.9m，到过的驿是 1 座、碎片 0 块。打卡是要拐下路、把车骑到亭子
+  跟前去的，那正是玩家做的事；任何"沿中心线自动骑"的自动化（`DemoDirector`、
+  录制回放、以后的自动导览）都必须显式把站点当目标，否则它会在一条永远
+  够不着的路上空跑一整圈
+
+- **`Player3D` 的转向速率按速度缩放，所以"转弯时松油"是个死锁**：
+  `turn_factor = clamp(|speed| / 3.0, 0, 1)`，`abs(_speed) <= 0.5` 时直接为 0。
+  于是"误差大 → 松油 → 停住 → 更拧不动"——第一版 `DemoDirector` 骑了 0 米。
+  只能**降速不能停**：用占空比（拧不过来时 1/2），车永远在动、转向一直有效。
+  而占空比的下限是 1/2，试过"误差大就用 1/4"：开局车头歪着（出发点上前视点
+  在侧后方 152°），25% 的油门攒不起速度、速度不够就拧不动，62 秒只骑了 8m。
+  **对准了就是满油**——占空比是用来拧把的，不是用来巡航的
+
+- **「一个体验问题」和「一把量错的尺子」在日志里长得一模一样**：冷启动曾经被记成
+  「65 秒」，然后当成 P0 排进计划。写了 `tools/measure_cold_start.gd` 重量，
+  真值是**连打 4.6 秒 / 人读 6.2 秒**——从来没有接近过 65 秒。错在
+  `play_newcomer.gd`：空格**只在 `dlg.visible` 时才发**，而操作说明面板不是
+  `DialoguePopup`，于是玩家站在面板前的那几秒里一次空格都没发出去，
+  `_can_move` 也不可能变真，循环注定跑满 40 秒预算并报「按了 0 次空格、40.0 秒」。
+  计时还叠了一层 `t += 0.016`（帧率不等于 60 时低报）。教训：**先问这把尺子
+  凭什么能通过**，再问被测的东西有多慢——一个恒等于预算上限的读数根本不是读数。
+  新工具走的是玩家真按的那条路（`StartBtn` → `change_scene_to_packed` →
+  World3D → 操作说明 → 序章）；旧脚本把 `GiftBox` `queue_free()` 掉、自己
+  `instantiate()` 出 World3D，**把整段过场动画绕过去了**，量不到该量的东西。
+
+- **「两个字符在字体里长得不一样」不等于「玩家分得出来」**：顶栏那三个音频开关
+  原来用 ♫(BGM) / ♪(音效) 区分，字符串判据（`"♫ 开" != "♪ 开"`）**全绿**——
+  它本来就该绿，两个码位不同。而 `Font.has_char(0x266B)` 也报 true，单独放大
+  到 64px 渲染，那根横杠画得清清楚楚。问题全在**字号**：顶栏按钮是 18px，
+  那根横杠在这个尺寸下是亚像素的，两个按钮读起来是同一个东西。
+  第一版把它记成「字体缺字形、回退成 ♪」——**那个诊断是错的**，写进注释里
+  差点就成了下一个人的前提。判据是"在实际字号上还剩多少差别"，那只有图能量：
+  定妆照 `04_ride` 的右上角裁出来放大 5 倍才看得出差一根线。
+  改法是换成词（`bgm_short`「乐」/ `sfx_short`「效」），
+  `verify_mood_mask.gd` 的 `_audit_audio_buttons()` 现在多钉一条：
+  区分用的那个字符必须是**字**（CJK / 拉丁字母），不是符号。
+  做过变异验证（把 ♫/♪ 填回去）：新判据两条红，原来那条字符串判据**照样绿**。
+  可推广的一条：**断言要量玩家用的那个量**——"两个值不相等"和
+  "这两个值在 18px 上分得开"是两个量，而后者量不到的时候，
+  至少要把判据写成后者能被代理的形式（"用字，不用符号"）。
+
+- **界外的草地不是"难走一点"，是一堵压过油门的墙**：`World3D._apply_boundary_force()`
+  离路心线 `SOFT_BOUND`(12m) 之外就开始往回推，而 `Player3D.ACCEL` 只有 8.0 m/s²
+  ——推力在 **21m 之外就压过自行车自己的加速度**了。推的方向是**位置**的修正，
+  不是速度，所以车不会停、只是每帧被往回搬一截。实测一辆满速 15m/s 的车在
+  27m 处**正好被钉住**：油门每帧走 0.25m，边界力每帧也搬它 0.25m，两股力
+  精确抵消，于是"距目标 132m"三分钟一动不动，闩锁现场每一条都是放行的。
+  这个坑量过两次才认出来，而两次的症状都是"车不动"：第一次量到的距离是
+  **一条直线**（脚本横穿草地直奔下一站），把"这辆车开不过草地"当成了
+  "这辆车坏了"；第二次读数是沿路走的（`_road_waypoints()`），才定位到推力公式。
+  真人不会横穿草地——小地图上画的就是路——但这也说明**路外那一圈草地没有任何
+  理由让玩家进去**，而它现在不但进得去，还进去就出不来。回归验证：无（这一族
+  全靠 `play_newcomer.gd` 那把尺子量出来，几何断言量不到"推力大于加速度"）。
+  可推广的一条：**"这辆车怎么不动"要先问它想去哪**——推力、转向、油门三者
+  里只要有一个的作用方向和意图相反，症状就长得和"卡住"一模一样。
+
+- **`t += 0.016` 和 `t % 0.3 == 0` 是同一个错误的两种写法**：前者把「一帧」
+  当成 1/60 秒（本机带窗口能跑 280+ FPS，只低报不虚报，所以错得不容易发现）；
+  后者是浮点累加撞精确等号，**一次都撞不上**，于是「每 0.3 秒按一次空格」实际
+  是「一次都没按」。两种都表现为「时间过去了但什么都没发生」，都不报错。
+  带 `await process_frame` 的循环里一律用 `Time.get_ticks_msec()`。
 - **「按钮能按」这件事有三道独立的门，缺一道键盘玩家就卡在那一屏**：一个
   Button 要能被键盘激活，得同时满足 ① 它 `focus_mode != FOCUS_NONE`；
   ② 视口里**确实有**焦点落在某个控件上（`Viewport` 只把按键投给 key focus 的
@@ -463,6 +825,37 @@ echo. > .editor_mode
   `km / 公里 / kilometer / kilometre / K0 / K188`——**关键词要查全**，只查 "km" 会漏掉
   中文的「公里」（第一版就漏了 `onboarding_subtitle` 的「沿188公里环形路线」）；
   英式拼法 "kilometre" 也不是 "kilometer" 的子串（e 和 r 换了位置），得单独列一条。
+
+- **「这处该用项目的字体，可它写的是 `ThemeDB.fallback_font`」是个看着成立、
+  其实不成立的缺陷**：`GameManager._ready()` 第 111~112 行就把
+  `ThemeDB.fallback_font` 整个换成了 `res://assets/fonts/LXGWWenKai-Regular.ttf`，
+  所以全工程任何一处 `ThemeDB.fallback_font` 在运行时**就是** LXGW。
+  评审意见里那条「提示文字用的不是项目字体」就是这么来的：只读
+  `CheckInPrompt._draw()` 那一行，看到 `ThemeDB.fallback_font` 就判了不一致，
+  而看不到另一个文件里的那一行替换。
+  **凡是「A 处的默认值被别处覆盖了」这类判断，先跑一行代码把运行时的值读出来**
+  （`print(ThemeDB.fallback_font.resource_path)`），再决定要不要改。
+  同族：`Localization` / `Postcard` 那些「值和别处对不上」的怀疑，也要先确认
+  那个值到底是不是真的被谁在运行时改掉了。判据是**跑出来的**，不是读出来的。
+
+- **驿站占地是从模型量出来的，不是手填的一张表**：`MeshInstance3D.get_aabb()`
+  读的是网格自己的局部盒，**既不含节点上的缩放也不含旋转**——驿站统一乘
+  10~14 倍，直接拿它当占地，半径会小一个 `scale`（最大那座差 7 倍）。
+  `_measure_station_aabb()` 把「站 → model → 网格」这一串变换逐级乘起来才量，
+  而量出来的 16 个半径是 3.43~9.40m，随模型改而改。
+  **别为了"省事"把它抄成 `STATION_GLB_CONFIG` 里的一个字段**：那是 16 个数里
+  迟早有一个跟模型对不上的那种表，而对不上的时候玩家骑进亭子里、没有任何回归会红。
+  同族的教训：**这一圈墙必须在半径小于 `STATION_PASS_RADIUS`(15m) 的前提下成立**，
+  所以任何"把余量调大一点"的改动都要先看那条断言。
+
+- **`Player3D` 没有碰撞求解器，所以世界的墙只能是硬推出**：
+  它每帧 `position += forward * _speed * delta`，不走 `move_and_slide`。
+  15m/s 下一帧 0.25m，任何"软力推开"都拦不住——`_apply_boundary_force()`
+  用软力是因为路边界在草地外面，推不推玩家都无所谓；
+  而亭子是实心的，推不动就意味着车在里面、相机在里面。
+  所以 `_apply_station_keepout()` 是**直接把位置摆回边界**，
+  并且必须配一道 `damp_speed()`：位置摆回去了而 `_speed` 还在，
+  车每帧被推出去又每帧往里冲，玩家看着像卡在墙里抖。
 
 - **`Transform3D.scaled()` 会把 origin 一起缩放**：它不是"只缩 basis"，
   `Transform3D(basis, pos).scaled(Vector3(s,s,s))` 的 origin 会变成 `pos * s`。
@@ -656,6 +1049,54 @@ echo. > .editor_mode
   被推走。所以入账提示走独立的 `_lvbi_toast`（挂在 HUD3D 上、绝对定位、不进
   HBox），余额标签一个字都不动。别图省事把它改回去。回归验证：`verify_mood_mask.gd`
   第 7 节直接量三个标签的 `get_global_rect().position.x`。
+  **同一条陷阱还有一个没被绕过的后果**：正因为不能碰 HBox 里任何一个 Label 的
+  最小宽度，"给『下一处』单独加一块深色底板"这条路是**堵死的**——`StyleBoxFlat`
+  会把 Label 的最小尺寸撑大，于是它右边什么都没有了也会把整排标签推走。
+  要单独垫底只能走绝对定位的兄弟节点（`_lvbi_toast` 那种），代价是那个底板
+  不会跟着 HBox 排布移动。顶栏对比度最后是靠**抬高整条衬底的实底段**解决的，
+  不是靠给单条标签垫板。
+
+- **容器"排到哪"由它自己声明的 rect 决定，而子节点溢出它时没有任何人会吭声**：
+  `World3D.tscn` 里 `TopBar/HBox` 写的是 `offset_right = 480`（468px 宽），
+  而它那五个标签要 ~663px——于是 **~195px 静默溢出**（`Control.clip_contents`
+  默认 false，没有任何报错、没有一条回归看得见），顶栏排到哪里从此由**那行字此刻有多长**
+  决定，右端永远悬在半路，衬底比字宽出几百像素，图上读成一条黑带。
+  可推广的一条：**量"排版占满了没有"要量容器自己的右沿和最后一个子节点的右沿之差**，
+  别只量子节点互相不叠——**互不叠和没留死区是两件事**，而后者才是玩家读得出来的那个。
+  而宽度会变的顶栏，正确做法是让容器说实话（`anchor_right = 1.0`，
+  `offset_right = -(TOP_RIGHT_W + TOP_RIGHT_GAP)`）并把长度变化全交给
+  **心神和「下一处」之间那个 `SIZE_EXPAND_FILL` 弹簧**（`custom_minimum_size.x = 0`），
+  于是顶栏右端钉死在按钮排左边 16px，无论那行字多长多短。
+  同族的第二个坑：**「没有目标」不等于「没有话说」**。`fragment_station_needs_visit()`
+  五座都还清就返回空字典，`_update_next_label()` 那个空分支原来写的是 `text = ""`，
+  于是刷满之后（也就是玩家最该看着那一栏的 2.5 秒）整条空掉；数字上没有任何回归
+  看得出问题，因为"空串"和"该有话"在断言里长得一模一样。现在写 `hud_all_done`。
+  回归验证：`verify_mood_mask.gd` 第 10 节（三条判据：容器不许溢出自己的右沿 /
+  一直伸到按钮排左边 /「下一处」和按钮排之间没有空档）+ `verify_minimap.gd`
+  第 10 节末尾（刷满后那一行不是空的、且报的是那句收尾）。两处都做过删除突变，
+  改回去分别红 2 条
+
+- **顶栏背后最亮的是正午的天，而它比那行金字本身还亮**：
+  实测 `12b_day_正午.png` 里衬底之外的天 ≈ sRGB(198,210,237)、相对亮度 0.642，
+  而顶栏米金 ≈ (245,200,126)、0.621。所以「把衬底调暗一点」这个直觉**没有出路**
+  ——衬底本来就是接近黑的 (#07080C)，再调暗它也压不住一个更亮的背景。
+  唯一能动的是 alpha：合成亮度 = a·0.0069 + (1-a)·0.642 ≤ 0.099 才够 AA 的
+  4.5:1，解出来 **a ≥ 0.855**，所以 `SCRIM_TOP_ALPHA` 是 0.90。
+  旧版 0.46 的纯 pow 渐变实测只有 **1.22~1.36:1**，字在天上等于没写——
+  而 `verify_mood_mask.gd` 当时全绿，因为它只断言"两层 alpha 有先后"，
+  从没量过合成之后到底看不看得见。
+  连带一条：**实底段必须盖住整条文字行盒，不只是字形**。18px 的字在
+  `SCRIM_H`(62px) 里占到 t≈0.23~0.61，行盒比字形高、下面一截是降部留白；
+  按字形量出来是 0.23~0.52，按行盒量出来是 0.23~0.61，而 `SCRIM_SOLID_FRAC`
+  要按后者取（现在 0.68）。回归验证：`verify_mood_mask.gd` 第 9 节。
+
+- **算 WCAG 对比度时"谁除以谁"必须取 max/min，不能假定合成后一定更暗**：
+  第一版把比值写死成 `(合成+0.05)/(字+0.05)`，而合成是暗的、字是亮的，
+  于是每个比值都小于 1，最差那行报出 **0.18:1**——看着像灾难，
+  真值是 1/0.18 = 5.6:1，方向反了而已。
+  教训是可推广的：**归一化对称的量才会出现这种"红得没有道理"的失败**，
+  所以判据要写成单边的「≥ 4.5」而不是「比某个值小」，
+  并且失败时先确认自己要断的是哪一边（同 `verify_minimap.gd` 那条"别把极性写反"）。
 
 - **"下一处在哪"现在有三个地方在说，判据必须逐字一致**：
   顶栏 `HUD3D._next_fragment_target()`、小地图 `MiniMap._next_frag_idx()`、
@@ -696,6 +1137,29 @@ echo. > .editor_mode
   回归验证：`verify_minimap.gd` 第 9/10 节（集齐后整圈逐点对三处指示器 + 站到每座
   碎片站前核对"还差 N 次"两处同数 + 刷满才 `_all_done`）。
 
+- **"空着的一块"和"被排满的一块"是同一个量，量排版要量到边缘去**：
+  明信片抬头的右三分之一约 880×410px 一直是空白的纸——五个到访次数挤在
+  「已过 n/16 驿」底下那一行，剩下什么也没有，而这是玩家**唯一带走**的那张卡的抬头。
+  挪成右半一列五行之后那一带才排满，连带「每处去过三次、于是五件乐事轮换着来」
+  这件玩法上最要紧的事第一次在卡上读得出来。
+  可推广的一条：**凡是"一块该有东西的地方现在是空的"，先量"这一块的右沿到
+  版面右沿还有多远"，再想内容**；只量"东西之间有没有互相压到"的话，
+  一整块空白是"排得很整齐"的满分答案。
+  同一族的第二条：**右对齐的 `draw_string` 那个宽度是**裁切**宽度**，
+  字比它宽就整段被切掉——所以"排得下"必须量 `get_string_size()` 而不是量列宽。
+  第三条：**几何纯函数对不对，和画笔有没有去调它，是两件事**。
+  把 `_draw_map_caption()` 里那行 `_draw_joys_column(...)` 删掉，
+  第 3d 节那三十几条几何断言**全绿**（`--headless` 一笔都不落盘），
+  而图上重新变成空白的纸——所以这一族照 `verify_mini_game.gd` 第 6g 节的读法，
+  另加一条**读源码文本**的判据钉住调用点。回归验证：`verify_postcard_ending.gd`
+  第 3d 节（中英 × 900/1920 四种组合 + 那条读文本的）。三条突变都做过：
+  删掉画笔里那一行红 1 条、右沿退回 `w*0.62` 红 4 条、图例那项不加算那 44k 红 4 条。
+  顺带记一条**做突变时才发现的**：把左列的宽度按**这一趟的实际驿数**算而不是
+  按最宽情形算，**没有一条断言会红**——因为图例那一行本来就比驿数那行宽。
+  这不是断言漏了，是那个改动在当前字号下确实无害；而它也说明
+  「拿同一个 helper 自己的输出去断它算得对不对」是**恒真**的，
+  判据必须在测试里**把那几行字各自量一遍**
+
 - **拿掉一条结束路径，就得补一条出口**："集齐即结算"换成"刷满才结算"之后，
   这一趟**原本没有任何玩家可主动喊停的出口**——暂停面板里只有「重新开始」，
   而它走 `go_to_gift_box()` → `reset()`，把 `collected` 一起清掉。后果是
@@ -703,6 +1167,31 @@ echo. > .editor_mode
   玩家只剩从头再骑一遍。修法是在 `PausePanel` 里加「结束这一趟 · 收下明信片」，
   零碎片时不出现（那时候做出来的是空卡，EndCard 上没有任何说法）。
   **凡是删掉"到某个状态自动结束"的地方，都要回头问一句：那件事现在还能不能做完？**
+
+- **"离地多高"和"看得见"是两件事，而碑面下沿的地面不是 y=0，是石台顶**：
+  交叉点那块碑原来石台 0.95m、石板下沿落在 0.16m，于是 0.79m 的石板和
+  整行题字**埋在石头里面**。图上是一个闭环加一条尾巴（下瓣被石台沿齐刷刷切掉）、
+  题字一个字没有，而包围盒、刻线逐点对拍、面朝向、段数**四十条里三十几条全绿**——
+  4.1 那条断言写的是"离地 y=0 超过 0.05m"，量的是土，从来没量过石台。
+  可推广的一条：**判"这个东西玩家看得见吗"，要量的是它和最近的遮挡物之间的距离**，
+  不是它和坐标原点的距离；而碑、房子、箱子这类东西，脚下往往有一块**比地面高**
+  的基座，那块基座才是遮挡的下沿。对策两条：把"抬多高"写成 `static func face_lift()`
+  从基座高度**算出来**（写死 `PLINTH_H + 0.20` 就是一个雷：碑面高矮一动，
+  题字就悄悄埋进去），以及回归里补一条**离基座顶**的判据。
+  变异验证：把 `face_lift()` 换回旧的那个写死值，4 条立刻变红。
+
+- **"低头才看得清的那一档，恰恰是最躺的一档"**——这两条要求在一块石头上
+  是打架的，而当时没有人发现，因为两边各自都成立。那块碑原来后仰 40°，
+  理由写着"站着低头就正对着脸"；量过之后：1.94m 的面后仰 40° 竖直跨度只剩
+  1.49m，为了让下沿不埋进石台就得整体抬高 1m 多，碑顶顶到 2.9m——于是
+  玩家得**仰头**，而仰头那一刻正好看到石板的一条窄边。两条要求各自都能找到
+  数字支持，合起来是一个谁也读不到的东西。可推广的一条：
+  **量"可读性"要量玩家的眼睛到目标的连线（目标心离地 vs 眼高 1.6m、
+  目标顶 vs 仰头阈值），不是量一个描述设计意图的角度**；
+  凡是"为了让 X 更 Y"而设的旋钮，先问一句"这个旋钮是让 X 更 Y，还是让 X 更不像 X"。
+  顺带一条关于断言：把 "tilt ∈ (20°, 60°)" 换成 "tilt ∈ (5°, 25°)" 时，
+  那条断言守的东西整个变了（从"要仪式感"变成"要能读"）——**改断言的极性
+  要连理由一起改**，否则下一个读代码的人会以为那条守着的是原来那个意思。
 
 - **`.tscn` 里没有 `[connection]` 段的信号 = 从来没连过**：`PausePanel._on_visibility_changed()`
   写了三年（`World3D.tscn` 的 PausePanel 节点上并没有对应的 `[connection]`），
@@ -723,6 +1212,34 @@ echo. > .editor_mode
   那一节量的是一个不存在的世界。它走的是真的 `GameManager.check_in(i)`。
   同理要等 `_on_all_collected` 的 2.5 秒动画放人（`create_timer(3.2)`），
   而第 10 节（刷满 → `go_to_end_card()` 换场景）必须放在整个测试的**最后**。
+
+- **一条闸的断言可能因为"它自己的前提从没成立"而恒绿，删掉闸也拦不住**：
+  `verify_interact_latch.gd` 第 9 节的场次间隔闸（`VILLAIN_MIN_STATION_GAP`）
+  第一版删掉闸之后照样全绿——量的是"第 3 场没排上"，而那一版测试只把
+  `seen` 顶到 11，`VILLAIN_SCENES[2]["seen"]` 是 12，所以第 3 场**压根没武装**，
+  无论闸在不在它都不会排上。断言绿是因为它量了一个不存在的东西。
+  同一条测试里还叠了第二个坑：`while _world._villain_playing` 是在
+  `_villain_playing` 变 false 的**那一帧**退出的，下一场要等下一个
+  `_physics_process` 才起播，不等的话量到的是"还没轮到它"而不是"被闸挡住了"。
+  对策两条：断言前先钉一条**只钉前提数量**的断言（驿数 ≥ 第 3 场自己的阈值），
+  而且**不要把 `armed` 写进前提**——它此刻为 true（被闸挡住）或 false（已经起播）
+  两种都是对的；以及推完场之后 `await create_timer(0.5)`。
+  回归验证：`verify_interact_latch.gd` 第 9 节（两道闸都做过删除突变，删任一道都必须红）。
+
+- **`lookdev_journey.gd` 看不见反派戏，所以新增的入场提示差点只有数字守着**：
+  这份脚本为了拍后面的集齐屏，末尾会把 `_gm.seen_villain` 顶到 3——于是
+  中间整段流程里三场反派戏一次都触发不了，而"手机响了。"这行字是压在
+  玩家正看着的骑行画面上的新东西。第 13 节现在自己上膛第 0 场
+  （补足 4 座驿 → `_villain_armed` 全开 → `_teleport_open_road()`）再拍 `04b`。
+  两个连带要求：**瞬移完不能同一帧就断言 `_villain_playing`**（判定在
+  `_physics_process` 末尾），以及**拍完必须把整场推完**——不还相机的话
+  后面每一张都停在被冻住的镜头上。
+
+- **一次只排一场的闸，值记的是"上一场开演时的驿数"而不是"上一场结束时"**：
+  `_villain_last_play_seen` 在 `_play_villain_scene()` **开头**就写，而闸在
+  `_try_villain_scene()` 里比的是 `seen < _villain_last_play_seen + GAP`。
+  写"结束时"看起来更对称，其实会把对话时长算进间隔里——玩家读三场对白
+  花了十几秒，闸却以为他一秒没停，于是刚读完第三场就又开第四场。
 
 - **五件碎片的颜色/图标/标签必须同序，且只许有一个出口**：
   `Postcard.gd` 原来在 `VARIANT_LAYOUTS` 里把颜色和 slot 下标一起手抄了一份，
@@ -811,6 +1328,41 @@ echo. > .editor_mode
   **教训：改天色之前先探一下 `env.sky.sky_material` 是不是 null，别照着 .tscn 里的
   键名推断那个资源还在**——`verify_day_cycle.gd` 现在把"场景自带的天空是空的"
   当成一条前提断言守着，正是因为这个前提一旦悄悄变回非空，上面整套推理就全错了。
+  **它的下游还有一条**：天色一旦真的建出来了，`verify_mood_mask.gd` 第 9 节
+  声明的「顶栏衬底的最坏背景」就不再等于正午那档天实测出来的颜色了
+  （它那个数是按"天是一整片 sRGB(198,210,237)"量的，而换成渐变之后衬底底下
+  那一行只有 0.16 的相对亮度）。那条数**不许因为"实测值变好看了"就往下调**——
+  `SCRIM_TOP_ALPHA` 取 0.90 的唯一理由就是它；`lookdev_journey.gd` 里那条
+  跨脚本断言（衬底底下那一带比声明值暗）就是防这个的。
+
+- **"我照着显示器调了个颜色，结果渲出来不是那个颜色"——先问它是不是要自己转色彩空间**：
+  `ProceduralSkyMaterial` 的天空色在引擎里是**辐照度**、直接当线性值送进着色器，
+  不像普通材质那样帮你从 sRGB 转一遍。而 `DayCycle` 那六个 `DAY_SKY_*` /
+  `DAY_GND_*` 常量是照着显示器写的 **sRGB**。于是 `DAY_SKY_HORIZON`
+  =(0.72,0.85,0.97) 这个"看着是淡青白"的数，渲出来是 sRGB(0.87,0.94,0.99)、
+  **几乎就是白的**；天上最亮的那一片进到 AGX 的高光肩之后又被去一次饱和，
+  于是整片天读成**一张一整片的灰蓝纸**：骑行视角下（仰角 0~22.5°）
+  从天顶到地平线只有 **8%** 的亮度差。
+  **第二个成因是场景的雾画天**：`fog_sky_affect` 原来 0.3，而雾色是
+  (0.88,0.92,0.98) 那一档近白，于是材质自己的蓝先被雾洗掉一层。改成 0 之后
+  同样那六个常量渲出来的带内落差从 8% 涨到 15%。
+  两处都改（常量走 `srgb_to_linear()` + `fog_sky_affect = 0`）之后是 **37%**，
+  而正午那行渲出来 sRGB(92,114,205)、黄昏那行 sRGB(118,5,8)。
+  连带两条：① **`lerp` 要在 sRGB 空间做、换算放最后**
+  （`DAY_SKY_TOP.lerp(DUSK_SKY_TOP, t).srgb_to_linear()`）——在线性里插那 9 秒的
+  交叉淡入中段会塌成一团发灰的泥；②**断言要问"线性空间里的反差"而不是
+  常量自己的反差**：按未换算的 sRGB 数值算出来是 0.39，看着已经很够，
+  而画面上一片平，因为 AGX 压的是线性那一头。这就是"量玩家用的那个量"的又一处。
+  回归验证：`verify_day_cycle.gd` 第 2b 节（成因：`fog_sky_affect == 0`
+  与白昼档线性反差 ≥ 0.50）+ `lookdev_journey.gd` 那五条天带像素断言（结果）。
+  同族已经栽过两次：`FarRidge` 的顶点色（AGX 那条）、GLB 的 `baseColorFactor`
+  到 `albedo_color` 是过 `linear_to_srgb()` 的——**三个方向的换算都发生过，
+  而它们各自只在自己的文件里写着**。
+  第三条同族教训，写在这次上：**同一个取样框上的两个判据不一定量的是同一件事**。
+  判"天有没有层次"量的是两端之差（0.10 与 0.22 两行，第一版一次就量对了），
+  判"天是不是蓝"量的是单行色相——而第一版让两条共用同一行，取到的是**设计成
+  近白的地平线霾**，于是"天蓝不蓝"恒红而"天有没有层次"恒绿。取样框对了不代表
+  每条判据都对，这两条得分开取样（`SKY_HUE_ROW` vs `SKY_ROWS`）。
 
 - **压低太阳不等于天要暗，光强也得降**：黄昏那档只把仰角从 38° 压到 9°、能量从
   1.1 降到 1.05，渲出来是一片亮黄油的草配一层灰粉的天，读成"下午起了雾"。
@@ -952,6 +1504,23 @@ echo. > .editor_mode
   预览的高度是从按钮下沿反推的（`THUMB_BTN_Y_FRAC` / `THUMB_BTN_H` 是文件级
   常量，摆按钮和摆预览两处各写一份必然漂）。回归验证：
   `verify_postcard_ending.gd` 第 3 节 + `lookdev_journey.gd` 的 `16_postcard_back`。
+  **这一条的前半段（宽度）修完之后，字号还是那个病**：卡片上 `font_size := 36`
+  写死，预览从 200 加到 452 之后那行字也只有 `36 × 452 / 1920 = 8.5px`——
+  "预览 ≥400px 宽"和"字号 = 36"**两条断言当时都是绿的**。可推广的一条：
+  **凡是"原尺寸画完再缩下来"的那一族，可读性是个乘积（源上的字号 × 缩放比），
+  量任何一个因子都量不到它**，两个都得量。而缩放比里那个宽度上限
+  （`minf(vw * 0.36, 460)`）在 720p 上**根本不生效**——高度那道约束先卡住，
+  于是"把上限调大"对多数玩家是零效果，而 headless 量到的偏偏是上限那一档。
+  同族：**"纸上还空着"要当病治**。写死的 36 让 200 字只占框高的三分之一，
+  剩下的空不是留白而是没人用；改成从 `FONT_MAX` 往下找第一个放得下的号之后，
+  短句顶到 84px、写满 200 字落到 60px，两头都填满框。判据里必须有"最大号"那一条，
+  否则把 `LINE_GAP` 或 `FONT_MAX` 调小到"还更空"也照样全绿。
+
+- **断行必须"先试着放，放不下再收尾"，不能"先放进去再看超没超"**：
+  后者只在**断行点**（空格 / 逐字的 CJK）上检查，于是西文那一行会冲出去
+  **一整个词**才收尾——实测一行 1969px 而框只有 1792px，右端那一截被框沿吃掉。
+  中文不受影响（逐字都是断行点），所以**只拿中文当样本的话这条永远是绿的**。
+  对应的断言要写成 `每一行 ≤ max_w`（量成品），而不是"断行函数被调过"（量过程）。
 
 - **「抉择有后果」这件事要落在玩家真正带走的那张 PNG 上**：
   明信片正面才是产物（`_postcard_export` 才是导出的那张），背面那句预填
@@ -1024,3 +1593,128 @@ echo. > .editor_mode
 	`running`，所以**这一条没量到**，别当成已验证。
   · 附带：全程只用键盘（空格）就能从标题走到骑行——`ui_accept` 在 Web 上是通的，
 	`_bind_ui_accept_to_physical()` 那个修法确实管用。
+
+- **"水关得住"靠的是地形高程被 clamp 在 [-3, 6] 这件事，不是靠把岸修陡**：
+  `TerrainBuilder.natural_height_at()` 把自然高程夹在 **-3.0**，而全场 31% 的采样点
+  正好压在这个下限上（一片望无际的平地）。所以水位放到 -3.0 以下之后，
+  全场低于水位的就只剩挖出来的三只碗——碗沿处碗深归零、高度回到自然地形，
+  必然高于水位。于是"水会不会漫出去"不再取决于地形坡度，而恒等于否。
+  第一版按"碗心实挖高程 + FILL×碗深"逐碗定水位，实测**每一处都有几十度角在两倍盆沿
+  之外还没露出岸**：这条路的地形在几十米尺度上就有几米落差，水位按碗心定，
+  顺坡的一侧永远追不上岸，水面在半空中被切断——天上飘着一片蓝。
+  别把 `WATER_LEVEL` 调回 -3.0 以上；调回去之后所有几何断言照样绿，症状只在图上。
+
+- **碗心要挑"碗底足迹平均高程最低"的那处，不是"最低的那一点"**：
+  水面盖住的是"自然地形减去碗深之后低于水位"的那一圈，所以好不好看取决于
+  **整片碗底的自然高程平不平**。只挑最低的点会挑到陡坡的下缘：湖顺着下坡摊开、
+  上坡一侧露成一大片干土，水面半径从 7m 拉到 29m 的月牙。第一版正是这么写的，
+  而上面每一条几何断言都照过——分不出"湖"和"土坑围着的一小滩蓝"。
+  真正的判据是**水面盖住碗的百分比**（现在门槛 55%，实测 58/66/66）：
+  门槛第一版取 45%，而退回到"沿 away 推固定距离"之后量到 42/46/50——
+  45% 只拦得住最差的那一处，**三处里两处照绿，等于门槛定在了噪声里**。
+  同族的一条：量这个百分比只准扫**这只碗自己的**水面顶点，拿全部水体一起扫的话
+  别处的顶点偶然落在这条射线上就会算进来。
+
+- **碗是椭圆，岸线的搜索上限就不能是 `radius`**：`Water._shoreline()` 第一版拿
+  `radius` 当每个方向的搜索上限，于是 `squash = 3.2` 的溪在 22m 处被齐腰剪断——
+  碗其实一直伸到 70m，水面边缘成了一条**悬在半空里的直线**。正确的上限是
+  "沿这个方向走到盆沿还有多远" = `r / |(dir·along)/squash, dir·away|`。
+  这条是 `probe_water.gd` 报的"有几个角找不到岸"从 22 降到 0 才发现的，
+  而那 22 个角当时没有任何一条断言在管。
+
+- **`ripple_amp` 是法线的**倾角**，不是波高**：`wave()` 三个正弦加起来归一到 ±1，
+  在 `e = 0.4m` 那一步上 |Δh| 的上限约 0.82，所以 amp 就是法线偏离竖直方向的角度。
+  原来的 `7.0` → 约 80°，渲出来是一片**锡纸**：满屏高光白斑、倒影全碎、
+  水面读成泳池底，掠射角下"这是水"那个最强的信号反而被自己毁了。0.60 → 约 26°，
+  平静的湖面，而"水面一直在动"这个信号在 26° 上已经足够。
+  **没有任何无头回归能量到它**（不编译着色器），只有 `lookdev_water.gd` 的图能。
+
+- **判"哪些像素是水"不许靠颜色猜**：第一版判据是"偏蓝且不亮"，当场废了两次——
+  只判偏蓝时**整片天都算成水**（天本身就是亮的青蓝），"水跑到天上去了"那条永远红
+  而真正该量的量不到；补上"不亮"之后天顶那片深蓝的亮度又掉进阈值里。
+  靠颜色猜"这是水"，量到的是**天空长什么样**。现在每张拍两遍：第一遍把三片水换成
+  一片不受光的洋红量它遮住哪些像素（纯几何，谁也不用猜颜色），第二遍换回真材质量观感。
+  而**掩膜的判据要比通道之间的差距而不是绝对值**（`r > g + 0.18 且 b > g + 0.12`）：
+  绝对阈值量的是那个色号在 AGX + 雾之后落到哪一档，而那正是被 tonemap 挪动的那几档——
+  第一版的 `r > 0.45 and b > 0.45 and g < 0.35` 配着没关雾的材质，四张图全部量到
+  **0 个像素**而三条断言照样打印 PASS。掩膜材质还要 `disable_fog = true`，
+  场景那层雾的 `fog_light_color` 几乎是白的。
+  同族提醒：掩膜空的时候"水没跑到天上"那条会**空过**（没有像素就没有违规），
+  它是被同一张图里"看得见水"那条兜住的——两条必须成对写。
+- **回归把测试数据写进 `res://layout.json`，污染的是**整个世界**：这个文件不是测试夹具，
+  是关卡编辑用 Ctrl+S 存下来的成果，而 `World3D._setup_stations()` / `VegBuilder.setup()`
+  启动时真的会读它。第一版 `verify_layout_editor` 往上面写了自己的样例数据
+  （两座驿站摆到 `(1,2,3)` 和 `(-2,0.5,4)`，相隔 3.2m）然后 `clear()`，一个断言都不打。
+  它留在盘上之后**每一次**跑回归，世界都被摆歪：路过那一带一次发两份旅币
+  （`on_station_pass` 只按站号去重，两座站都在 15m 圈内就各发一次），
+  "到过 N 驿"一次涨 2，于是郑铎三场在"才 3 驿"时就开演。
+  症状全在 `verify_shop_world` 上（两条红），而根因在一条没人跑过的、
+  已经删除自己的回归里——**报错的文件和出问题的文件不是同一个**。
+  现在两道防线：`verify_layout_editor` 自己备份/还原，
+  `check_all.sh` 在整轮跑之前再存一份、跑完还回来；本来没有就还它没有。
+  顺带一条判据：凡是有回归会写**产品输入**（存档、layout.json、导入缓存），
+  跑完之后必须回到跑之前的状态，而"跑完检查一下"不算——脚本中途抛异常就还原不了。
+
+- **`road_data` 的 `dialogue` 和 `dialogue_en` 是两份手抄的数组，不是同一份数据的两种语言**：
+  原来 `verify_story.gd` 只查"两边都非空"，于是中文加到 3 句、英文忘了加（或者反过来）
+  时**没有任何一条回归会红**——少的那句是个合法的非空数组，
+  中英 key 集合照样逐字相同（那两项查的是 `Localization.STRINGS`，不碰 `road_data`），
+  而英文玩家在首访对白里就少读一句。这一族的判据是"两份副本的**形状**要对上"，
+  不是"它们都在"。现在钉的是句数一一对应 + 逐句不重复（相同即漏译）。
+  两条断言都做过变异验证：删掉一整句英文 → 红；把一句英文原样填成中文 → 红。
+  顺带：删掉一句英文里的**半句**两条都抓不到（句数没变、也不重复）——
+  翻译质量本来就不是自动断言的活儿，那只能靠 `lookdev_journey.gd` 看图。
+
+- **"操纵权还回去了"和"模态收掉了"是两个量，而信号只承诺了其中一个**：
+  集齐二选一面板第一版把 `visible = false` 写在面板自己的 `_emit()` 里，
+  于是**点按钮**这条路收得掉，而 `synthesis_choice` 是个公开信号——
+  定妆照脚本、以后的自动导览、任何 `emit()` 都走不到那一行。后果是
+  `_synthesis_choice_open` 已经归零（操纵权还回去了、圈也画出来了）而模态还亮着，
+  玩家站在一个等他按键的屏底下重新握住把手。**当时全部断言是绿的**：
+  `verify_interact_latch` 第 10 节量的是操纵权，量得对；`lookdev_journey` 的
+  `13c_after_再骑一圈` 量的是屏幕，于是拍出一张和 `13b` 一模一样的图——
+  看图的人只会觉得"这张和上一张重复了"，读代码的人只会觉得"操纵权还回去了，没问题"。
+  两个提示在同一刻互相拆台。修法是**收面板的责任归一**：
+  `World3D._on_synthesis_choice()` 收到信号就 `_synthesis_panel.close()`，
+  按钮那条路经由同一个 `close()`，于是所有入口收敛到一处。
+  回归要补的那一条断言是"**直接 `emit()` 信号也收得掉面板**"——
+  写完照例做一次删除突变（删掉那行 `close()`，两条断言变红）才认。
+  可推广的一条：**任何一个模态的收尾，责任要放在"谁决定结束"的那一处，
+  而不是放在"某条触发路径"上**；而**断言要量玩家看得见的那一半**，
+  状态那一半对了不代表画面那一半也对了
+
+- **一条回归在新的模态面前要跟着做玩家会做的动作，否则它量的不是产品**：
+  `verify_minimap.gd` 第 9 节推完 5 次真实 `check_in()` 之后，本来是直接接着
+  逐站核对脚下的圈——集齐那 2.5 秒的合成动画演完之后面板弹出来了，
+  而 `_synthesis_choice_open` 在 `_physics_process` 那张早退单子里，
+  `_nearby_*` 被清成 -1，于是十条断言一起红（"圈指的就是它"got=-1）。
+  **那个红是新行为的正确结果**：模态开着的时候圈本来就该收掉。
+  修法不是把断言改松，而是让测试**先选「再骑一圈」**——和玩家一样。
+  顺带钉了三条前提（面板真的弹出来了 / 面板开着时世界真的冻着 / 选完之后真的解冻），
+  否则将来那 2.5 秒一变长，这段就悄悄不干活而断言数一条不少
+
+- **「这一屏在讲什么」和「这一屏画的是什么」是两件事，而回归只量过一件**：
+  琴那屏的标题写着「记住音符顺序并重复」，通篇不提琴，而屏上是一块收分的
+  木色多边形加四根横线——**一块有四根线的板子**；竹那五根是
+  `draw_rect(..., 12, ...)` 的等宽竖条，竹节那四条线也才 12px 宽，
+  画在一条 12px 的条上等于没有，于是标题写"竹子一冒头就按空格"而屏上没有竹子；
+  云最荒唐：背景那五片云是三个圆叠出来的，而**要描的那条轨迹是一串手抄的
+  八边形顶点**——同一屏上同一件事两套画法，`MiniGameBackdrop._clouds()` 和
+  `PATH_POINTS` 各画各的。
+  为什么全绿：`verify_mini_game.gd` 一直量的是**机制**（松手退不退出、
+  描边能不能刷分），`lookdev_journey.gd` 出图但那五张 `minigame_*.png`
+  是拍下来没人逐张看的。可推广的一条：**一屏的文案里出现了某个名词，
+  就得有一处断言去量"屏上有没有那个东西"**——量不到就说明判据挂错了地方。
+  判据钉的是纯函数（`cloud_outline()` / `stalk_poly()` / `hui_positions()`），
+  不是像素；而"是不是多边形"钉成**尖角占顶点的比例**而不是"有没有尖角"
+  （一朵云本来就有几处圆与圆交接的棱，真正的判据是"多边形的每个顶点都是尖角"：
+  旧的八边形是 8/8，现在是 9/40）
+
+- **按"窗口高度的百分比"取的尺寸，在别的分辨率上必然越界**：
+  砍倒的竹子那段上半身原来写死 `h * 0.30`，在 720p 上量着伸出 106px、
+  刚好在 152px 的列距之内，看着没事；无头视口是 1280 高，同一段伸到 **177px**，
+  已经压到右边那根还立着的竹子上了——而**当时所有断言都是绿的**，因为没有一条
+  量的就是这个。可推广的一条：**任何"不许越过某条边界"的量，它的基准必须是
+  那条边界本身，不是另一个会变的量**。修法是从边界反解尺寸
+  （`fall_len(spacing) = spacing * FRAC / sin(FALL_DEG)`），
+  回归就也钉在同一条边界上，于是任何分辨率下量到的都是同一个比值

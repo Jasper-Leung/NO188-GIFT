@@ -252,7 +252,24 @@ func _run() -> void:
 	print("11. 骑开 %.1fm 后按空格 -> 新打卡=%s（应为 true：正常打卡不受影响）  ctx=%s" % [
 		10.0, str(ok11), _ctx()])
 
-	var ok_all: bool = intro_accepted and echo_ignored and ok8 and ok9 and ok10 and ok11
+	# 逐条打 [OK]/[FAIL]，而不是只打一行合起来的布尔。
+	# `check_all.sh` 数的是**有几条断言被打了**——原来这里一个 `[OK]` 都没有，
+	# 于是它在表里报成 `NO-ASSERT`，整轮 `--window` 的结论也跟着变成 FAIL：
+	# 一条明明全绿的回归把自检表染红了，而看表的人无从分辨"没跑"和"跑绿了"。
+	var rows := [
+		["引导期提前按的那一下算数（玩家第一反应就按的那一下不许被吃掉）", intro_accepted],
+		["长按不放的 echo 不算第二下", echo_ignored],
+		["结算后的静默期内按空格不会立刻再开一场打卡", ok8],
+		["静默期过了但人没骑开，按空格仍然不开打卡", ok9],
+		["把旧的那道门关掉之后按空格会开打卡（证明这道门在起作用）", ok10],
+		["骑开 10m 之后按空格正常打卡", ok11],
+	]
+	var ok_all := true
+	for r in rows:
+		var pair: Array = r
+		var passed: bool = pair[1]
+		ok_all = ok_all and passed
+		print("[%s] 竹/世界：%s" % ["OK" if passed else "FAIL", pair[0]])
 	print("[verify_bamboo_world] %s  (4a=%s 4b=%s 8=%s 9=%s 10=%s 11=%s)" % [
 		"PASS" if ok_all else "FAIL", intro_accepted, echo_ignored, ok8, ok9, ok10, ok11])
 	_clear_save()

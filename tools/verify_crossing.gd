@@ -4,6 +4,7 @@ var terrain
 var road
 var vertices: PackedVector3Array
 var indices: PackedInt32Array
+var _fails := 0
 
 
 func _initialize() -> void:
@@ -74,13 +75,25 @@ func _run() -> void:
 	print("MAX_RIBBON_STEP=%.6f sampling_distance_about=0.1m" % worst)
 	print("RESULT: ", "REPRODUCED_HEIGHT_JUMP" if worst > 0.05 else "NO_LARGE_JUMP_REPRODUCED")
 	print("CROSSINGS_OK=", crossings_ok)
+	# 全工程统一的机器可读契约：每条回归都打 `[OK]` / `[FAIL]` 行。
+	# `tools/check_all.sh` 靠它统计，而它判"没跑成"的方式是**一条断言都没打出来**——
+	# 一条回归自己抛异常时退出码仍是 0，只看退出码会把空跑判成通过。
+	_ck("ribbon 高度在自交处连续（玩家感觉不到台阶）", worst <= 0.05,
+			"最大台阶 %.4fm" % worst)
+	_ck("几何自交处不超过 3 处（平滑本就把 180° 折返抹掉了）", crossings_ok,
+			"实测 %d 处" % crossings.size())
 	road.queue_free()
 	terrain.queue_free()
 	await process_frame
-	if not crossings_ok:
-		quit(3)
-		return
-	quit(2 if worst > 0.05 else 0)
+	quit(0 if (_fails == 0) else 1)
+
+
+func _ck(label: String, cond: bool, detail: String = "") -> void:
+	if cond:
+		print("[OK]   ", label)
+	else:
+		_fails += 1
+		print("[FAIL] ", label + ("（" + detail + "）" if detail != "" else ""))
 
 
 func _sample_branch(line: Array, center: float, steps: int = 150) -> float:

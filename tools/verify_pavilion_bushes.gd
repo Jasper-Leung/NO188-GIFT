@@ -5,6 +5,7 @@ var road
 var veg
 var station_scene
 var station_model
+var _fails := 0
 
 
 func _initialize() -> void:
@@ -67,9 +68,28 @@ func _run() -> void:
 				" terrain_y=%.6f" % terrain_y, " road_y=", road_y, " gap=%.6f" % gap)
 	print("BUSH_NEAR count=", near_count, " protected_count=", protected_count, " worst=", worst)
 
+	# 统一契约：每条回归都打 `[OK]` / `[FAIL]` 行。`tools/check_all.sh` 靠它统计，
+	# 而它判"这条没跑成"的方式是**一条断言都没打出来**——这条脚本原来只
+	# `quit(1 if ...)`，一个断言都不打，于是它在自检表里既不算通过也不算失败，
+	# 只是安静地跑完了。
+	_ck("驿站净空内的灌木被清干净了", protected_count == 0,
+			"还剩 %d 丛（净空半径 %.1fm）" % [protected_count, veg.STATION_BUSH_CLEAR_RADIUS])
+	_ck("净空附近确实有灌木被检查过（不是附近一丛都没有，判据空转）",
+			near_count > 0, "附近 %d 丛" % near_count)
+	_ck("每株灌木都贴在地形上（gap≈0）", worst_gap < 0.05,
+			"最大偏差 %.4fm" % worst_gap)
+
 	station_model.free()
 	road.queue_free()
 	terrain.queue_free()
 	veg.queue_free()
 	await process_frame
-	quit(1 if protected_count > 0 else 0)
+	quit(0 if _fails == 0 else 1)
+
+
+func _ck(label: String, cond: bool, detail: String = "") -> void:
+	if cond:
+		print("[OK]   ", label)
+	else:
+		_fails += 1
+		print("[FAIL] ", label + ("（" + detail + "）" if detail != "" else ""))

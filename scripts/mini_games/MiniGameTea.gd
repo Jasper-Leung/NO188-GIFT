@@ -3,6 +3,8 @@ extends Control
 ## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
 ## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
+const MiniGameBar = preload("res://scripts/mini_games/MiniGameBar.gd")
+const MiniGameChrome = preload("res://scripts/mini_games/MiniGameChrome.gd")
 ## 茶烟小筑(10) 小游戏：按住3秒把水注满，松手退回零重来
 ##
 ## 这一行原来写的是「松开失败」，而代码从来没有实现失败：松手只是把
@@ -114,23 +116,25 @@ func _draw() -> void:
 		draw_circle(Vector2(sx, sy), (5.0 + rise * 0.05) * sc,
 				Color(1, 1, 1, 0.30 * (1.0 - rise / 96.0)))
 
-	# 进度条背景
-	var bar_w := w * 0.55
-	var bar_h := 22.0
-	var bar_x := w * 0.5 - bar_w * 0.5
-	var bar_y := h * 0.72
-	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.15, 0.12, 0.08), true)
-	# 进度条填充
-	var fill_w := bar_w * clampf(_hold_time / HOLD_DURATION, 0.0, 1.0)
+	# 进度条。门槛在**条的右端**（按满 HOLD_DURATION 即成），原来这根条
+	# 只有一条边框、什么标记都没有，而标题写的是"3秒后完成"——玩家盯着
+	# 一个从 0% 爬到 100% 的数，看不出"还差几秒"，而那正是这一屏的全部。
+	# 松手时条不倒退是不行的：`_hold_time` 立刻清零，刻痕要跟着往回退，
+	# 不然条上留着一道满的刻痕而条是空的，两者在同一屏上互相拆台。
+	var bar := MiniGameBar.rect(Vector2(w, h), 0.72, 0.55, 22.0)
+	var held: float = clampf(_hold_time / HOLD_DURATION, 0.0, 1.0)
 	var fill_col := Color(0.6, 0.35, 0.1) if _holding else Color(0.35, 0.2, 0.08)
-	draw_rect(Rect2(bar_x, bar_y, fill_w, bar_h), fill_col, true)
-	# 进度条边框
-	draw_rect(Rect2(bar_x, bar_y, bar_w, bar_h), Color(0.8, 0.6, 0.3), false, 2)
+	MiniGameBar.draw_bar(self, bar, held, 1.0,
+			fill_col, Color(0.15, 0.12, 0.08), Color(0.8, 0.6, 0.3),
+			Color(1.0, 0.82, 0.45))
 
-	# 进度文字
-	draw_string(ThemeDB.fallback_font, Vector2(w * 0.5 - 60, bar_y - 12),
-		"%d%%" % int(clampf(_hold_time / HOLD_DURATION, 0.0, 1.0) * 100),
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+	# 进度文字：百分比 + 还差几秒。只报百分比的话，玩家得自己乘一个他
+	# 不知道是多少的 HOLD_DURATION 才算得出还差多久。
+	draw_string(ThemeDB.fallback_font, Vector2(bar.position.x, bar.position.y - 12),
+		"%d%%" % int(held * 100), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color.WHITE)
+	draw_string(ThemeDB.fallback_font, Vector2(bar.end.x - 130.0, bar.position.y - 12),
+		Localization.t("mg_tea_left", [maxf(HOLD_DURATION - _hold_time, 0.0)]),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1.0, 0.85, 0.6))
 
 	# 提示
 	var hint := Localization.t("mg_tea_hint_release") if _holding \
@@ -139,11 +143,7 @@ func _draw() -> void:
 		hint, HORIZONTAL_ALIGNMENT_CENTER, w, 22, Color(1, 0.85, 0.6))
 
 	# 取消按钮
-	var btn_rect := Rect2(w - 160, h - 60, 140, 44)
-	draw_rect(btn_rect, Color(0.4, 0.3, 0.3), true)
-	draw_rect(btn_rect, Color(0.8, 0.3, 0.3), false, 2)
-	draw_string(ThemeDB.fallback_font, Vector2(btn_rect.position.x, btn_rect.position.y + 30),
-		Localization.t("mg_cancel"), HORIZONTAL_ALIGNMENT_CENTER, btn_rect.size.x, 22, Color.WHITE)
+	MiniGameChrome.draw_cancel(self, MiniGameChrome.cancel_rect(Vector2(w, h)))
 
 func _gui_input(event: InputEvent) -> void:
 	if _done:
@@ -156,9 +156,9 @@ func _gui_input(event: InputEvent) -> void:
 		if ekc == KEY_ESCAPE and event.pressed and not event.echo:
 			_world_ref._on_mini_game_done(CANCELLED)
 			return
-	var w := size.x
-	var h := size.y
-	var btn_rect := Rect2(w - 160, h - 60, 140, 44)
+	# 热区走画笔那一处。画和点各抄一份 `Rect2(w - 160, ...)` 的话，
+	# 挪一次按钮就得改两处，而漏掉的那一处症状是"看得见点不着"。
+	var btn_rect: Rect2 = MiniGameChrome.cancel_rect(size)
 
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:

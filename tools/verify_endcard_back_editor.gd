@@ -98,8 +98,26 @@ func _audit(tag: String) -> void:
 		_check(inside, "[%s] 子控件%d (%s) 正尺寸且完全在屏内" % [tag, i, c.get_class()])
 		i += 1
 
-	_check(ed.get_child_count() == 5,
-		"[%s] 共 5 个子节点（遮罩+标题+输入框+2按钮），实际 %d" % [tag, ed.get_child_count()])
+	# 断**构成**而不是断总数。原来写的是 `get_child_count() == 5`，而背面预览
+	# （TextureRect + 它上面那行说明 Label）是后加的——于是这条从加预览那天起
+	# 一直红着，没人跑它而已。总数是一个变更探测器而不是不变量：合法地多一个
+	# 说明文字就会红，而真正要守的是"遮罩只有一层、动作只有两个、预览只有一块"。
+	var n_colorrect := 0
+	var n_button := 0
+	var n_textedit := 0
+	var n_textr := 0
+	for c in ed.get_children():
+		match c.get_class():
+			"ColorRect": n_colorrect += 1
+			"Button": n_button += 1
+			"TextEdit": n_textedit += 1
+			"TextureRect": n_textr += 1
+	_check(n_colorrect == 1,
+		"[%s] 遮罩恰好一层（多一层就是整屏被压两遍）" % tag)
+	_check(n_button == 2,
+		"[%s] 恰好两个动作按钮（多一个就把版面挤掉，少一个就有个功能点不到）" % tag)
+	_check(n_textedit == 1, "[%s] 恰好一个输入框" % tag)
+	_check(n_textr == 1, "[%s] 恰好一块预览（所见的和导出的必须是同一张）" % tag)
 
 	# 各元素不能互相压住
 	var rects: Array[Rect2] = []

@@ -3,6 +3,7 @@ extends Control
 ## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
 ## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
+const MiniGameChrome = preload("res://scripts/mini_games/MiniGameChrome.gd")
 ## 琴音林(13) 小游戏：Simon Says 记忆音符序列
 
 var _world_ref: Node = null
@@ -15,6 +16,19 @@ const SHOW_DELAY := 0.7
 ## 示范阶段两声之间的空档。原来这个 0.2 是散在协程末尾的一个字面量。
 const SHOW_GAP := 0.2
 const INPUT_TIMEOUT := 2.5
+
+## 古琴身上那 13 个"徽"。它们是嵌在琴面里的螺钿小圆点，从琴额那头的岳山
+## 一路排向琴尾的雁足，标的是泛音的位置——**古琴最有辨识度的一处**。
+##
+## 原来这具琴身只有一块收分的木色多边形加四根弦，屏上又没有一处字提到"琴"
+## （标题是「记住音符顺序并重复」），于是这一屏读出来的是"一块有四根线的板子"。
+## 徽位、岳山、雁足三样一起摆上，那块板子才真的是一张琴。
+const HUI_COUNT := 13
+const HUI_R := 6.0
+## 徽只排在岳山与雁足之间，不铺满全长
+const HUI_FROM := 0.16
+const HUI_TO := 0.88
+
 
 enum { STATE_SHOW, STATE_INPUT, STATE_DONE }
 
@@ -131,6 +145,55 @@ func _string_rects() -> Array[Rect2]:
 	return out
 
 
+## 13 个徽在琴面上的位置。**纯函数，不碰画笔**（headless 不调 `_draw`）。
+## 判据钉的是"徽有 13 个、且不铺满全长"，而不是某一组坐标。
+static func hui_positions(from_frac: float, to_frac: float, count: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for i in count:
+		out.append(from_frac + (to_frac - from_frac) * float(i) / float(count - 1))
+	return out
+
+
+## 岳山与雁足的落点。**和 `_draw` 同源**——判据量的是画笔真的摆的那一处。
+## 在测试里把这几个算式抄一遍的话，改画不动测、测会一直绿。
+static func head_anchor(board: Rect2) -> Vector2:
+	return Vector2(board.position.x + board.size.y * 0.12, board.get_center().y)
+
+
+static func foot_anchor(board: Rect2) -> Vector2:
+	return Vector2(board.end.x - 44.0, board.get_center().y)
+
+
+## 琴额那头的岳山与琴轸。岳山是弦在琴头那端压住的那一道，琴轸是穿过它调弦的两枚栓。
+##
+## 岳山要**压在琴面里**：原来的高取到 `head_h * 0.86`，而琴额那半高就是
+## `head_h`，于是一道比琴身还高的黑板戳在琴头左侧、上下各露出一截——
+## 读起来是"琴旁边竖了块牌子"，不是琴上压弦的那道棱。
+static func headgear_poly(anchor: Vector2, head_h: float) -> PackedVector2Array:
+	return PackedVector2Array([
+		anchor + Vector2(-head_h * 0.22, -head_h * 0.58),
+		anchor + Vector2(0.0, -head_h * 0.44),
+		anchor + Vector2(0.0, head_h * 0.44),
+		anchor + Vector2(-head_h * 0.22, head_h * 0.58),
+	])
+
+
+## 琴尾那头的雁足：两只小脚，古琴是趴着放的，没有它们这张琴悬空。
+##
+## 两只都挂在**琴腹以下**。原来一支朝上一支朝下，朝上的那支从琴面里钻出来、
+## 顶出琴身，读成两片鱼鳍；脚是撑在琴底下把琴托起来的，不是长在琴面上的。
+static func foot_polys(anchor: Vector2, tail_h: float) -> Array:
+	var out: Array = []
+	for s in [-1.0, 1.0]:
+		out.append(PackedVector2Array([
+			anchor + Vector2(0.0, tail_h * 0.55),
+			anchor + Vector2(20.0, tail_h * 0.55 + s * 20.0),
+			anchor + Vector2(44.0, tail_h * 0.55 + s * 15.0),
+		]))
+	return out
+
+
+
 func _draw() -> void:
 	var w := size.x
 	var h := size.y
@@ -162,6 +225,25 @@ func _draw() -> void:
 	draw_colored_polygon(body, Color("4A3524"))
 	draw_polyline(body, Color("2A1C12"), 3.0)
 
+	# 琴身的三样附件：岳山+琴轸在琴额那头，雁足在琴尾，13 个徽排在当中。
+	# 徽要压在弦**下面**一层（它们嵌在木面里），所以画在弦之前。
+	var hx0 := board.position.x
+	var hx1 := board.end.x
+	# 锚点给琴额**内侧**：headgear 的背面从锚点往左退 0.22·head_h，
+	# 锚点摆在 hx0 + 16 的话那道棱就有 15px 戳在琴身之外（原来那块黑板就是这么
+	# 冒出来的）。弦从 hx0 + 14 起，正好压在岳山上面——古琴本来就是这样。
+	draw_colored_polygon(headgear_poly(head_anchor(board), head_h), Color("3A2818"))
+	# 琴轸：岳山两侧各一枚
+	draw_rect(Rect2(hx0 + 0.06 * head_h, cy - head_h * 0.40, 22.0, 5.0), Color("9A7A52"), true)
+	draw_rect(Rect2(hx0 + 0.06 * head_h, cy + head_h * 0.40 - 5.0, 22.0, 5.0), Color("9A7A52"), true)
+	for fp in foot_polys(foot_anchor(board), tail_h):
+		draw_colored_polygon(fp, Color("3A2818"))
+	# 徽：排在正中线上——四根弦的两根中间正好空出一条，而徽本就该在这条线上
+	for f in hui_positions(HUI_FROM, HUI_TO, HUI_COUNT):
+		var hp := Vector2(lerpf(hx0, hx1, f), cy)
+		draw_circle(hp, HUI_R, Color("D8CDA8", 0.95))
+		draw_circle(hp, HUI_R * 0.42, Color("6B5535", 0.9))
+
 	var row_h := board.size.y / float(NOTE_COUNT)
 	var amp := row_h * 0.26
 	# 命中区是整根弦所在的一条横带，比弦本身粗，玩家不必瞄准细线。
@@ -188,11 +270,7 @@ func _draw() -> void:
 		status, HORIZONTAL_ALIGNMENT_CENTER, w, 24, Color(0.9, 0.9, 0.9))
 
 	# 取消
-	var btn_rect := Rect2(w - 160, h - 60, 140, 44)
-	draw_rect(btn_rect, Color(0.4, 0.3, 0.3), true)
-	draw_rect(btn_rect, Color(0.8, 0.3, 0.3), false, 2)
-	draw_string(ThemeDB.fallback_font, Vector2(btn_rect.position.x, btn_rect.position.y + 30),
-		Localization.t("mg_cancel"), HORIZONTAL_ALIGNMENT_CENTER, btn_rect.size.x, 22, Color.WHITE)
+	MiniGameChrome.draw_cancel(self, MiniGameChrome.cancel_rect(Vector2(w, h)))
 
 ## 一根弦。**横向**的：沿着琴身长边从琴额拉到琴尾，振动方向是上下。
 ## 振幅 = _ring[i] 随时间衰减，位移是两端固定的驻波：
@@ -236,10 +314,8 @@ func _gui_input(event: InputEvent) -> void:
 	if _note_rects.is_empty():
 		return
 
-	# 取消按钮
-	var w := size.x
-	var h := size.y
-	var btn_rect := Rect2(w - 160, h - 60, 140, 44)
+	# 取消按钮。热区走画笔那一处，见 MiniGameChrome 那条注释
+	var btn_rect: Rect2 = MiniGameChrome.cancel_rect(size)
 	if event is InputEventMouseButton and event.pressed and btn_rect.has_point(event.position):
 		_world_ref._on_mini_game_done(CANCELLED)
 		return

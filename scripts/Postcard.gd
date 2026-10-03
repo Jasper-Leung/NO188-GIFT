@@ -12,6 +12,17 @@ extends Control
 var _t = 0.0
 var _variant: int = 0  # 0-4 评级，由 PostcardVariant.compute_variant() 计算
 
+## 顶部那一块是**这一趟的路线图**：真中心线 + 16 座驿站 + 到访状态。
+## _rd 只在 _ready() 里建一次（960 个点，别在 _draw() 里现建——那每帧重算一次
+## 中心线的包围盒）。用 RefCounted 注解而不是 RoadData：`--script` 模式的
+## verify_postcard_ending.gd 会按 class_name 在编译期拉依赖。
+var _rd: RefCounted = null
+var _map_min := Vector2.ZERO
+var _map_max := Vector2.ZERO
+## 地图方框在卡片上的位置。留成成员是为了让回归能直接量它——
+## 以前正面顶部那块只有云天，谁也说不清它占多少、该被什么压着。
+var _map_rect := Rect2()
+
 const CLOUD_COL = Color("B0C4DE")
 const TEA_COL = Color("8FB35A")
 const QIN_COL = Color("C9A26B")
@@ -23,6 +34,11 @@ const BIRD_COL = Color("E8A04F")
 ## 手抄的那份整体错位一格，标签对而颜色和图标属于下一件。两个表彼此自洽，
 ## 缩略图一眼扫过去完全正常，可玩家存走的那张 PNG 一样是错的。
 const FRAGMENT_COLS: Array = [CLOUD_COL, TEA_COL, QIN_COL, BAMBOO_COL, BIRD_COL]
+
+## 顶部路线图占卡片高度的比例。8 字环接近正方（bbox 329×361m），所以这块
+## 一旦压到 0.3 以下，地图就得按宽走，两侧各空掉一大片纸；0.38 是试下来
+## 地图还能按高走满、而下面五格画区还剩得下 46% 的那一个。
+const MAP_BAND_FRAC := 0.38
 
 const LAND_COL = Color("F4F2EA")
 const INK_COL = Color("4A3520")
@@ -72,6 +88,63 @@ const VARIANT_LAYOUTS: Array = [
 func _ready() -> void:
 	_variant = PostcardVariant.compute_variant()
 	_apply_paper_style()
+	_build_route_map()
+
+
+## 所有尺寸跟着卡片宽度走。导出的 PNG 是 1920 宽、屏上是 900 宽，
+## 写死像素的话同一段代码在两处的相对字号差一倍以上。
+func _map_k(w: float) -> float:
+	return w / 900.0
+
+
+## 地图方框落在卡片哪儿。不碰画笔，_draw() 和回归量的是同一个函数——
+## 「路有没有被框裁掉」「买了信封以后方框还在不在卡片里」这两件事，
+## headless 下不画一笔，全靠这里才判得了。
+##
+## 方框按**高**定边长：8 字环的 bbox 是 329×361m，接近正方，按宽定会在
+## 上下各空掉一条，按高定才能把 MAP_BAND_FRAC 的高度吃满。
+## 左边距在买了信封时要让开折角 —— 折角是一条从 (0,0) 切下来的等腰直角，
+## 方框照旧贴着左边上角放的话，正好被它削掉框线的一段和路的一角。
+func _layout_map(w: float, band_h: float) -> void:
+	var k: float = _map_k(w)
+	var inset: float = 16.0 * k
+	if _has_env:
+		inset = maxf(inset, minf(w, size.y) * 0.16 + 12.0 * k)
+	_map_rect = Rect2(inset, band_h * 0.09, band_h * 0.82, band_h * 0.82)
+
+
+## 路线铺进去的那块内框。内缩 10k 而不是贴着框线：路线是**正好**铺满 fit
+## 区的（有一边一定顶死），留白不够的话 8 字的上凸和下凸会压在框线上，
+## 读成「图被裁了一刀」。
+func _map_inner() -> Rect2:
+	return _map_rect.grow(-maxf(8.0, 10.0 * _map_k(size.x)))
+
+
+func _map_scale() -> float:
+	var inner := _map_inner()
+	var span := Vector2(_map_max.x - _map_min.x, _map_max.y - _map_min.y)
+	return minf(inner.size.x / span.x, inner.size.y / span.y)
+
+
+## 世界 XZ → 卡片坐标。中心线的 960 个点和 16 座驿站走的都是它。
+func _map_project(world: Vector3) -> Vector2:
+	var inner := _map_inner()
+	var sc := _map_scale()
+	var span := Vector2(_map_max.x - _map_min.x, _map_max.y - _map_min.y)
+	var org := inner.position + (inner.size - span * sc) * 0.5
+	return org + Vector2((world.x - _map_min.x) * sc, (world.z - _map_min.y) * sc)
+
+
+## 把中心线取出来量一次包围盒，画的时候只做一次仿射，不重算。
+func _build_route_map() -> void:
+	_rd = RoadData.new()
+	_map_min = Vector2(1e9, 1e9)
+	_map_max = Vector2(-1e9, -1e9)
+	for p in _rd.points:
+		_map_min.x = minf(_map_min.x, p.x)
+		_map_min.y = minf(_map_min.y, p.z)
+		_map_max.x = maxf(_map_max.x, p.x)
+		_map_max.y = maxf(_map_max.y, p.z)
 
 
 ## 档位决定纸与框，散件各管自己那一笔，互不覆盖：
@@ -129,13 +202,13 @@ func _draw() -> void:
 	draw_rect(Rect2(0, 0, w, h), _frame_col, false, _frame_w)
 	draw_rect(Rect2(8, 8, w - 16, h - 16), _ink, false, 1)
 
-	# 上1/3 云层 + 佳禽
-	var cloud_h = h * 0.3
-	_draw_cloud_sky(w, cloud_h)
+	# 顶部：这一趟的路线图（真中心线 + 16 驿 + 到访状态）
+	var map_h = h * MAP_BAND_FRAC
+	_draw_route_map(w, map_h)
 
-	# 下2/3 画区（根据 variant 决定哪些是真实、哪些是占位灰）
-	var sect_y = cloud_h
-	var sect_h = h * 0.55
+	# 中段：五格碎片画区（根据 variant 决定哪些是真实、哪些是占位灰）
+	var sect_y = map_h
+	var sect_h = h * (0.85 - MAP_BAND_FRAC)
 	var layout: Array = VARIANT_LAYOUTS[_variant]
 	var sect_count: int = layout.size()
 	var sect_w: float = w / float(max(sect_count, 1))
@@ -212,32 +285,148 @@ func _draw() -> void:
 			tname, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, _frame_col)
 
 
-func _draw_cloud_sky(w: float, h: float) -> void:
-	# 渐变天空
-	var steps = int(h)
-	for y in range(steps):
-		var t = float(y) / max(1.0, h - 1.0)
-		var col = CLOUD_COL.darkened(0.18 + t * 0.08)
-		draw_line(Vector2(0, y), Vector2(w, y), col, 1)
+## 顶部那一块：这一趟的路线图。
+##
+## 它换掉的是原先那段云天。原来这整张正面是「云 + 五格色卡 + No.188 路牌」，
+## 谁拿出去都是同一张——五格只报**收了几件**，不报**在哪儿收的**。而这张
+## 卡片是玩家唯一带走的东西，正面却一点都不记得他骑过哪条路。
+##
+## 画的是真数据：`RoadData` 的 960 点中心线 + 16 座驿站的真实落点，
+## 到过画实心、没到过画空心，五座碎片站额外用自己那件的颜色。零新资产。
+func _draw_route_map(w: float, band_h: float) -> void:
+	# 整块压一层比纸面稍深的底。直接画在纸面上，地图会读成一张浮着的
+	# 剪贴画；给它一个「这一带是另一个东西」的地基才像印上去的。
+	draw_rect(Rect2(0, 0, w, band_h), _paper.darkened(0.035))
+	if _rd == null:
+		return
+	var k: float = _map_k(w)
+	_layout_map(w, band_h)
+	var sc := _map_scale()
 
-	# 多层云
-	for i in range(7):
-		var cx = (i + 0.3) * w / 7.0 + sin(_t * 0.3 + i * 0.8) * 18
-		var cy = h * 0.45 + sin(i * 1.3) * 22 + cos(_t * 0.5 + i) * 6
-		var r = 25 + i * 4
-		var alpha = 0.32 + sin(_t + i) * 0.06
-		draw_circle(Vector2(cx, cy), r, Color(1, 1, 1, alpha))
-		draw_circle(Vector2(cx + 18, cy - 5), r - 5, Color(1, 1, 1, alpha * 0.8))
-		draw_circle(Vector2(cx - 18, cy - 2), r - 7, Color(1, 1, 1, alpha * 0.7))
+	# 底衬：一层比纸更浅的「空地」，路线浮在它上面
+	draw_rect(_map_rect, _paper.lightened(0.35))
+	var road := PackedVector2Array()
+	for p in _rd.points:
+		road.append(_map_project(p))
+	# 路基铺宽、路心压细：一条线粗细一致读成「画了一条线」，两段才像路
+	draw_polyline(road, Color(_ink.r, _ink.g, _ink.b, 0.16), 7.0 * k)
+	draw_polyline(road, Color(_ink.r, _ink.g, _ink.b, 0.85), 1.8 * k)
 
-	# 右上 佳禽
-	var bird_x = w * 0.82 + sin(_t * 0.7) * 12
-	var bird_y = h * 0.32 + cos(_t * 0.9) * 5
-	_draw_bird(Vector2(bird_x, bird_y), BIRD_COL, 1.0, 1.4)
+	# 16 座驿站。判据是**这一趟真的经过了没有**（GameManager.seen_stations），
+	# 碎片站再叠一层：到过访的用自己那件的颜色点实心，没到过是空心加一圈
+	# 淡色外环——空心才和右边图例里那句「空心 = 未至」对得上。
+	for i in _rd.stations.size():
+		var p := _map_project(_rd.get_station_world_pos(i))
+		var slot: int = int(RoadData.FRAGMENT_STATION_TO_SLOT.get(i, -1))
+		var visits: int = int(GameManager.collected.get(i, 0))
+		if slot >= 0:
+			var col: Color = FRAGMENT_COLS[slot]
+			draw_arc(p, 5.4 * k, 0.0, TAU, 14, Color(col.r, col.g, col.b, 0.45), 1.2 * k)
+			draw_arc(p, 3.4 * k, 0.0, TAU, 14, _ink, maxf(1.0, 1.2 * k))
+			if visits > 0:
+				draw_circle(p, 2.2 * k, col.darkened(0.25))
+		elif GameManager.seen_stations.has(i):
+			draw_circle(p, 2.6 * k, _ink)
+		else:
+			draw_arc(p, 2.0 * k, 0.0, TAU, 12, _ink, maxf(1.0, 1.0 * k))
 
-	# "云"字
-	draw_string(ThemeDB.fallback_font, Vector2(w * 0.5 - 20, 38),
-		Localization.t("fragment_0"), HORIZONTAL_ALIGNMENT_CENTER, -1, 36, _ink)
+	# 框：内外两道，取「一方图」的版式
+	draw_rect(_map_rect, _ink, false, maxf(1.0, 1.6 * k))
+	draw_rect(_map_rect.grow(-maxf(3.0, 4.0 * k)), _ink, false, maxf(1.0, 1.0 * k))
+
+	_draw_map_caption(w, band_h, k)
+
+
+## 地图右边那一列字：一句标题、一句「已过 n/16 驿」、五件乐事各到访几次、
+## 外加图例。数字全部现算自存档，一个字都不另存——明信片是在
+## `go_to_end_card()` 那一刻现画的，玩家改了存档再导出，拿到的就该是改过的那张。
+func _draw_map_caption(w: float, band_h: float, k: float) -> void:
+	var font := ThemeDB.fallback_font
+	var x: float = _map_rect.position.x + _map_rect.size.x + 22.0 * k
+	var dim := Color(_ink.r, _ink.g, _ink.b, 0.62)
+
+	draw_string(font, Vector2(x, band_h * 0.28),
+		Localization.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1,
+		int(20 * k), dim)
+	draw_string(font, Vector2(x, band_h * 0.56),
+		Localization.t("stations_seen") % [GameManager.get_seen_station_count(), 16],
+		HORIZONTAL_ALIGNMENT_LEFT, -1, int(28 * k), _ink)
+
+	# 五件乐事的到访次数。**这一列原来挤在「已过 n/16 驿」底下那一行**，
+	# 于是整条带子的右三分之一——约 880x410px——是一张空白的纸，
+	# 而这一带本来就是玩家唯一带走的那张卡的抬头。挪成一列五行之后，
+	# 「每处去过三次、于是五件乐事轮换着来」这件事才第一次真的读得出来。
+	_draw_joys_column(w, band_h, k, x + _caption_col_w(font, k) + w * 0.05)
+
+	# 图例：两个小圆点 + 一句话。图上一共十六个点，不说清楚实心空心的
+	# 意思，看的人只会以为那是十六个一样的标记。
+	var ly: float = band_h * 0.96
+	var dot: float = 4.0 * k
+	draw_circle(Vector2(x + dot, ly - dot * 0.4), dot, _ink)
+	draw_arc(Vector2(x + 30.0 * k, ly - dot * 0.4), dot * 0.8, 0.0, TAU, 12,
+			_ink, maxf(1.0, 1.0 * k))
+	draw_string(font, Vector2(x + 44.0 * k, ly), Localization.t("postcard_map_legend"),
+			HORIZONTAL_ALIGNMENT_LEFT, -1, int(14 * k), dim)
+
+	# 飞禽。原先它在天上飞，云天没了就让它飞过这一带。位置躲开两样东西：
+	# 右上角那枚完满金印（半径 32 是**不缩放**的，写死 w-90 附近），
+	# 以及列 B —— 它占的那条道是 `_joys_column_rect()` 量出来的。
+	_draw_bird(Vector2(w - 120.0 * k, band_h * 0.52 + sin(_t * 0.9) * 5.0 * k),
+			BIRD_COL, 1.0, 0.8 * k)
+
+
+## 列 A（标题 / 已过 n/16 驿 / 图例）最宽的那一条有多宽。列 B 靠它起步，
+## 所以这一段必须**量出来**：英文那一列比中文长一截，写死一个间距的话
+## 英文界面下两列会压在一起。
+##
+## 拿 `[16, 16]` 而不是这一趟的实际值：要的是这一列在**任何存档**下的最宽情形。
+## 按实际值起步的话，玩家到过的驿越多、后面的列离字越近。
+func _caption_col_w(font: Font, k: float) -> float:
+	var a: float = font.get_string_size(
+			Localization.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1, int(20 * k)).x
+	var b: float = font.get_string_size(
+			Localization.t("stations_seen") % [16, 16], HORIZONTAL_ALIGNMENT_LEFT, -1,
+			int(28 * k)).x
+	var c: float = font.get_string_size(
+			Localization.t("postcard_map_legend"), HORIZONTAL_ALIGNMENT_LEFT, -1,
+			int(14 * k)).x + 44.0 * k
+	return maxf(a, maxf(b, c))
+
+
+## 五件乐事那一列占的那块矩形。不碰画笔，回归量的是它。
+##
+## 右沿停在 `w - 150k`：那只禽半径 18x0.8k、画在 w-120k，列 B 一起涨过去
+## 就会骑到它身上。宽度算出来是 0 也不画 —— 卡片窄到放不下这一列时，
+## 宁可少一列，也不要两列的字压在一起。
+func _joys_column_rect(w: float, band_h: float, k: float, x0: float) -> Rect2:
+	var row_h: float = band_h * 0.15
+	return Rect2(x0, band_h * 0.20, maxf(0.0, w - 150.0 * k - x0), row_h * 5.0)
+
+
+func _draw_joys_column(w: float, band_h: float, k: float, x0: float) -> void:
+	var r := _joys_column_rect(w, band_h, k, x0)
+	if r.size.x <= 0.0:
+		return
+	var font := ThemeDB.fallback_font
+	var dim := Color(_ink.r, _ink.g, _ink.b, 0.62)
+	draw_string(font, Vector2(r.position.x, band_h * 0.13),
+			Localization.t("postcard_joys_title"), HORIZONTAL_ALIGNMENT_LEFT, -1,
+			int(17 * k), dim)
+	var name_fs: int = int(20 * k)
+	for slot in 5:
+		var st_idx: int = RoadData.FRAGMENT_SLOT_STATION_IDX[slot]
+		var visits: int = int(GameManager.collected.get(st_idx, 0))
+		var by: float = r.position.y + r.size.y * (float(slot) + 0.70) / 5.0
+		# 名字用它自己那件的颜色 —— 和下面五格画区是同一把钥匙，玩家扫一遍就通
+		draw_string(font, Vector2(r.position.x, by),
+				Localization.t("fragment_%d" % slot), HORIZONTAL_ALIGNMENT_LEFT, -1,
+				name_fs, FRAGMENT_COLS[slot].darkened(0.35))
+		# 次数**右对齐在这一列的右沿**：五行的数字对不齐的话读起来像随手记的，
+		# 而这一列现在替的是"玩家这一趟干了什么"这句话。
+		draw_string(font, Vector2(r.position.x, by),
+				Localization.t("postcard_visit_n") % visits, HORIZONTAL_ALIGNMENT_RIGHT,
+				r.size.x, int(17 * k), dim)
+
 
 
 ## 画区里的纸感。五个画区原来是五块**平涂**的色卡，远看就是一份色板，

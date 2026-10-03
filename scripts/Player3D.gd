@@ -76,6 +76,14 @@ func set_camera_locked(v: bool) -> void:
 	_cam_locked = v
 
 
+## 相机是不是被冻住了。`World3D._play_villain_scene()` 现在也会锁相机，
+## 而它**必须**在收尾时解锁——漏掉的话车照跑、镜头定死在原地，
+## 没有任何症状会指向"刚才那场反派戏没收干净"。
+## 所以这条状态需要一个从外面读得到的出口。
+func is_camera_locked() -> bool:
+	return _cam_locked
+
+
 func get_speed() -> float:
 	return _speed
 
@@ -88,3 +96,12 @@ func set_can_move(v: bool) -> void:
 
 func set_touch_direction(dir: Vector2) -> void:
 	_touch_dir = dir
+
+
+## 撞到世界硬边界时按比例掉速度。
+##
+## `World3D._apply_station_keepout()` 把位置摆回墙外之后，车本身并不知道自己撞了——
+## `_speed` 还在，于是它会贴着墙"蹭"着走：位置每帧被推回、每帧又往里冲，
+## 玩家看着像车卡在墙里抖。这道衰减让撞墙之后真的慢下来。
+func damp_speed(f: float) -> void:
+	_speed *= f

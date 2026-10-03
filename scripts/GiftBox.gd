@@ -3,6 +3,7 @@ extends Control
 ## 居中礼物盒 + 标题 + 副标题 + 开启旅程按钮
 
 @onready var _start_btn: Button = $StartBtn
+@onready var _demo_btn: Button = $DemoBtn
 @onready var _language_btn: Button = $LanguageBtn
 @onready var _title: Label = $Title
 @onready var _subtitle: Label = $Subtitle
@@ -31,10 +32,30 @@ const PREVIEW_FIT_DIM := 1.15
 const PREVIEW_ALPHA_DIM := 0.20
 const BG_COLOR := Color(0.1, 0.08, 0.12, 1.0)
 
+## 「开启旅程」按下之后到 World3D 换上来之前的那段过场，一共有五段。
+##
+## 这五段是冷启动里**唯一一段纯机器等待**：礼物盒淡出、路网底纹推正、停一拍、
+## 推回、然后换场景——合计 3.15 秒，而这几秒里玩家既动不了，也读不到任何新东西
+## （他刚按完按钮，正在等）。带窗口的 `tools/measure_cold_start.gd` 量到的
+## 「按钮按下→世界起来了」里，它占了四分之三。
+##
+## 现在压到 1.20 秒。路网底纹推正那一下留着——它是"按下开始 = 看清路线"这件事
+## 唯一的兑现，砍掉就等于按了按钮什么也没发生；只是不再让它独占三秒。
+const BOX_OUT_SEC := 0.22        # 礼物盒放大淡出
+const ROAD_IN_SEC := 0.28        # 底纹从 DIM 推到前景
+const ROAD_HOLD_SEC := 0.40      # 停一拍，让它真的被看清
+const ROAD_OUT_SEC := 0.22       # 推回 DIM
+const SWITCH_DELAY_SEC := 0.08   # 换场景前最后一点留白
+
+## 上面五段加起来。这是回归钉的那一个数（verify_story 第 5 节对着文档核，
+## measure_cold_start 从这张表重算一遍，两边不许漂）。
+const START_TRANSITION_SEC := BOX_OUT_SEC + ROAD_IN_SEC + ROAD_HOLD_SEC + ROAD_OUT_SEC + SWITCH_DELAY_SEC
+
 
 func _ready() -> void:
 	_box_center = Vector2(get_viewport_rect().size.x / 2, 290)
 	_start_btn.pressed.connect(_on_start_pressed)
+	_demo_btn.pressed.connect(_on_demo_pressed)
 	_language_btn.pressed.connect(_on_language_pressed)
 	Localization.language_changed.connect(_apply_language)
 	_apply_language()
@@ -163,12 +184,32 @@ func _apply_language() -> void:
 	_guide.text = Localization.t("guide")
 	_disclaimer.text = Localization.t("disclaimer")
 	_start_btn.text = Localization.t("start")
+	_demo_btn.text = Localization.t("demo_start")
 	_language_btn.text = "%s  %s" % [Localization.t("language"), Localization.t("language_current")]
 	_loading_label.text = Localization.t("loading")
 
 
 func _on_language_pressed() -> void:
 	Localization.set_language("zh" if Localization.is_english() else "en")
+
+
+## 演示入口。**不播那 1.2 秒过场**——演示的人已经知道自己按了什么，
+## 站着看礼物盒淡出是在花掉一条 90 秒里最贵的一段。
+func _on_demo_pressed() -> void:
+	if _opened:
+		return
+	_opened = true
+	_start_btn.disabled = true
+	_demo_btn.disabled = true
+	AudioManager.play_sfx("open")
+	_start_btn.visible = false
+	_demo_btn.visible = false
+	GameManager.enter_demo()
+	_world_scene = load("res://scenes/World3D.tscn")
+	_loading_bg.visible = true
+	_loading_label.visible = true
+	await get_tree().create_timer(0.1, false).timeout
+	get_tree().change_scene_to_packed(_world_scene)
 
 
 func _on_start_pressed() -> void:
@@ -180,13 +221,13 @@ func _on_start_pressed() -> void:
 	_start_btn.visible = false
 
 	var tw = create_tween().set_parallel(true)
-	tw.tween_property(self, "_box_scale", 2.5, 0.5)
-	tw.tween_property(self, "_box_alpha", 0.0, 0.5)
-	tw.tween_property(_title, "modulate:a", 0.0, 0.3)
-	tw.tween_property(_subtitle, "modulate:a", 0.0, 0.3)
-	tw.tween_property(_guide, "modulate:a", 0.0, 0.3)
-	tw.tween_property(_disclaimer, "modulate:a", 0.0, 0.3)
-	tw.tween_property(_language_btn, "modulate:a", 0.0, 0.3)
+	tw.tween_property(self, "_box_scale", 2.5, BOX_OUT_SEC)
+	tw.tween_property(self, "_box_alpha", 0.0, BOX_OUT_SEC)
+	tw.tween_property(_title, "modulate:a", 0.0, BOX_OUT_SEC)
+	tw.tween_property(_subtitle, "modulate:a", 0.0, BOX_OUT_SEC)
+	tw.tween_property(_guide, "modulate:a", 0.0, BOX_OUT_SEC)
+	tw.tween_property(_disclaimer, "modulate:a", 0.0, BOX_OUT_SEC)
+	tw.tween_property(_language_btn, "modulate:a", 0.0, BOX_OUT_SEC)
 
 	await tw.finished
 	_language_btn.visible = false
@@ -195,20 +236,20 @@ func _on_start_pressed() -> void:
 
 	# 底纹推正：同时缩到正常尺寸并提亮，让"点开始"变成"看清路线"而不是凭空出图
 	var tw2 = create_tween().set_parallel(true)
-	tw2.tween_property(self, "_road_preview_alpha", 1.0, 0.5)
-	tw2.tween_property(self, "_road_preview_fit", PREVIEW_FIT, 0.5)
+	tw2.tween_property(self, "_road_preview_alpha", 1.0, ROAD_IN_SEC)
+	tw2.tween_property(self, "_road_preview_fit", PREVIEW_FIT, ROAD_IN_SEC)
 
 	_world_scene = load("res://scenes/World3D.tscn")
 
-	await get_tree().create_timer(1.5, false).timeout
+	await get_tree().create_timer(ROAD_HOLD_SEC, false).timeout
 
 	var tw3 = create_tween().set_parallel(true)
-	tw3.tween_property(self, "_road_preview_alpha", 0.0, 0.5)
-	tw3.tween_property(self, "_road_preview_fit", PREVIEW_FIT_DIM, 0.5)
+	tw3.tween_property(self, "_road_preview_alpha", 0.0, ROAD_OUT_SEC)
+	tw3.tween_property(self, "_road_preview_fit", PREVIEW_FIT_DIM, ROAD_OUT_SEC)
 	await tw3.finished
 
 	_loading_bg.visible = true
 	_loading_label.visible = true
 
-	await get_tree().create_timer(0.15, false).timeout
+	await get_tree().create_timer(SWITCH_DELAY_SEC, false).timeout
 	get_tree().change_scene_to_packed(_world_scene)

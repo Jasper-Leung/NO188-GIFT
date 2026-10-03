@@ -90,13 +90,13 @@ const POOL_SLACK := 6
 ## 1.6m）下路自己就露出来了，不需要为视线另开一条走廊。**别在密度上使劲。**
 const ROAD_CLEAR := 8.0                # RoadBuilder.TOTAL_HALF_WIDTH(6.5) + 1.5 路肩
 const ROAD_INDEX_CELL := 16.0          # 道路段索引的格子边长（米）。越小每格段数越少：
-                                       # 实测 32m 时每格 31 段（最多 77），
-                                       # 16m 时降到 ~8 段，热点快 4 倍
+									   # 实测 32m 时每格 31 段（最多 77），
+									   # 16m 时降到 ~8 段，热点快 4 倍
 const ROAD_POLY_STEP := 1.0            # 中心线抽稀间距。抽稀是弦近似，间距越大
-                                       # 量出来的"离路距离"越大（实测 2.0m 间距
-                                       # 会系统性高报 0.2~0.5m，1.0m 收到 0.05m 内），
-                                       # 而 8.0m 的让位半径只比 6.5m 的路面半宽
-                                       # 多 1.5m 路肩，误差不能白吃掉。
+									   # 量出来的"离路距离"越大（实测 2.0m 间距
+									   # 会系统性高报 0.2~0.5m，1.0m 收到 0.05m 内），
+									   # 而 8.0m 的让位半径只比 6.5m 的路面半宽
+									   # 多 1.5m 路肩，误差不能白吃掉。
 const PLAZA_CLEAR_RADIUS := 14.0       # RoadBuilder.PLAZA_RADIUS(12) + 2
 const PLAZA_CENTER := Vector2(0.0, 43.0)   # RoadBuilder.PLAZA_CENTER_X/Z，全场只有这一个盘
 const STATION_CLEAR := 8.0             # 驿站脚下铺装，别让草穿出来

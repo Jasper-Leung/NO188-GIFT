@@ -5,8 +5,19 @@ var _terrain_builder: Node3D
 var _road_builder: Node3D
 var _player: CharacterBody3D
 var _stations: Array[Node3D] = []
+## 每座驿站模型在**站自身局部坐标**里的 AABB，GLB 还没加载时是空的。
+## 只由 `_update_station_streaming()` 量出来，不另抄一份手填的尺寸表——
+## 那是 16 个数里迟早有一个跟模型对不上的那种表。
+var _station_aabb: Array[AABB] = []
 var _check_in_in_progress = false
 var _all_done = false
+## 集齐二选一面板正开着。
+##
+## 刻意**不用** `_all_done` 冻这个世界：那一趟并没有走完，玩家随时可以
+## 选「再骑一圈」。`verify_minimap.gd` 第 9 节断言的正是「集齐之后
+## `not _world._all_done`」，拿 `_all_done` 当这个闸门会让那条变红，
+## 而那条是对的。
+var _synthesis_choice_open = false
 ## 打卡/小游戏刚结束后的输入静默期（秒）。
 ## 竹子等小游戏就是"按空格"玩的，序列一结束玩家手上往往还在按空格——
 ## 而空格同时是全局 "interact" 动作，不加静默期的话下一次空格会
@@ -53,6 +64,8 @@ var _pass_inside: Dictionary = {}
 ## 里程只增不减，所以按阈值一次性武装就够了，不用每帧重扫里程。
 var _villain_armed: Array = []
 var _villain_playing := false
+## 上一场郑铎戏开演时玩家已过的驿数。见 `_try_villain_scene()` 的场次间隔。
+var _villain_last_play_seen := -999
 const STATION_PASS_RADIUS := 15.0
 ## 五件乐事怎么轮着上。preload 而不是 class_name —— `--script` 模式下
 ## class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
@@ -66,8 +79,25 @@ var _odometer_units: float = 0.0
 ## 十分钟就是七遍同一片地 —— 详见 DayCycle.gd。
 var _ridge: FarRidge = null
 var _day_cycle: Node3D = null
+## 路边四块碑（scripts/RoadSteles.gd）。preload 而不是 class_name ——
+## 理由和 MiniGamePicker 同一条：`--script` 模式下 class_name 会拉编译期依赖。
+const RoadStelesRef = preload("res://scripts/RoadSteles.gd")
+var _steles: Node3D = null
+## 碑号 -> 此刻是否在 STELE_PASS_RADIUS 内。和 _pass_inside 同一个边沿触发：
+## 停在碑前不走不该每秒重弹同一句话。
+var _stele_inside: Dictionary = {}
+## 碑离路心线 9m（RoadSteles.STELE_OFFSET），所以半径得比它大一点，
+## 不然骑在路中心线上根本进不了圈——那块碑就永远只是一件布景。
+const STELE_PASS_RADIUS := 11.0
 var _road_points_2d: PackedVector2Array = []
 var _boundary_intensity: float = 0.0
+## 8 字交叉点那块「路自此复」的碑（scripts/CrossingMark.gd）。
+## 和 RoadSteles 一样用 preload，理由同上。
+const CrossingMarkRef = preload("res://scripts/CrossingMark.gd")
+var _crossing_mark: Node3D = null
+## 三处水（scripts/Water.gd）。preload 而不是 class_name，同 RoadSteles。
+const WaterRef = preload("res://scripts/Water.gd")
+var _water: Node3D = null
 var _station_mesh_pending: Array = []
 var _station_load_timer: float = 0.0
 var _last_check_in_idx: int = -1
@@ -91,6 +121,13 @@ const SOFT_BOUND := 12.0
 const HARD_BOUND := 25.0
 const PUSH_STRENGTH := 12.0
 const PUSH_INCREASE := 1.5
+
+## 驿站占地在 AABB 之外再留这么宽，车撞上去的位置。
+##
+## 必须比 `STATION_PASS_RADIUS`(15.0) 小出一大截，否则玩家被墙挡在打卡圈外面，
+## 「下一处 … Nm」永远减不到 0、圈也永远不亮。实测 16 座里最大的是 `station_岭台`
+## （局部半跨 7.8m），加上这个余量是 9.4m，离 15m 还差 5.6m——玩家停在墙外照样打卡。
+const STATION_KEEPOUT_PAD := 1.6
 
 const STATION_GLB_CONFIG: Array = [
 	{"path": "res://assets/models/station_0.glb", "scale": 10.0, "label_y": 12.0, "glow_y": 8.0, "glow_range": 12.0},
@@ -126,6 +163,38 @@ const STATION_ROOF_TINT := {
 	"roof_2": Color(0.245, 0.215, 0.170),
 }
 
+## 站名牌在世界里的字高（m）。
+##
+## 原来写死 `pixel_size = 0.002`，配上 `font_size = 48` 只有 **9.6cm 高**。
+## 而站心离路心线 `STATION_OFFSET`(18m)、`STATION_PASS_RADIUS` 又是 15m——
+## 玩家在**唯一能看清一座站的那一档**上看到的这行字折合 3 个像素，等于没有。
+## 16 座站里 12 个模型、三对还是同一个 GLB，于是从路上看过去就是十六个
+## 一模一样的带顶盒子，"起程驿楼"和"东岭驿楼"分不出谁是谁。
+## 0.012 → 58cm 高，18m 上约 20px，一行五个字约 100px 宽，720p 画幅里读得出来。
+const STATION_LABEL_PIXEL_SIZE := 0.012
+
+## 牌子的字号。**写成一个常量而不是散在两处调用点的字面量**：定妆照要按
+## 「字高(m) × 屏上每米像素」算它在 18m 那一档有多高，算的是产品里真实的
+## 那个字号；这里填着 48、画笔里写着别的数的话，那条量度量的就是一个
+## 不存在的牌子。
+const STATION_LABEL_FONT_PX := 48
+## 没有碎片的驿站（`_build_station_generic()`）用的小一号。
+const STATION_LABEL_FONT_PX_SMALL := 32
+
+## 牌子挂在**量出来的**屋顶上方多少米。
+##
+## 写死一个高度就是一个雷：亭子有 8m 高的也有 15m 高的，`STATION_GLB_CONFIG`
+## 里那个 `label_y` 全都埋在模型里面（8~14，而模型整体 10~14m）。所以牌子高度
+## 由 `_measure_station_aabb()` 量出来的盒子顶**反解**，改一次模型尺寸它自己跟着走。
+## 和 `CrossingMark.face_lift()` 同一个道理：离地多高是算出来的，不是填出来的。
+const STATION_LABEL_CLEAR := 2.2
+
+## 牌子的字色与描边。深墨配一圈米白halo——它在正午的浅天上要读得出来，
+## 在黄昏的深屋顶上也要读得出来，而玩家看它的时候背景正是这两样。
+const STATION_LABEL_INK := Color(0.09, 0.08, 0.07)
+const STATION_LABEL_HALO := Color(0.97, 0.95, 0.90)
+const STATION_LABEL_HALO_PX := 10
+
 @onready var _check_in_popup: Control = $HUDLayer/CheckInPopup
 @onready var _popup_name: Label = $HUDLayer/CheckInPopup/Panel/VBox/NameLabel
 @onready var _popup_event: Label = $HUDLayer/CheckInPopup/Panel/VBox/EventLabel
@@ -146,6 +215,7 @@ const STATION_ROOF_TINT := {
 @onready var _onboarding: Control = $OnboardingGuide
 @onready var _mini_game_layer: CanvasLayer = $MiniGameLayer
 @onready var _dialogue_popup: Control = $HUDLayer/DialoguePopup
+@onready var _synthesis_panel: Control = $HUDLayer/SynthesisPanel
 
 
 func _ready() -> void:
@@ -185,12 +255,20 @@ func _ready() -> void:
 	_ridge = FarRidge.new()
 	_ridge.name = "FarRidge"
 	add_child(_ridge)
+	# 水必须排在 DayCycle 之前：DayCycle 要拿它做黄昏染色，而黄昏那一档
+	# 的光只有看图才知道水有没有跟上（正午和黄昏必须同机位两张）。
+	_water = WaterRef.new()
+	_water.name = "Water"
+	add_child(_water)
+	_water.setup(_terrain_builder,
+			get_node_or_null("DirectionalLight3D") as DirectionalLight3D)
 	_setup_day_cycle()
 
 	GameManager.all_fragments_collected.connect(_on_all_collected)
 	GameManager.all_fragments_maxed_reached.connect(_on_all_maxed)
 	Localization.language_changed.connect(_apply_language)
 	_joystick.joystick_input.connect(_on_joystick_input)
+	_synthesis_panel.synthesis_choice.connect(_on_synthesis_choice)
 	_check_in_prompt.setup(self)
 	_check_in_prompt.check_in_pressed.connect(_on_check_in_pressed)
 	_setup_shop()
@@ -227,7 +305,34 @@ func _ready() -> void:
 		_tree_scatter.setup(_terrain_builder, _road_builder.get_all_centerlines(),
 			tree_protect)
 
-	_setup_onboarding()
+	# 碑必须排在 TreeScatter 之后：落点判据里有"骑在路上的人到碑之间不许有树
+	# 挡视线"，而树的落点要先算出来。碑面朝向由最近那一段中心线算（不是
+	# "世界原点"——8 字环的中心在 (0, 43)），所以它不需要 _stations 的模型节点。
+	_steles = RoadStelesRef.new()
+	_steles.name = "RoadSteles"
+	add_child(_steles)
+	var tree_xz: Array = []
+	if _tree_scatter != null:
+		for t in _tree_scatter._trees:
+			var tp: Vector3 = t["pos"]
+			tree_xz.append(Vector2(tp.x, tp.z))
+	_steles.setup(_road_builder.get_road_data(), _terrain_builder, tree_xz)
+
+	# 交叉点那块碑排在 _steles 之后：它不靠树判可见性（交叉点 14m 外就是沥青
+	# 边沿，本来就没有行道树），但要复用同一份 road_data 的采样结果。
+	_crossing_mark = CrossingMarkRef.new()
+	_crossing_mark.name = "CrossingMark"
+	add_child(_crossing_mark)
+	_crossing_mark.setup(_road_builder.get_road_data(), _terrain_builder)
+
+	if GameManager.demo_mode:
+		# 演示模式跳过操作说明。评审已经知道怎么操作，而那一屏（连同它的
+		# 淡入淡出）是这条 90 秒演示里最贵的一段——冷启动实测里
+		# 「操作说明 → 拿到操纵权」占了 2.0~4.2 秒。
+		_onboarding.visible = false
+		_player.set_can_move(true)
+	else:
+		_setup_onboarding()
 
 	# 按已播到的场次武装反派对白：armed 的含义是「还没播过」，
 	# 即 i > seen_villain（seen_villain 是 1-based 的已播场次）。
@@ -238,9 +343,22 @@ func _ready() -> void:
 	# 编辑模式入口(必须放在所有 setup 完成后,LayoutEditor 需要 stations 和 plants 列表)
 	if GameManager.is_editor_mode():
 		_setup_editor()
+	elif GameManager.demo_mode:
+		_setup_demo()
 	# 序章压在 Onboarding 之后播，不叠屏。不 await：_ready() 不能挂起。
 	elif not GameManager.prologue_done:
 		_play_prologue()
+
+
+## 演示模式：把操纵权交给 DemoDirector，它自己骑这段环路。
+##
+## 序章在演示里也不播——`enter_demo()` 已经把 `prologue_done` 置真，
+## 而上面那条分支的判据就是它。
+func _setup_demo() -> void:
+	var d: Node = load("res://scripts/DemoDirector.gd").new()
+	d.name = "DemoDirector"
+	add_child(d)
+	d.setup(self, _road_builder.get_road_data())
 
 
 func _setup_onboarding() -> void:
@@ -364,7 +482,7 @@ func _setup_day_cycle() -> void:
 		get_node_or_null("DirectionalLight3D") as DirectionalLight3D,
 		get_node_or_null("FillLight3D") as DirectionalLight3D,
 		get_node_or_null("WorldEnvironment") as WorldEnvironment,
-		_ridge)
+		_ridge, _water)
 	_day_cycle.dusk_began.connect(_on_dusk_began)
 
 
@@ -399,6 +517,7 @@ func _setup_stations() -> void:
 		st.position = pos
 		add_child(st)
 		_stations.append(st)
+		_station_aabb.append(AABB())
 
 		var has_fragment = road_data.station_has_fragment(i)
 		var col: Color = road_data.stations[i]["color"]
@@ -408,7 +527,7 @@ func _setup_stations() -> void:
 		if model_idx >= 0 and model_idx < STATION_GLB_CONFIG.size():
 			# 只建 label + glow，GLB 模型走近时加载
 			var cfg = STATION_GLB_CONFIG[model_idx]
-			_add_label(st, name, cfg.get("label_y", 6.0), 48, has_fragment)
+			_add_label(st, name, cfg.get("label_y", 6.0), STATION_LABEL_FONT_PX, has_fragment)
 			_add_glow(st, col, Vector3(0, cfg.get("glow_y", 4.0), 0), 0.5, cfg.get("glow_range", 12.0))
 			_station_mesh_pending.append({
 				"st": st,
@@ -474,7 +593,78 @@ func _update_station_streaming(delta: float) -> void:
 	else:
 		print("[World3D] WARNING: No mesh found in " + path)
 
+	_measure_station_aabb(entry.st, model)
 	_station_mesh_pending.erase(entry)
+
+
+## 量这座站模型在**站局部坐标**里的 AABB，存进 `_station_aabb`。
+##
+## `MeshInstance3D.get_aabb()` 读的是网格自己的局部盒，既不含节点上的缩放也不含
+## 旋转——直接拿它当占地，半径会小一个 `scale`（驿站统一乘 10~14 倍）。
+## 所以要把「站 → model → 网格」这一串变换逐级乘起来再量。
+func _measure_station_aabb(st: Node3D, model: Node) -> void:
+	var idx := _stations.find(st)
+	if idx < 0:
+		return
+	var box := AABB()
+	var got := false
+	for child in model.find_children("*", "MeshInstance3D", true, false):
+		var mi := child as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		var to_st := st.global_transform.affine_inverse() * mi.global_transform
+		box = box.merge(to_st * mi.mesh.get_aabb()) if got else (to_st * mi.mesh.get_aabb())
+		got = true
+	if got and idx < _station_aabb.size():
+		_station_aabb[idx] = box
+		# 牌子挪到**刚量出来的**屋顶上方。配置表里那个 label_y 是写死的，
+		# 8~14m，而亭子本身就有 10~15m 高——牌子整个埋在网格里，从路上
+		# 一点都看不见。16 座站里三对共用同一个 GLB，看不见名字的那几座
+		# 就是彼此的复制品。
+		var lbl := st.get_node_or_null("StationNameLabel") as Label3D
+		if lbl != null:
+			lbl.position.y = label_y_for(box.end.y)
+
+
+## 牌子挂在屋顶上方多少米。抽成 static 是为了让无头回归能直接调它：
+## 写死在 `_measure_station_aabb()` 里的话，回归只能把那一行的算式抄一遍，
+## 改了画不动测、测会一直绿。回归验证：`verify_stations.gd` 末节。
+static func label_y_for(box_top: float) -> float:
+	return box_top + STATION_LABEL_CLEAR
+
+
+## 这座站挡车的半径（米）。模型还没加载时返回 0 —— 那时玩家还在
+## `STATION_LOAD_DISTANCE` 之外，不该有一堵看不见的墙。
+func station_keepout_radius(i: int) -> float:
+	if i < 0 or i >= _station_aabb.size():
+		return 0.0
+	var ab: AABB = _station_aabb[i]
+	if ab.size == Vector3.ZERO:
+		return 0.0
+	var half := maxf(maxf(absf(ab.position.x), absf(ab.end.x)),
+			maxf(absf(ab.position.z), absf(ab.end.z)))
+	return half + STATION_KEEPOUT_PAD
+
+
+## 驿站占地的硬推出。`Player3D` 是直接 `position +=` 的，没有碰撞求解器，
+## 所以这里也不做软力：15m/s 一帧走 0.25m，力推是拦不住的，只能直接摆回边界。
+## 位置摆出去之后还要把速度按掉一部分，否则车会贴着墙"蹭"着走——
+## `_speed` 归零由 Player3D 自己管，这里只做方向性衰减。
+func _apply_station_keepout() -> void:
+	var pp := Vector2(_player.position.x, _player.position.z)
+	for i in _stations.size():
+		var r := station_keepout_radius(i)
+		if r <= 0.0:
+			continue
+		var c := Vector2(_stations[i].position.x, _stations[i].position.z)
+		var to := pp - c
+		var d := to.length()
+		if d >= r:
+			continue
+		var dir := to / d if d > 0.001 else Vector2(0.0, 1.0)
+		_player.position.x = c.x + dir.x * r
+		_player.position.z = c.y + dir.y * r
+		_player.damp_speed(0.7)
 
 
 ## 只换屋顶材质，其余一律不碰。
@@ -523,7 +713,8 @@ func _build_station_generic(st: Node3D, col: Color, name: String, has_fragment: 
 	sign.material = _mat(Color(0.9, 0.9, 0.85))
 	st.add_child(sign)
 
-	_add_label(st, name, pole_h + 0.6, 48 if has_fragment else 32, has_fragment)
+	_add_label(st, name, pole_h + 0.6,
+			STATION_LABEL_FONT_PX if has_fragment else STATION_LABEL_FONT_PX_SMALL, has_fragment)
 
 	if has_fragment:
 		_add_glow(st, col, Vector3(0, pole_h + 1, 0), 0.5, 10.0)
@@ -546,16 +737,23 @@ func _add_glow(st: Node3D, col: Color, pos: Vector3, energy: float, r: float) ->
 	st.add_child(g)
 
 
-func _add_label(st: Node3D, text: String, y: float, fs: int, has_fragment: bool) -> void:
+## 站名牌。字号按**世界里的字高**给（`STATION_LABEL_PIXEL_SIZE` × `font_size`），
+## 不是按屏幕像素——牌子是钉在世界里的东西，18m 上要读得出来，而玩家一辈子
+## 只在骑行那一档看它。字色深墨加一圈米白halo，因为那一刻它背后的东西正好是
+## 正午的浅天或者黄昏的深屋顶。
+func _add_label(st: Node3D, text: String, y: float, fs: int, has_fragment: bool) -> Label3D:
 	var label = Label3D.new()
 	label.name = "StationNameLabel"
 	label.text = text
 	label.font_size = fs
 	label.position = Vector3(0, y, 0.1)
-	label.modulate = Color(0.1, 0.1, 0.1, 1.0) if has_fragment else Color(0.4, 0.4, 0.4, 1.0)
+	label.modulate = STATION_LABEL_INK
+	label.outline_modulate = STATION_LABEL_HALO
+	label.outline_size = STATION_LABEL_HALO_PX
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.pixel_size = 0.002
+	label.pixel_size = STATION_LABEL_PIXEL_SIZE
 	st.add_child(label)
+	return label
 
 
 func _mat(c: Color, rough: float = 0.85, metal: float = 0.0) -> StandardMaterial3D:
@@ -640,6 +838,8 @@ func _physics_process(_delta: float) -> void:
 
 	# 2. 软边界回弹（F-07）
 	_apply_boundary_force(_delta)
+	# 2b. 驿站占地硬推出：车不钻进亭子里，相机也就不会穿进模型内壁
+	_apply_station_keepout()
 
 	# 3. 更新 _last_global_pos（在回弹后，确保下帧 move_vec 只含前进量）
 	_last_global_pos = _player.global_position
@@ -690,8 +890,13 @@ func _physics_process(_delta: float) -> void:
 	# 而圈和那句话一起把玩家指向一个这一趟按不出来的交互。
 	# 清成 -1 就一起收掉：`_prompt_target()` 返回空（圈不画），
 	# `_interact_blocked_reason()` 也跟着返回空串（不冒那句话）。
+	#
+	# 集齐面板也是同一类状态：它没有倒计时地占着屏幕，而空格在它上面是
+	# **按钮的 ui_accept**，可同一个键又是全局 interact（`Input.is_action_just_pressed`
+	# 拦不住）。少了这一格，玩家按"收下明信片"的那一下空格会顺手再走一遍
+	# interact 分支——而它只差 `_interact_cooldown` 过期就够了。
 	if _check_in_in_progress or _all_done or _mini_game_state == MG_RUNNING \
-			or _villain_playing:
+			or _villain_playing or _synthesis_choice_open:
 		_nearby_station_idx = -1
 		_nearby_shop_idx = -1
 		return
@@ -734,6 +939,8 @@ func _physics_process(_delta: float) -> void:
 	_nearby_shop_idx = best_shop_idx if best_shop_dist < STATION_PASS_RADIUS else -1
 	_nearby_shop_dist = best_shop_dist
 
+	_check_steles()
+
 	# 面板开着却骑出了铺子范围就自动收摊，不然玩家被困在面板上。
 	if _shop_open and _nearby_shop_idx < 0:
 		_close_shop()
@@ -750,6 +957,24 @@ func _physics_process(_delta: float) -> void:
 			_on_interact_blocked()
 
 	_try_villain_scene()
+
+
+## 碑不走 _physics_process 主循环里那个驿站 for——它们是路边的石头，不是
+## 驿站：不加旅币、不进 _nearby_*、不能打卡，只是"骑过去时浮一句"。
+## 半径用 XZ 而不是三维：碑坐在地形上、路在路基上，两边的高差能到几米，
+## 量三维会把站在路中心线的玩家算成 12m 以外。
+func _check_steles() -> void:
+	if _steles == null or _hud3d == null or not _hud3d.has_method("show_pass_line"):
+		return
+	var here := Vector2(_player.position.x, _player.position.z)
+	for i in range(_steles.stele_line_keys.size()):
+		var p: Vector3 = _steles.stele_positions[i]
+		var inside := here.distance_to(Vector2(p.x, p.z)) <= STELE_PASS_RADIUS
+		if inside and not _stele_inside.get(i, false):
+			var line := Localization.t(_steles.stele_line_keys[i])
+			if line != "":
+				_hud3d.show_pass_line(line)
+		_stele_inside[i] = inside
 
 
 func _apply_boundary_force(delta: float) -> void:
@@ -784,8 +1009,8 @@ func _apply_boundary_force(delta: float) -> void:
 func _can_start_check_in(station_idx: int) -> bool:
 	if station_idx < 0 or station_idx != _nearby_station_idx:
 		return false                          # 必须站在可打卡驿站旁
-	if _check_in_in_progress or _all_done:
-		return false                          # 打卡序列中 / 全收集收尾中
+	if _check_in_in_progress or _all_done or _synthesis_choice_open:
+		return false                          # 打卡序列中 / 全收集收尾中 / 集齐面板开着
 	if _mini_game_state == MG_RUNNING:
 		return false                          # 小游戏进行中(它的按键会漏进 interact)
 	# 郑铎戏正在播对白时同样不能打卡。对白弹窗靠 ui_accept 推进，而 interact 也是
@@ -1093,9 +1318,16 @@ func _on_station_check_in(station_idx: int) -> void:
 		_do_check_in(station_idx)
 
 
-## 第一次集齐五块碎片。**不是结束** —— 顶栏、脚下的圈、小地图此刻都已经
-## 切到「再访 · 还差 2 次」，导航重新指向还欠到访的驿站，玩家当然可以继续骑。
-## 这里只放一小段合成动画 + 一句话，把"礼物成形了，但乐事还能再收"讲清楚。
+## 第一次集齐五块碎片。**不是结束，但必须有落点**。
+##
+## 原来是"合成动画 + 浮一句『顶栏的圆点还是空的』"，然后把操纵权还回去。
+## 信息量最大的那一刻（五件乐事到齐、五个字凑齐、下一站是礼物）被当成了一个
+## 中局过场，而唯一的出口「收下明信片」藏在暂停面板深处、没有任何一句话
+## 告诉玩家它在那儿。一趟 20~30 分钟，评委玩不到终点就已经还回去了。
+##
+## 现在这里弹 `SynthesisPanel`：「收下明信片 · 结束这一趟」/「再骑一圈 · 刷到完满」。
+## 顶栏、脚下的圈、小地图此刻都已经切到「再访 · 还差 2 次」，选"再骑一圈"
+## 之后玩家当然可以继续骑——所以 `_all_done` 一个字都没动。
 func _on_all_collected() -> void:
 	_player.set_can_move(false)
 	_player.set_camera_locked(true)
@@ -1105,7 +1337,24 @@ func _on_all_collected() -> void:
 	_spawn_synthesis_animation()
 	await get_tree().create_timer(2.5, false).timeout
 	_collecting_label.visible = false
-	# 收尾：把操纵权和相机还回去，并给一段静默期 ——
+	# 冻结状态一路保持到面板关闭 —— 面板只是原来那 2.5 秒窗口的加长版，
+	# 所以这里不需要第二套冻结机制，只需要把闩锁按上、让那三道闸都知道。
+	_synthesis_choice_open = true
+	_synthesis_panel.open()
+
+
+## take_postcard = true 是「收下明信片 · 结束这一趟」，false 是「再骑一圈」。
+func _on_synthesis_choice(take_postcard: bool) -> void:
+	_synthesis_choice_open = false
+	# 面板由这一处负责收掉，而不是只由它自己的按钮收：`synthesis_choice` 是
+	# 一个公开信号，任何按它发信号的路子（定妆照脚本、以后的自动导览）走完
+	# 都会落到这里，面板不关的话操纵权已经还回去了而模态还亮着——屏幕在等
+	# 他按键、脚下的圈也在等他按键，两个提示说的还不是同一件事。
+	_synthesis_panel.close()
+	if take_postcard:
+		GameManager.go_to_end_card()
+		return
+	# 收尾三件套与 `_on_all_collected` 原来那句一样，一件都不能少：
 	# 玩家手上多半还按着空格，闩锁不在这一刻放下就会立刻再触发一轮打卡。
 	_player.set_camera_locked(false)
 	_player.set_can_move(true)
@@ -1241,8 +1490,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	# 但传播顺序不由我们保证，漏掉就把暂停面板叠在铺子上面。
 	if _onboarding.visible or _shop_open or _villain_playing:
 		return
+	# 集齐面板自己收 ESC（走「再骑一圈」），所以这里必须让开，
+	# 否则同一个键既关了面板又弹起暂停面板，两个模态叠在一起。
 	if event.is_action_pressed("pause"):
-		if _check_in_in_progress or _all_done:
+		if _check_in_in_progress or _all_done or _synthesis_choice_open:
 			return
 		toggle_pause()
 
@@ -1424,9 +1675,46 @@ const VILLAIN_SCENES: Array = [
 	},
 ]
 
+## 离「下一处」碎片驿站还有这么近的时候，不许把郑铎叫出来。
+##
+## 实测（`.review/play_newcomer2.txt` ~146s）：玩家离目标还有 15m、正全速冲刺，
+## 车突然停住，一个不认识的人开始讲他妈的坟——9 行台词必须读完才能动。
+## 这是全场唯一一次"游戏卡了"的错觉，而它出现的**唯一**原因是落点撞上了
+## 到站那一刻：正冲刺的人被冻住的观感，比停下来的人被冻住差得多。
+##
+## 30 不是随手挑的：`STATION_PASS_RADIUS` 是 15m，而站心离中心线 18m，
+## 玩家从 30m 外开始减速到停稳正好几秒——留出这一段，戏就落在巡航途中，
+## 而不是落在"我马上就能按空格"的那半秒上。
+const VILLAIN_MIN_TARGET_DIST := 30.0
 
-## 每帧轮询里程阈值。里程只增不减，所以阈值一次性消费掉。
+## 两场郑铎戏之间至少要再过这么多座驿。
+##
+## 三场的阈值是 4/8/12，本来就隔得开，正常玩家永远碰不到这个下限。
+## 它是为**一次冲太快**准备的：`_villain_armed` 在 `_ready()` 里一次性武装，
+## 而阈值只看"已过几驿"，所以一个玩家从 4 驿一路开到 12 驿，
+## 三场会连着灌完、中间一站都没停——那不是"有人三次找你"，
+## 那是"这一趟你再也不能安静地骑了"。有了这道闸，多余的那几场会被压回去，
+## 玩家还得再骑两站才轮到下一场。
+const VILLAIN_MIN_STATION_GAP := 2
+
+## 入场那一段的秒数：镜头收束走 `VILLAIN_CAM_PULL_SEC`，再定格 `VILLAIN_CAM_HOLD_SEC`。
+##
+## 这一段原来根本不存在——车直接停住、对白直接弹出。玩家没有任何东西可以把
+## "刚才那一下"归因，于是读成"卡了"。加它不是为了好看，是为了让打断有一个
+## **可归因的边界**：先看见一句"手机响了"，再看见镜头收一下，然后才有人说话。
+const VILLAIN_CAM_PULL_SEC := 0.7
+const VILLAIN_CAM_HOLD_SEC := 1.1
+
+
+## 每帧轮询驿数阈值。驿数只增不减，所以阈值一次性消费掉。
 ## 「路过够多的驿」只是触发条件，真门是 GameManager.claim_villain_scene() 的严格顺序检查。
+##
+## 落点有两道额外的闸，都在**武装之后、开演之前**：
+##  · 离当前目标太近（`VILLAIN_MIN_TARGET_DIST`）→ 这一帧不起播，
+##    armed 留着，下一帧再看。所以它不是"取消"，是"排队等一个不撞的时刻"。
+##  · 离上一场太近（`VILLAIN_MIN_STATION_GAP`）→ 同上。
+## 两道闸都只推迟、不丢弃：玩家一直停在目标边上，那一场就一直等着，
+## 等到他骑开——而这正是我们想要的，玩家总有一刻是要走的。
 func _try_villain_scene() -> void:
 	if _villain_armed.is_empty() or _villain_playing:
 		return
@@ -1440,6 +1728,12 @@ func _try_villain_scene() -> void:
 			continue
 		if seen < int(VILLAIN_SCENES[i]["seen"]):
 			continue
+		# 闸一：刚够过阈值的那几秒通常正冲刺着，不在这里叫他。
+		if _too_close_to_target():
+			return
+		# 闸二：一次只排一场。阈值被一口气冲掉时，多余的场次留到下一段路。
+		if seen < _villain_last_play_seen + VILLAIN_MIN_STATION_GAP:
+			return
 		_villain_armed[i] = false
 		if GameManager.claim_villain_scene(i + 1):
 			# _play_villain_scene 是协程：它自己在结尾清 _villain_playing。
@@ -1449,12 +1743,41 @@ func _try_villain_scene() -> void:
 		return
 
 
+## 玩家是不是正贴着「下一处」碎片驿站。判据与顶栏那句「下一处」同一个函数
+## （`GameManager.fragment_station_needs_visit()`），不许自己抄一遍「最近的
+## 未收碎片站」——抄的那份迟早和 HUD 漂，然后打断就落在了另一个站旁边。
+func _too_close_to_target() -> bool:
+	var rd = _road_builder.get_road_data()
+	if rd == null:
+		return false
+	for i in rd.stations.size():
+		if not GameManager.fragment_station_needs_visit(i):
+			continue
+		var d: float = Vector2(_player.position.x - _stations[i].position.x,
+				_player.position.z - _stations[i].position.z).length()
+		if d < VILLAIN_MIN_TARGET_DIST:
+			return true
+	return false
+
+
 func _play_villain_scene(scene_idx: int) -> void:
 	if _headless_mode:
 		_villain_playing = false
 		return
 	_player.set_can_move(false)
 	var scene: Dictionary = VILLAIN_SCENES[scene_idx]
+	# 记在**开演**这一刻而不是函数入口：它是"下一场最早能从哪一驿开始数"的起点。
+	_villain_last_play_seen = GameManager.get_seen_station_count()
+
+	# ---- 入场：先告诉玩家"有人找你"，再收一下镜头，然后才进对白 ----
+	# 三步各自都便宜（一条 Label + 一次 tween + 一次定格），但缺任何一步
+	# 打断就退回"车停住了"。顺序也不能换：先出字再动镜头，玩家读到的是一次
+	# 转场；先动镜头再出字，玩家读到的是镜头自己抽了一下。
+	_hud3d.show_cue_line(Localization.t("villain_speaker"),
+			Localization.t("villain_cue_%d" % (scene_idx + 1)))
+	await _villain_camera_cue()
+	_hud3d.clear_cue_line()
+
 	for part in scene["parts"]:
 		var lines: Array = []
 		for key in part["lines"]:
@@ -1473,5 +1796,35 @@ func _play_villain_scene(scene_idx: int) -> void:
 			push_warning("World3D: 郑铎第 %d 场被其他对白打断，提前收尾" % (scene_idx + 1))
 			break
 		_dialogue_popup.visible = false
+
+	# 收尾必须把入场那一段接管的一切都还回去，一个都不能漏：
+	# 相机锁、look_at 目标、操纵权、以及 _villain_playing。
+	_cam_look_at_active = false
+	_player.set_camera_locked(false)
 	_player.set_can_move(not _paused and not _check_in_in_progress and not _all_done)
 	_villain_playing = false
+
+
+## 打断入场的那一下镜头收束。
+##
+## 收得**很浅**（抬高一点、往车后方缩一点），因为玩家此刻正满速冲刺，
+## 一记猛拉会读成运镜失误而不是"有人找你"。定格那一下也是同一个道理：
+## 让世界停住一秒钟，好让那句提示被读完，然后才轮到对白接管。
+func _villain_camera_cue() -> void:
+	_player.set_camera_locked(true)
+	var fwd: Vector3 = -_player.global_transform.basis.z
+	var fwd_flat := Vector3(fwd.x, 0.0, fwd.z)
+	if fwd_flat.length() < 0.001:
+		fwd_flat = Vector3(0.0, 0.0, -1.0)
+	fwd_flat = fwd_flat.normalized()
+	var target: Vector3 = _player.global_position - fwd_flat * 2.2 \
+			+ Vector3(0.0, 3.1, 0.0)
+	_cam_look_at_target = _player.global_position + Vector3(0.0, 1.2, 0.0)
+	_cam_look_at_active = true
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_player_cam, "global_position", target, VILLAIN_CAM_PULL_SEC) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await tw.finished
+	await get_tree().create_timer(VILLAIN_CAM_HOLD_SEC, false).timeout

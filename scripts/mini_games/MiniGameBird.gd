@@ -3,6 +3,7 @@ extends Control
 ## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
 ## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
+const MiniGameChrome = preload("res://scripts/mini_games/MiniGameChrome.gd")
 ## 禽语湖湾(4) 小游戏：看清一只鸟的剪影，再从4只里把它认出来
 
 var _world_ref: Node = null
@@ -158,6 +159,13 @@ func _draw_choice_phase(w: float, h: float) -> void:
 		draw_string(ThemeDB.fallback_font, Vector2(bx + 8.0, by + 24.0),
 			str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 20, Color(1, 1, 1, 0.75))
 
+	# 取消。这一屏原来**留了热区却没画**：那块矩形只写在 `_pick_by_mouse()`
+	# 里，右下角于是变成一块点得着、读不出是什么的地方——玩家在那一带点空了，
+	# 小游戏就没了，而界面上没有任何东西告诉他那里能点。
+	# 画出来，这块角落才是它自己声称的那样。
+	MiniGameChrome.draw_cancel(self, MiniGameChrome.cancel_rect(Vector2(w, h)))
+
+
 ## 四只鸟必须是**四个形状**，不能是同一个形状刷四种颜色。
 ##
 ## 原来四只鸟的头/身/翼/尾是同一套坐标，唯一的区别是填充色——于是这个
@@ -289,7 +297,8 @@ func _pick_by_mouse(event: InputEvent) -> void:
 		return
 	if event.button_index != MOUSE_BUTTON_LEFT:
 		return
-	var btn_rect := Rect2(size.x - 160, size.y - 60, 140, 44)
+	# 热区走画笔那一处，见 MiniGameChrome 那条注释
+	var btn_rect: Rect2 = MiniGameChrome.cancel_rect(size)
 	if btn_rect.has_point(event.position):
 		_world_ref._on_mini_game_done(CANCELLED)
 		return

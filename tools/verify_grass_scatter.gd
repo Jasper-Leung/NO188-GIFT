@@ -514,13 +514,29 @@ func _run() -> void:
 	var max_builds := 0
 	var worst_frame_ms := 0.0
 	var over_10ms := 0
+	# 逐帧的耗时全存下来，算「削掉前 K 名之后的最慢帧」。
+	#
+	# 为什么不能只判最大值：最大值量的是**机器**不是代码。这台机器上后台跑着
+	# 别的程序时，同一份代码连跑三次量到最慢帧 20.00 / 32.00 / 29ms，而单帧
+	# 均值稳在 0.635 / 0.671 / 0.652ms、铺满 tick 47/47/45 —— 均值稳而最大值
+	# 乱跳，就是外部噪声。同一份 CLAUDE.md 里已经写着这条判据
+	# （"最慢的一帧这类极值断言量的是机器不是代码"），而这条断言当初守的
+	# 回归是"ring 0 一格建不完就整帧丢出去"——那个 bug 的特征是**很多**帧
+	# 超标，不是**三帧**超标。所以削掉最前面的少数几个尖峰再判，既守得住
+	# 原来那个回归，又不会被调度器的一次抢占判红。
+	#
+	# 用 usec 而不是 msec：msec 分辨率下每帧耗时只能取整数，读出来永远是
+	# 20.00 / 32.00 / 29.00 这种整数字，一点真实分布都看不出来。
+	var frame_us: Array[int] = []
 	var t0 := Time.get_ticks_msec()
 	while t < 20.0:            # 20 秒 = 300m
 		pos2 += Vector3(step, 0.0, 0.0)
 		_grass.set_focus(pos2)
-		var f0 := Time.get_ticks_msec()
+		var f0 := Time.get_ticks_usec()
 		_grass.tick(1.0 / 60.0)
-		var fms := float(Time.get_ticks_msec() - f0)
+		var fus := Time.get_ticks_usec() - f0
+		var fms := float(fus) / 1000.0
+		frame_us.append(fus)
 		worst_frame_ms = maxf(worst_frame_ms, fms)
 		if fms >= 10.0:
 			over_10ms += 1
@@ -534,6 +550,22 @@ func _run() -> void:
 				hidden_hits += 1
 		t += 1.0 / 60.0
 	var ride_ms := Time.get_ticks_msec() - t0
+	# 削掉前 TRIM 个尖峰之后的最慢帧。TRIM=3 判的是"第 4 慢的那一帧"：
+	# 三次抢占以内的尖峰放过去，成片超标照样红。
+	const TRIM := 3
+	var sorted_us := frame_us.duplicate()
+	sorted_us.sort()
+	var trimmed_worst_ms := 0.0
+	if sorted_us.size() > TRIM:
+		trimmed_worst_ms = float(sorted_us[sorted_us.size() - 1 - TRIM]) / 1000.0
+	var over_20ms := 0
+	var over_40ms := 0
+	for u in frame_us:
+		var f := float(u) / 1000.0
+		if f >= 20.0:
+			over_20ms += 1
+		if f >= 40.0:
+			over_40ms += 1
 	_check(hidden_hits == 0,
 		"骑行全程没有一格是「建好了却不显示」的（隐藏 %d 次）" % hidden_hits)
 
@@ -585,13 +617,32 @@ func _run() -> void:
 		"每一份的累计构建次数都 <= 1（实测最大 %d）" % max_builds)
 
 	# ---- 9. 骑行的单 tick 构建预算 ----
-	print("    1200 帧里有 %d 帧 >= 10ms（最慢 %.2fms）" % [over_10ms, worst_frame_ms])
-	_check(worst_frame_ms < 20.0,
-		"骑行中最慢的一帧 < 20ms（实测 %.2fms）" % worst_frame_ms)
-	# 只查最大值会漏掉"每个构建 tick 都慢 15ms"这种 equally bad 的情况：
-	# 超过 10ms 的不能超过三成，否则是常态掉帧而不是偶发。
-	_check(over_10ms <= 60,
-		"超过 10ms 的帧不超过 60/1200（实测 %d）" % over_10ms)
+	#
+	# 判据是「削掉前 3 个尖峰之后的最慢帧」，不是绝对最大值：见上面 frame_us
+	# 那段注释——绝对最大值量的是机器，成片超标才量的是代码。原始最大值照样
+	# 打出来，但它只是**诊断信息**，判红判的是它削掉尖峰后的邻居。
+	print("    1200 帧里 >=10ms %d 帧 / >=20ms %d 帧 / >=40ms %d 帧（绝对最慢 %.2fms，"
+		% [over_10ms, over_20ms, over_40ms, worst_frame_ms]
+			+ "削掉前 %d 个尖峰后最慢 %.2fms）" % [TRIM, trimmed_worst_ms])
+	_check(trimmed_worst_ms < 20.0,
+		"骑行中最慢的一帧 < 20ms（削掉前 %d 个尖峰后 %.2fms；绝对最慢 %.2fms "
+		% [TRIM, trimmed_worst_ms, worst_frame_ms]
+			+ "只作诊断）")
+	#
+	# 下面这条是"建格工作塌进少数几帧"的正面判据。阈值是 40ms 而不是 20ms，
+	# 这不是随手挑的：把 BUILD_MS_STREAM 从 6 抬到 600（故意让一个 tick 建完
+	# 整个环）之后量到的是**最慢帧 155.51ms、>=40ms 的只有 9 帧、
+	# >=20ms 的 9 帧、>=10ms 的 9 帧**——也就是说 >=10ms / >=20ms 那两条
+	# 计数在真出 bug 时反而**变绿**（干净跑是 23~25 帧）。
+	#
+	# 原因很直白：总工作量是恒定的（785ms vs 干净跑的 787ms，一模一样），
+	# 预算掐开后工作只是从 24 帧摊开变成 9 帧堆在一处，**帧数下降、峰值暴涨**。
+	# 所以判据不能数"慢帧有多少"，只能看"最慢的那几帧有多慢"——
+	# 上面那条削尖峰后的最慢帧（干净 13~14ms vs 变异 97.61ms，差 7 倍）才是
+	# 真正有分辨力的那一条。这条 40ms 的计数是它的备份：万一某天尖峰数超过
+	# TRIM 而把真峰值削掉了，这条会先红。
+	_check(over_40ms <= 2,
+		"没有帧慢到 40ms 以上（实测 %d/1200）" % over_40ms)
 	# 1200 帧模拟 20 秒骑行：均摊到每帧的 CPU 预算必须远低于 16.6ms 的帧时间
 	print("    20s 骑行模拟（1200 帧, 15m/s, 300m）共 %dms，单帧均值 %.3fms，最慢 %.2fms"
 		% [ride_ms, ride_ms / 1200.0, worst_frame_ms])

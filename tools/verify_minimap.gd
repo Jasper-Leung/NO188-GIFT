@@ -262,6 +262,20 @@ func _run() -> void:
 	await physics_frame
 	await process_frame
 
+	# 2.5 秒演完之后会弹集齐二选一面板，而面板开着的时候世界是冻住的
+	# （`_synthesis_choice_open` 在 `_physics_process` 那张早退单子里，
+	# `_nearby_*` 被清成 -1，脚下的圈照画不误才是 bug）。这一节接下来要
+	# 逐站核对那个圈，所以得先走玩家会走的那条路：选「再骑一圈」。
+	# 顺带钉一条"面板真的弹出来了"，不然这段代码将来可以悄悄失效
+	# （比如那 2.5 秒变长）而断言数一条不少、全绿。
+	_ck("集齐 2.5 秒后弹出了二选一面板", bool(_world._synthesis_choice_open))
+	_ck("面板开着的时候世界是冻住的（不能边看面板边打卡）",
+			not bool(_world._player._can_move))
+	_world._on_synthesis_choice(false)
+	await physics_frame
+	await process_frame
+	_ck("选「再骑一圈」之后世界解冻", bool(_world._player._can_move))
+
 	_ck("五站各打一次卡后：不算满格", not bool(_gm.all_fragments_maxed()))
 	_ck("五站各打一次卡后：这一趟**没有**结束", not bool(_world._all_done),
 			"_all_done=%s" % str(bool(_world._all_done)))
@@ -325,6 +339,21 @@ func _run() -> void:
 	_ck("五站各刷满：这一趟**才**结束", bool(_world._all_done),
 			"_all_done=%s" % str(bool(_world._all_done)))
 	_eq("刷满后评级是完满(4)", int(pvar.compute_variant()), 4)
+
+	# 刷满之后顶栏那一行**不许空掉**。原来 `_update_next_label()` 在
+	# `_next_fragment_target()` 返回空时写的是 `text = ""` ——于是这一栏
+	# 整条消失，只剩衬底。而这恰好是玩家最该看着它的那两秒：屏幕中央
+	# 正在演「五座驿站都走满了」，2.5 秒后就要跳去结算页，信息量最大的一刻
+	# 导航栏先哑了；衬底又一直铺到屏右，于是那段空档读成一条什么都没有的黑带
+	# （评审第一轮记的约 600px 死区就是它，"下一处"一空就整整翻倍）。
+	# 上面对"集齐"那一段已经钉了"整圈没有一帧是空的"，这里是它的另一半：
+	# 真的一个目标都没有的时候，那一栏仍然得说出一件真事。
+	await process_frame
+	_ck("刷满后顶栏那一行不是空的",
+			str(_hud._next_label.text).strip_edges() != "",
+			"text=%s" % str(_hud._next_label.text))
+	_eq("刷满后顶栏报的是那句收尾的话",
+			str(_hud._next_label.text), _loc.t("hud_all_done"))
 
 	_finish(backup)
 

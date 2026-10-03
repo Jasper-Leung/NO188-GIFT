@@ -71,16 +71,16 @@ func _run() -> void:
 	print("VEGETATION total=", total, " north=", north, " south=", south,
 		" invalid_distance=", invalid_distance, " invalid_height=", invalid_height,
 		" outside_terrain=", outside_terrain, " protected_station_bushes=", protected_station_bushes)
-	if invalid_distance > 0:
-		failures += invalid_distance
-	if invalid_height > 0:
-		failures += invalid_height
-	if outside_terrain > 0:
-		failures += outside_terrain
-	if protected_station_bushes > 0:
-		failures += protected_station_bushes
-	if north != south:
-		failures += 1
+	# 统一契约：每条回归都打 `[OK]` / `[FAIL]` 行。`tools/check_all.sh` 靠它统计，
+	# 而它判"这条没跑成"的方式是**一条断言都没打出来**——这种脚本失败时退出码
+	# 仍可能是 0，只看退出码会把空跑判成通过。
+	_ck("每株植物都在路的净空里", invalid_distance == 0, "越界 %d 株" % invalid_distance)
+	_ck("每株植物都站在地面上", invalid_height == 0, "悬空/穿地 %d 株" % invalid_height)
+	_ck("没有植物掉到地形外面", outside_terrain == 0, "界外 %d 株" % outside_terrain)
+	_ck("驿站周围的灌木被清干净了", protected_station_bushes == 0,
+			"还剩 %d 丛" % protected_station_bushes)
+	_ck("南北两侧数量对得上（散布没偏一边）", north == south,
+			"北 %d / 南 %d" % [north, south])
 
 	road.queue_free()
 	terrain.queue_free()
@@ -93,3 +93,11 @@ func _run() -> void:
 func _fail(message: String) -> void:
 	failures += 1
 	print("FAIL: ", message)
+
+
+func _ck(label: String, cond: bool, detail: String = "") -> void:
+	if cond:
+		print("[OK]   ", label)
+	else:
+		failures += 1
+		print("[FAIL] ", label + ("（" + detail + "）" if detail != "" else ""))

@@ -8,6 +8,8 @@ const MAX_HEIGHT := 25.0
 ## 草皮的底色必须等于脚下那块地的颜色，否则草和地会明显分家。
 const BASE_COLOR := Color(0.36, 0.55, 0.24, 1.0)
 const SHADER_PATH := "res://assets/shaders/terrain_grass.gdshader"
+## 名字承诺了水的三处要真的挖出碗来（scripts/water_data.gd）。
+const WaterDataRef = preload("res://scripts/water_data.gd")
 
 var _mesh_instance: MeshInstance3D
 var _height_grid: PackedFloat64Array = []
@@ -22,6 +24,10 @@ func _build_terrain() -> void:
 	var res = TERRAIN_RES
 	var size = TERRAIN_SIZE
 	var cell_size = size / res
+	# 先把三只碗定下来再建网格：碗深是从**自然高程**反推的，而网格本身
+	# 要按碗深去挖——顺序反过来的话碗深按"没挖过的地形"算，碗心就浅了
+	# WATER_DEPTH 的量，水会薄成一层贴在碗底上的蓝。
+	WaterDataRef.plan(Callable(self, "natural_height_at"))
 	_build_height_grid()
 
 	var verts: PackedVector3Array = PackedVector3Array()
@@ -105,13 +111,28 @@ func _build_terrain() -> void:
 
 
 func _height(x: float, z: float) -> float:
+	return natural_height_at(x, z) - WaterDataRef.depth_at(x, z)
+
+
+## 未挖碗的自然高程。`water_data.plan()` 按它反推碗深，所以它必须是
+## **不含碗**的那一半——不然碗深会拿"已经挖过"的地形去算，越挖越浅。
+func natural_height_at(x: float, z: float) -> float:
 	var h = 0.0
 	h += _fbm(x * 0.008, z * 0.008, 3) * 8.0
 	h += _fbm(x * 0.02, z * 0.02, 2) * 2.0
 	h += _fbm(x * 0.06, z * 0.06, 1) * 0.5
 	# 地形不在广场区下挖(避免中间凹陷感),改由 RoadBuilder 把广场盘抬到
 	# 该区最高地形之上 0.5m,呈现圆形环岛而非凹陷坑。
+	#
+	# clamp 之后再挖碗，而 clamp 下限 -3.0 正是 water_data 把水位放到 -3.4 的理由：
+	# 自然地形恒不低于 -3.0，于是全场低于水位的只有挖出来的那三只碗，
+	# 水就不可能漫出去（water_data.gd 文件头有完整推导）。
 	return clamp(h, -3.0, 6.0)
+
+
+## 三只碗。给 `Water.gd` 和回归读——同一个数组对象，不另抄一份。
+func water_basins() -> Array:
+	return WaterDataRef.basins()
 
 
 func _fbm(x: float, z: float, octaves: int) -> float:

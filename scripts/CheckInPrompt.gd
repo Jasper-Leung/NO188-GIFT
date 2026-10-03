@@ -162,7 +162,10 @@ func _draw() -> void:
 	var pad := 8.0
 	var plate := Rect2(text_pos.x - pad, text_pos.y - float(fs) - pad * 0.6,
 		text_w + pad * 2.0, float(fs) + pad * 1.2)
-	draw_rect(plate, Color(0.06, 0.05, 0.07, 0.72))
+	# 透明度必须压到 0.92，不能停在"半透明"：0.72 那版压不住底下的石台——
+	# 米金字压在一块亮石台上，石头从字里透出来，整行读成"被什么挡了一部分"，
+	# 而不是一句提示。底板本来就是为可读性铺的，留那 28% 透光没有构图收益。
+	draw_rect(plate, Color(0.06, 0.05, 0.07, 0.92))
 	# 描边：提示文字直接画在浅蓝天空上时，浅色描边是唯一能让它读出来的办法
 	# （米金 0.96/0.78/0.49 压在浅蓝上对比度约 1.6:1，远低于可读线）。
 	draw_string(font, text_pos + Vector2(1, 0), label, HORIZONTAL_ALIGNMENT_CENTER, -1, fs, Color(0.06, 0.07, 0.10, 0.75))

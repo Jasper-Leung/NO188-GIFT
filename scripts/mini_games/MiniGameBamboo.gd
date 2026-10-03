@@ -3,6 +3,7 @@ extends Control
 ## 五个小游戏共用一套景。这里用 preload 而不是 class_name：
 ## `--script` 模式下 class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGameBackdrop = preload("res://scripts/mini_games/MiniGameBackdrop.gd")
+const MiniGameBar = preload("res://scripts/mini_games/MiniGameBar.gd")
 ## 竹雨庭(14) 小游戏：QTE 砍竹 — 5根竹子依次倒下，需在窗口内按键
 
 var _world_ref: Node = null
@@ -16,6 +17,94 @@ const INTRO_SEC := 0.8
 ## _next_bamboo 里直接 _on_mini_game_done(SUCCESS) + queue_free()，遮罩在同一帧
 ## 就没了，玩家看到的是"按空格小游戏凭空消失"，既分不清是砍赢了还是被踢出去。
 const SUCCESS_HOLD_SEC := 1.6
+
+## 五根竹子的摆法。
+##
+## 原来每根是一条 `draw_rect(..., 12, ...)` 画的**等宽竖条**，竹节那四条线
+## 也是 12px 宽的——画在一条 12px 的条上等于没有。所以这一屏上根本没有竹子，
+## 只有五根绿色的柱子和五个数字，而标题写的是"竹子一冒头就按空格"。
+const SPACING := 152.0
+const STALK_W_BASE := 30.0
+const STALK_W_TIP := 15.0
+const NODE_COUNT := 4
+## 还没冒头那根笋的高度占比。太小的话剩四座就成四个点，
+## 这一屏读成"一根竹子 + 四粒灰"。
+const SPROUT_FRAC := 0.20
+## 砍倒之后画成什么样。
+##
+## 不把整根放平：五根按 `SPACING` 并排，一根 `h*0.52` 高的竹子倒下去要横跨
+## 好几列，五个全倒就是一片绿线团，谁也数不清自己砍了几根。留一截桩、上半截
+## 斜靠在桩上，是砍竹子本来就会有的样子，也老老实实待在自己那一列里。
+const STUMP_FRAC := 0.16
+const FALL_DEG := 72.0
+## 斜靠那截的横向伸出占列距的几成。这个数是**从"不许伸进邻居那一列"反解**出来的，
+## 不是窗口高度的百分比 —— 按高度取的话，720p 上量着刚好不压到邻居，1080p 上
+## 就压上去了（这一节的判据在 1280 高的视口上量到 177px > 152px 就是这么翻的）。
+const FALL_REACH_FRAC := 0.78
+
+## 砍倒那截该有多长。横向伸出 = 长度 × sin(FALL_DEG)，所以长度由列距反解。
+static func fall_len(spacing: float) -> float:
+	return spacing * FALL_REACH_FRAC / sin(deg_to_rad(FALL_DEG))
+
+
+## 一根竹子的四边形：底宽 `w_base`、顶窄 `w_tip`，绕**底端**朝 `lean_deg`
+## 倒过去。倒下的上半截和立着的那半截走的是同一个函数——它们本来就是
+## 同一根竹子，只是躺下了。
+## 纯函数，不碰画笔（headless 不调 `_draw`，见 CLAUDE.md 已知陷阱）。
+static func stalk_poly(base: Vector2, height: float, w_base: float, w_tip: float,
+		lean_deg: float) -> PackedVector2Array:
+	var a := deg_to_rad(lean_deg)
+	var dir := Vector2(sin(a), -cos(a))          # lean=0 时指向正上方
+	var side := Vector2(cos(a), sin(a))          # 与竹身垂直
+	var tip := base + dir * height
+	return PackedVector2Array([
+		base - side * (w_base * 0.5), tip - side * (w_tip * 0.5),
+		tip + side * (w_tip * 0.5), base + side * (w_base * 0.5),
+	])
+
+## 第 n 个竹节距底端的高度占比。竹节比竹身宽一点，是竹子身上最认得出来的一处。
+static func node_fracs(count: int) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	for n in count:
+		# 底端那个节贴着地不算数，从 1/count 开始往上排
+		out.append((float(n) + 1.0) / float(count + 1))
+	return out
+
+## 第 i 根竹子该往哪边倒。左右交替：都往同一边倒的话，斜靠的那截会压在
+## 右边那根还立着的竹子上。交替之后每截只伸进自己那一列。
+static func fall_dir(i: int) -> float:
+	return 1.0 if i % 2 == 0 else -1.0
+
+## 顶上那片叶。`reach`/`drop`/`width` 三个都直接以像素计。
+##
+## 叶是**窄条**。原来一片叶的三个顶点是根、朝外上方、斜下方各一个，
+## 于是一片叶横向伸到 `bh * 0.31`（116px）却只垂 `bh * 0.14`（52px）——
+## 比 30px 宽的竹身还大好几倍，两片一左一右读成一对翅膀或者龙舌兰。
+## 竹叶身上最认得出的是"长而窄"：叶宽大致是叶长的十五分之一。
+##
+## 叶宽是**参数**，不是从别的量推出来的：把中点沿弦的垂直方向推开
+## 半个 `width`，量出来的最大宽度就正好是 `width`（等腰三角形），
+## 回归可以拿返回的多边形自己复核，不用信这里的注释。
+static func leaf_poly(root: Vector2, side: float, reach: float, drop: float,
+		width: float) -> PackedVector2Array:
+	var tip := root + Vector2(side * reach, drop)
+	var chord := tip - root
+	if chord.length() <= 0.0:
+		return PackedVector2Array([root, root, tip])
+	var mid := root + chord * 0.5 + chord.orthogonal().normalized() * (width * 0.5)
+	return PackedVector2Array([root, mid, tip])
+
+## 顶上那几片叶。每一项是 [根距竹梢的高度占比（负数）, 横向伸出, 垂下, 叶宽]，
+## 四个量都按 `bh` 计。左右各一片。
+##
+## **画笔和回归读的是同一张表**（和 `CLOUD_CIRCLES` 同一个道理）：测试里另抄
+## 一份数字的话，改画不动测、测会一直绿，而"叶宽只有竹身的四分之一"这件事
+## 正是这一版的正事。
+const LEAVES := [
+	[-0.82, 0.24, 0.16, 0.035],   # 长的那片甩出去
+	[-0.70, 0.14, 0.30, 0.030],   # 矮的那片垂下来
+]
+
 
 var _bamboo_states: Array = []   # -1=未出现, 0=可砍, 1=已砍
 var _current_bamboo: int = 0
@@ -103,54 +192,88 @@ func _draw() -> void:
 			Color(0.9, 0.9, 0.9, 0.9))
 
 	# 5根竹子
-	var start_x := w * 0.5 - (BAMBOO_COUNT * 70) * 0.5
+	var start_x := w * 0.5 - (BAMBOO_COUNT * SPACING) * 0.5
 	var base_y := h * 0.82
-	var bh := h * 0.55
+	var bh := h * 0.52
 
 	for i in range(BAMBOO_COUNT):
-		var bx := start_x + i * 70.0
+		var bx := start_x + i * SPACING
 		var state: int = _bamboo_states[i]
-		var offset := 0.0
 		var alpha := 1.0
 
-		if state == -1:
-			# 未出现
-			alpha = 0.2
-			offset = -bh
-		elif state == 0:
-			# 可砍（当前）
-			offset = 0.0
-			var urgency := 1.0 - _window_timer / WINDOW_SEC
-			# 闪烁
+		if state == 0:
+			# 可砍（当前）：闪烁
 			alpha = 0.7 + sin(_t * 12) * 0.3
 			# 显示倒计时
+			var urgency := 1.0 - _window_timer / WINDOW_SEC
 			var timer_col := Color(1.0, urgency, 0.0, 1.0)
 			draw_string(ThemeDB.fallback_font, Vector2(bx - 5, base_y - bh - 10),
 				"%.1f" % maxf(_window_timer, 0.0),
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 20, timer_col)
-		elif state == 1:
-			# 已砍（倒下）
-			offset = bh * 0.9
-			alpha = 0.6
 
-		var bamboo_top := base_y - bh + offset
-		# 竹身
-		var col := Color(0.3, 0.65, 0.3, alpha)
-		draw_rect(Rect2(bx, bamboo_top, 12, bh - offset), col, true)
-		# 竹节
-		for n in range(4):
-			var ny := bamboo_top + n * (bh / 4.0)
-			draw_line(Vector2(bx, ny), Vector2(bx + 12, ny),
-				Color(0.2, 0.45, 0.2, alpha), 2.0)
+		_draw_stalk(i, Vector2(bx, base_y), bh, state, alpha)
 
 		# 序号
-		draw_string(ThemeDB.fallback_font, Vector2(bx - 2, base_y + 20),
+		draw_string(ThemeDB.fallback_font, Vector2(bx - 2, base_y + 26),
 			"%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 18, Color(0.7, 0.9, 0.7, alpha))
 
-	# 进度
-	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.92),
-		Localization.t("mg_progress", [_current_bamboo, BAMBOO_COUNT]),
-		HORIZONTAL_ALIGNMENT_CENTER, w, 22, Color(0.8, 1.0, 0.8))
+	# 进度：五格。**原来只有一行"进度 0/5"的字，条都没有**——门槛写在了
+	# 字里，画在屏上的却是一整屏竹子，玩家读不出还差几根。而竹子的进度是
+	# **五件互相独立的事**，所以分格而不是一根连续条：一根填到 60% 的条
+	# 读成"有一根被砍掉了 60%"，实际是三根倒了、两根还立着。
+	var pbar := MiniGameBar.rect(Vector2(w, h), 0.88, 0.42, 14.0)
+	MiniGameBar.draw_pips(self, pbar, BAMBOO_COUNT, _current_bamboo, _current_bamboo,
+			Color(0.30, 0.62, 0.32, 0.95), Color(0.14, 0.20, 0.16, 0.75),
+			Color(1.0, 0.9, 0.5))
+
+
+## 一根竹子。`state`: -1=还没冒头, 0=可砍, 1=已砍。
+## 三种状态走的是同一套几何 —— 立着的时候是上下收分的竹身 + 竹节 + 顶上两片叶，
+## 砍倒之后底下一截桩、上半截斜靠着（`stalk_poly` 的 `lean_deg` 就是那个斜度）。
+func _draw_stalk(i: int, base: Vector2, bh: float, state: int, alpha: float) -> void:
+	var skin := Color(0.30, 0.62, 0.32, alpha)
+	var skin_lo := Color(0.20, 0.45, 0.22, alpha)
+	var node_col := Color(0.46, 0.74, 0.40, alpha)
+
+	if state == 1:
+		var sdir := fall_dir(i)
+		# 留在地上的那截桩
+		draw_colored_polygon(
+			stalk_poly(base, bh * STUMP_FRAC, STALK_W_BASE, STALK_W_BASE * 0.86, 0.0), skin)
+		# 斜靠在上半截：同一个四边形按 FALL_DEG 摆过去，所以上下两截
+		# 必然接得上、宽窄也必然连续
+		var top := base + Vector2(0, -bh * STUMP_FRAC)
+		draw_colored_polygon(
+			stalk_poly(top, fall_len(SPACING), STALK_W_BASE * 0.86, STALK_W_TIP,
+					FALL_DEG * sdir),
+			skin)
+		# 断口
+		draw_line(top + Vector2(-STALK_W_BASE * 0.43, 0.0),
+				top + Vector2(STALK_W_BASE * 0.43, 0.0), skin_lo, 3.0)
+		return
+
+	if state == -1:
+		# 还没冒头：地上一个笋尖。原来只画到 `bh * 0.10` 高，于是这一屏是
+		# 一根立着的竹加四个几乎看不见的点，剩四座亭子空着——笋子要读得出
+		# "这里还有一根"，高度得够它自己被认成一株。
+		draw_colored_polygon(
+			stalk_poly(base, bh * SPROUT_FRAC, STALK_W_BASE * 0.62, STALK_W_TIP * 0.7, 0.0),
+			Color(0.30, 0.62, 0.32, 0.45))
+		return
+
+	draw_colored_polygon(stalk_poly(base, bh, STALK_W_BASE, STALK_W_TIP, 0.0), skin)
+	# 竹节：比竹身宽一点的一道亮环
+	for f in node_fracs(NODE_COUNT):
+		var ny := base.y - bh * f
+		var hw := lerpf(STALK_W_BASE, STALK_W_TIP, f) * 0.5 + 3.0
+		draw_line(Vector2(base.x - hw, ny), Vector2(base.x + hw, ny), node_col, 4.0)
+	# 顶上两片叶。竹子身上最认得出的一处，缺了它这条就是绿色的棍子。
+	# 长的那片甩出去，矮的那片垂下来，两片错开一层。
+	for s in [-1.0, 1.0]:
+		for L in LEAVES:
+			draw_colored_polygon(
+					leaf_poly(base + Vector2(0.0, bh * L[0]), s,
+							bh * L[1], bh * L[2], bh * L[3]), node_col)
 
 
 ## 砍完 5 根后的收尾画面：5 根全倒 + 一句成功文案 + 结算前的停留倒计时。
@@ -160,13 +283,11 @@ func _draw_success(w: float, h: float) -> void:
 	draw_rect(Rect2(0, 0, w, h), Color(0, 0, 0, 0.45))
 
 	# 5 根全部倒伏，位置/尺寸跟主画面保持一致
-	var start_x := w * 0.5 - (BAMBOO_COUNT * 70) * 0.5
+	var start_x := w * 0.5 - (BAMBOO_COUNT * SPACING) * 0.5
 	var base_y := h * 0.82
-	var bh := h * 0.55
+	var bh := h * 0.52
 	for i in range(BAMBOO_COUNT):
-		var bx := start_x + i * 70.0
-		var bamboo_top := base_y - bh + bh * 0.9
-		draw_rect(Rect2(bx, bamboo_top, 12, bh * 0.1), Color(0.3, 0.65, 0.3, 0.6), true)
+		_draw_stalk(i, Vector2(start_x + i * SPACING, base_y), bh, 1, 0.75)
 
 	# 成功文案，入场时轻微淡入
 	var fade: float = clampf(1.0 - _success_timer / SUCCESS_HOLD_SEC, 0.0, 1.0)

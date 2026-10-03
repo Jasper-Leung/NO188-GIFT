@@ -93,6 +93,18 @@ var seen_villain: int = 0          # 已播到的反派场次（1-based）
 var prologue_done: bool = false
 var ending_id: String = ""
 
+## ---- 演示模式（给评审的 90 秒路径）----
+##
+## **不存档**：`enter_demo()` 每次都从 `reset()` 起，任何一次普通游玩读档
+## 都读不到它。它唯一的作用是让 World3D 跳过操作说明和序章、并挂上
+## DemoDirector；那张明信片本身仍是玩家走出来的存档现算的。
+var demo_mode: bool = false
+
+## 演示总长，和标题页按钮上写的「90 秒」是同一个数
+const DEMO_BUDGET_SEC := 90.0
+## 演示在这里收工跳去结算页，剩下的时间留给明信片和终局二选一
+const DEMO_END_AT_SEC := 62.0
+
 
 func _ready():
 	_setup_input_map()
@@ -490,6 +502,7 @@ func reset():
 	seen_villain = 0
 	prologue_done = false
 	ending_id = ""
+	demo_mode = false
 	_clear_save()
 
 
@@ -556,6 +569,38 @@ func _load_save() -> void:
 func _clear_save() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(SAVE_PATH)
+
+
+## 从标题页进演示模式。一律从 `reset()` 起，所以点了演示之后退出重进，
+## 磁盘上也不会留下任何演示痕迹。
+func enter_demo() -> void:
+	reset()
+	demo_mode = true
+	# 演示一开始就是"会玩的人"：操作说明和序章都在 World3D 里被 demo_mode 跳过，
+	# 这里只需要保证那两个标记是真的，免得它们各自再判一遍。
+	onboarding_shown = true
+	prologue_done = true
+
+
+## 把这一趟补齐成**完满**评级：五座碎片驿站各刷满三次、十六驿全路过、
+## 珍藏笺 + 四件散件全上身。演示快结束时调一次，好让评审看到的是那张
+## 带金印的满配明信片，而不是一张走了两站的中途卡。
+##
+## 关键：**直接写字段，不走 `check_in()`**。`check_in()` 会把
+## `all_fragments_maxed_reached` 那个闩锁翻过来，于是 World3D 的
+## `_on_all_maxed()` 当场锁死操纵权、2.5 秒后自己跳去结算页——而那时候
+## 演示还在半路。演示要自己掌握什么时候收工，所以这里绕开信号。
+func fill_finished_run() -> void:
+	var rd: RefCounted = load("res://scripts/road_data.gd").new()
+	for i in rd.stations.size():
+		seen_stations[i] = true
+	for si in rd.FRAGMENT_SLOT_STATION_IDX:
+		collected[si] = MAX_VISITS_PER_STATION
+	inv["postcard_tier"] = 3
+	for id in ["paper", "ink", "seal", "env"]:
+		inv[id] = 1
+	seen_villain = VILLAIN_SCENE_COUNT
+	mood = MOOD_INITIAL
 
 
 func go_to_roaming(scene: PackedScene = null):

@@ -270,6 +270,273 @@ func _audit_variant_independent() -> void:
 					entry[1] == (entry[0] < 0), "entry=%s" % str(entry))
 
 	await _audit_panel_identity()
+	await _audit_route_map()
+
+
+## 正面顶部那一块是「这一趟的路线图」：真中心线 + 16 座驿站的真实落点。
+##
+## 量的是几何，不是像素 —— `_draw()` 在 headless 下一笔都不落盘。投影抽成了
+## `_map_project()`（不碰画笔的纯函数），所以「路有没有被框裁掉」在这里判得了；
+## 以前那段云天连形状都没有，自然没什么可量的。
+func _audit_route_map() -> void:
+	print("\n---------- 3c. 正面路线图：这一趟真的画在这张卡上 ----------")
+	var band: float = float(_pc("MAP_BAND_FRAC")) * 506.0
+	_ck("顶部留给路线图的高度够画下一个 8 字（%.0fpx）" % band, band >= 150.0)
+	# 顶部这一带 + 中间画区一共只能占 85%：底下 15% 压着路牌、落款和封口位。
+	# 写成「frac + (0.85 - frac) == 0.85」是恒真的，等于没量——所以直接量
+	# 地图方框的下沿：谁把 MAP_BAND_FRAC 调大，最先压住路牌的就是它。
+	var pc: Control = await _make_postcard(1, [])
+	pc._layout_map(900.0, band)
+	var box: Rect2 = pc._map_rect
+	_ck("地图方框是正方（%.0f×%.0f）" % [box.size.x, box.size.y],
+			absf(box.size.x - box.size.y) < 0.5)
+	_ck("地图方框整块在卡片里", box.position.x >= 0.0 and box.position.y >= 0.0
+			and box.end.x <= 900.0 and box.end.y <= 506.0, "box=%s" % str(box))
+	_ck("地图不压到中间那五格画区（方框下沿 %.0f ≤ 画区上沿 %.0f）" % [box.end.y, band],
+			box.end.y <= band + 0.5)
+	_ck("地图不压到底下那条路牌/落款（方框下沿 %.0f ≤ %.0f）" % [box.end.y, 506.0 * 0.85],
+			box.end.y <= 506.0 * 0.85)
+
+	# 16 座驿站**一个都不许被框裁掉**。fit 取的是 bbox 两边缩放的较小值，
+	# 余量给负了的话 8 字的上下两个凸起正好压在框线上，定妆照上读成
+	# 「图被裁了一刀」——而任何只量尺寸的断言都是绿的。
+	var rd = load("res://scripts/road_data.gd").new()
+	_ck("拿得到 16 座驿站", rd.stations.size() == 16)
+	var worst := 1e9
+	for i in rd.stations.size():
+		var p: Vector2 = pc._map_project(rd.get_station_world_pos(i))
+		worst = minf(worst, minf(minf(p.x - box.position.x, box.end.x - p.x),
+				minf(p.y - box.position.y, box.end.y - p.y)))
+	_ck("16 座驿站全在框内（离框最近的那个还有 %.1fpx）" % worst, worst >= 0.5)
+
+	# 碎片站不能叠在同一个点上。这一条一断，图上就是「五个点全挤在一处」，
+	# 而那恰好是最坏的读法：看着像五件都收了，其实只画出一处。
+	var seen := {}
+	for st_idx in [7, 10, 13, 14, 4]:
+		var p: Vector2 = pc._map_project(rd.get_station_world_pos(int(st_idx)))
+		var key := "%.0f,%.0f" % [p.x, p.y]
+		_ck("碎片站 %d 在图上有自己的位置" % int(st_idx), not seen.has(key))
+		seen[key] = true
+
+	# 买了信封之后方框要让开左上角的折角。第一版没让开，框线的一角和 8 字
+	# 的左上凸起都被折角削掉一块 —— 而当时所有断言都是绿的。
+	var fold: float = minf(900.0, 506.0) * 0.16
+	var penv: Control = await _make_postcard(1, ["env"])
+	penv._layout_map(900.0, band)
+	_ck("买了信封，地图方框让开折角（左边距 %.0fpx > 折角 %.0fpx）"
+			% [penv._map_rect.position.x, fold], penv._map_rect.position.x > fold)
+	_ck("让开之后方框仍然整块在卡片里",
+			penv._map_rect.end.x <= 900.0 and penv._map_rect.end.y <= 506.0,
+			"box=%s" % str(penv._map_rect))
+
+	# 图上那几行字全部现算自存档，一个字都不另存：驿数走
+	# GameManager，五件次数走 collected —— 玩家导出前改了存档，
+	# 拿到的就该是改过的那张。
+	# 注意顺序：_make_postcard() 自己会 _gm.reset()，所以存档必须**建完卡之后**
+	# 再摆 —— 摆在前面会被它清掉，而三行断言于是全读成 0，看着像图不认存档。
+	var pvis: Control = await _make_postcard(1, [])
+	_gm.collected[7] = 2
+	_gm.collected[10] = 1
+	_gm.seen_stations[4] = true
+	_gm.seen_stations[7] = true
+	_eq("图上的驿数就是存档里的驿数", _gm.get_seen_station_count(), 2)
+	_ck("驿数那行是渲染后的整句，不是 key 本身",
+			_loc.t("stations_seen") % [2, 16] == "已过 2/16 驿",
+			"got=%s" % (_loc.t("stations_seen") % [2, 16]))
+	_eq("云那格的次数就是存档里的次数", int(_gm.collected[7]), 2)
+	_eq("茶那格的次数就是存档里的次数", int(_gm.collected[10]), 1)
+	# 五个数逐个点过：抄一份下标表而顺序错了的话，只有这条会红
+	var vis: Array = []
+	for st_idx in [7, 10, 13, 14, 4]:
+		vis.append(int(_gm.collected.get(st_idx, 0)))
+	_eq("五件次数没串位（云 2 / 茶 1 / 琴 0 / 竹 0 / 禽 0）", str(vis), str([2, 1, 0, 0, 0]))
+
+	# 图例那句话不许在中英两侧退化成 key 本身（Localization.t 查不到 key
+	# 时返回 key 自己，既不报错也不返回空串——中文界面一路正常，
+	# 只有切到英文的那一屏露 key）。
+	for k in ["postcard_map_title", "postcard_map_legend"]:
+		_ck("%s 有中文" % k, str(_loc.STRINGS["zh"].get(k, "")) != k)
+		_ck("%s 有英文" % k, str(_loc.STRINGS["en"].get(k, "")) != k)
+		_ck("%s 中英不是同一句" % k,
+				str(_loc.STRINGS["zh"].get(k, "")) != str(_loc.STRINGS["en"].get(k, "")))
+
+	await _free(pvis)
+	await _free(penv)
+	await _free(pc)
+
+	await _audit_joys_column()
+	await _audit_back_message()
+
+
+## 抬头右半那列（五件乐事各到访几次）。
+##
+## 它替掉的是**一整块空白的纸**：原来五个次数挤在「已过 n/16 驿」底下那一行，
+## 剩下约 880×410px 什么也没有，而这是玩家唯一带走的那张卡的抬头。
+## 判据量三件玩家读得出来的事：这一列**真的占到了右沿**（不是换了个地方
+## 继续空着）、**不压在左边那一列的字上**、**每一行放得下**——
+## 最后这条是必须的，因为 `draw_string` 的宽度参数是**裁切宽度**，
+## 而次数是右对齐画上去的：字比列宽就整段被裁掉，而尺寸断言照样全绿。
+func _audit_joys_column() -> void:
+	print("\n---------- 3d. 抬头右半：五件乐事那一列 ----------")
+	var font: Font = ThemeDB.fallback_font
+	for lang in ["zh", "en"]:
+		_loc.set_language(lang)
+		for cw in [900.0, 1920.0]:
+			var ch: float = cw * 900.0 / 1920.0
+			var band: float = float(_pc("MAP_BAND_FRAC")) * ch
+			var pc: Control = await _make_postcard(1, [])
+			var k: float = pc._map_k(cw)
+			pc._layout_map(cw, band)
+			var xa: float = pc._map_rect.position.x + pc._map_rect.size.x + 22.0 * k
+			var colw: float = pc._caption_col_w(font, k)
+			var x0: float = xa + colw + cw * 0.05
+			var r: Rect2 = pc._joys_column_rect(cw, band, k, x0)
+			var tag := "%s %.0fpx" % [lang, cw]
+
+			_ck("%s 这一列排得下（宽 %.0fpx）" % [tag, r.size.x], r.size.x > 0.0)
+			# 真正要拦的是"换了个地方继续空着"：右沿离卡片右边不得超过两成宽
+			var dead: float = cw - r.end.x
+			_ck("%s 抬头右沿不留死区（右边还剩 %.0fpx = %.1f%% 宽）"
+					% [tag, dead, dead / cw * 100.0], dead < cw * 0.2)
+			# 不许压在左边那一列的字上。列宽是**量出来**的最宽情形，
+			# 按实际驿数起步的话玩家到过的驿越多、这里离字越近。
+			#
+			# 注意这里**不拿 `_caption_col_w()` 当判据**：那条断言的两边
+			# 读的是同一个函数，helper 算窄了它照样全绿（第一版的这个缺陷）。
+			# 判据改成**在测试里把那三行字各自量一遍**——量的是"列 B 起点
+			# 有没有越过左边真的画出去的那几行字的右沿"。
+			var col_a_w: float = 0.0
+			col_a_w = maxf(col_a_w, font.get_string_size(
+					_loc.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1,
+					int(20 * k)).x)
+			# 用这一趟**真的会画出来**的那句（含实际的驿数，最多两位）
+			col_a_w = maxf(col_a_w, font.get_string_size(
+					_loc.t("stations_seen") % [16, 16], HORIZONTAL_ALIGNMENT_LEFT, -1,
+					int(28 * k)).x)
+			col_a_w = maxf(col_a_w, font.get_string_size(
+					_loc.t("postcard_map_legend"), HORIZONTAL_ALIGNMENT_LEFT, -1,
+					int(14 * k)).x + 44.0 * k)
+			_ck("%s 这一列起在左边那一列的字之后（%.0f ≥ %.0f + %.0f）"
+					% [tag, r.position.x, xa, col_a_w],
+					r.position.x >= xa + col_a_w - 0.5)
+			_ck("%s `_caption_col_w` 没有算窄（%.0f ≥ %.0f）"
+					% [tag, colw, col_a_w], colw >= col_a_w - 0.5)
+			_ck("%s 这一列不压到地图方框" % tag, r.position.x > pc._map_rect.end.x)
+			# 下沿不许压进中间那五格画区
+			_ck("%s 这一列不压到五格画区（下沿 %.0f ≤ 带高 %.0f）"
+					% [tag, r.end.y, band], r.end.y <= band + 0.5)
+			# 右沿要给那只禽让开道（它画在 w-120k，半径 14.4k）
+			_ck("%s 这一列和禽不叠" % tag, r.end.x <= cw - 150.0 * k + 0.5)
+			# **每一行放得下**：名字 + 次数，右对齐在列宽之内
+			var worst := 0.0
+			for slot in 5:
+				var name: String = _loc.t("fragment_%d" % slot)
+				var cnt: String = _loc.t("postcard_visit_n") % 3
+				var need: float = font.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT,
+						-1, int(20 * k)).x + 12.0 * k \
+						+ font.get_string_size(cnt, HORIZONTAL_ALIGNMENT_RIGHT,
+						-1, int(17 * k)).x
+				worst = maxf(worst, need)
+			_ck("%s 每一行放得下（最宽那行 %.0fpx ≤ 列宽 %.0fpx）"
+					% [tag, worst, r.size.x], worst <= r.size.x)
+			await _free(pc)
+	_loc.set_language("zh")
+	# 上面那十几条量的是**几何函数**，而几何函数对不对和画笔有没有去调它
+	# 是两件事 —— 把 `_draw_map_caption()` 里那一行删掉，上面全绿而图上
+	# 那一块重新变成空白的纸。所以照 `verify_mini_game.gd` 第 6g 节的读法，
+	# 从**源码文本**里钉住这一行确实在画笔身上（`_draw` 在 headless 下
+	# 一笔都不落盘，纯函数量不到调用点）。
+	var src: String = FileAccess.get_file_as_string("res://scripts/Postcard.gd")
+	var body: String = src.substr(src.find("func _draw_map_caption"),
+			src.find("func _caption_col_w") - src.find("func _draw_map_caption"))
+	_ck("_draw_map_caption 真的调了 _draw_joys_column",
+			body.contains("_draw_joys_column("), "画笔没调它，那一块还是空白的纸")
+	_ck("旧的「名字+次数挤成一行」已经拿掉了（%s%d 那个拼接）",
+			not body.contains('"%s%d"'), "两列会同时画在这一带")
+	for k in ["postcard_joys_title", "postcard_visit_n"]:
+		_ck("%s 有中文" % k, str(_loc.STRINGS["zh"].get(k, "")) != k)
+		_ck("%s 有英文" % k, str(_loc.STRINGS["en"].get(k, "")) != k)
+		_ck("%s 中英不是同一句" % k,
+				str(_loc.STRINGS["zh"].get(k, "")) != str(_loc.STRINGS["en"].get(k, "")))
+
+
+func _audit_back_message() -> void:
+	print("\n---------- 3e. 背面正文：预览里读不读得出自己写了什么 ----------")
+	# 这一族量的**不是**"字号是 36"这种实现细节，是玩家在编辑器那一屏上
+	# 真的看到多高的一行字。卡片在 SubViewport 里按 1920 宽画完再缩到预览上，
+	# 于是屏上字高 = 卡片字号 × 预览宽 / 1920 —— 三个数缺一个都量不出来。
+	var pb = load("res://scripts/PostcardBack.gd")
+	var card: Control = pb.new()
+	var font: Font = ThemeDB.fallback_font
+	# 预览宽度的**下界**（第 3 节钉的就是这条：tw >= 400）。用下界算，
+	# 判据就与玩家那台机器的分辨率无关了——屏越高预览越宽，只会更宽。
+	const CARD_W := 1920.0
+	const THUMB_FLOOR := 400.0
+
+	var box: Rect2 = card._message_box(CARD_W, 1080.0)
+	var max_w: float = box.size.x - card.MSG_PAD * 2.0
+	var max_h: float = box.size.y - card.MSG_PAD * 2.0
+	print("    正文框 %s → 可用 %.0f × %.0f" % [box, max_w, max_h])
+	_ck("正文框在卡片里（没出屏、没退化成一条缝）",
+			box.position.x >= 0.0 and box.end.x <= CARD_W
+			and box.size.y > 0.3 * 1080.0,
+			"%s" % box)
+
+	var n: int = int(card.MAX_CHARS)
+	for lang in ["zh", "en"]:
+		_loc.set_language(lang)
+		# 两种长度都要量：编辑器里**默认**预填的那句，和玩家真的写满 200 字
+		# 的最坏情形。原来写死 36 时后者在框里只占四五行、留下大半张空纸。
+		var cases := {
+			"默认那句": _loc.t("back_keep"),
+			"写满 %d 字" % n: ("写" if lang == "zh" else "word ")\
+					.repeat(n).substr(0, n),
+		}
+		for cname in cases:
+			var text: String = cases[cname]
+			var tag := "%s·%s" % [lang, cname]
+			var fs: int = card._message_font_size(font, text, max_w, max_h)
+			var lines: Array = card._wrap_text(font, text, fs, max_w)
+
+			var widest: float = 0.0
+			for l in lines:
+				widest = maxf(widest, font.get_string_size(l, HORIZONTAL_ALIGNMENT_LEFT,
+						-1, fs).x)
+			_ck("%s 每一行都在框宽之内（最宽 %.0f ≤ %.0f）" % [tag, widest, max_w],
+					widest <= max_w + 0.5)
+			var block: float = lines.size() * (font.get_height(fs) + card.LINE_GAP)
+			_ck("%s 整块在框高之内（%.0f ≤ %.0f）" % [tag, block, max_h],
+					block <= max_h + 0.5)
+			# 字号的**下限**是玩家读不看得见的那条线。预览宽 400（下界）
+			# 时 12px 是一行 CJK 的及格线——再小就不是"字"，是纹理了。
+			var on_screen: float = float(fs) * THUMB_FLOOR / CARD_W
+			_ck("%s 预览里的一行字 ≥12px（卡片 %dpx → 屏上 %.1fpx）"
+					% [tag, fs, on_screen], on_screen >= 12.0)
+
+			# 反过来：字号是**从大往下找的第一个放得下的**，不是随便一个放得下的。
+			# 少了这条，把 LINE_GAP 或 FONT_MAX 调小到"还更空"也照样全绿——
+			# 和第 3d 节那条「`_caption_col_w` 没有算窄」同一个坑。
+			# 顶上那档是 FONT_MAX，"再大一号"在它那儿不成立，所以那一种情形
+			# 单独判成"顶到上限了"，别把它算成"还有余量没用"。
+			var capped: bool = fs >= int(card.FONT_MAX)
+			var bigger: Array = card._wrap_text(font, text, fs + 4, max_w)
+			var b_block: float = bigger.size() * (font.get_height(fs + 4) + card.LINE_GAP)
+			_ck("%s 字号用满了（%dpx 是 FONT_MAX，或者大一号 %.0f > %.0f 放不下）"
+					% [tag, fs, b_block, max_h], capped or b_block > max_h)
+
+	# 上面量的是纯函数，而"画笔有没有去调它"是另一件事：把 `_draw_message`
+	# 里的 `var font_size := 36` 改回来，上面十条全绿，而预览里那行字
+	# 又变回八像素。照 `verify_mini_game.gd` 第 6g 节的读法从源码文本里钉住。
+	var src: String = FileAccess.get_file_as_string("res://scripts/PostcardBack.gd")
+	var body: String = src.substr(src.find("func _draw_message"),
+			src.find("func _wrap_line") - src.find("func _draw_message"))
+	_ck("_draw_message 真的调了 _message_font_size（不是自己写死一个号）",
+			body.contains("_message_font_size("), "画笔绕过了那个函数")
+	_ck("_draw_message 里没有写死的 36", not body.contains("36"),
+			"写死的字号就是原来那 8px 的根")
+	_loc.set_language("zh")
+	card.free()
+
 
 
 ## 画区那一格的「颜色 / 图标 / 标签」必须讲同一件碎片。
@@ -430,6 +697,18 @@ func _audit_ending_choice() -> void:
 	var tw: float = card._back_thumb.offset_right - card._back_thumb.offset_left
 	_ck("预览至少有 400px 宽（原来只有 200，字读不出来）", tw >= 400.0,
 			"%.0fpx @ 视口 %dx%d" % [tw, int(card.get_viewport_rect().size.x), int(vh)])
+	# 宽度只是这条链的**一半**：卡片在 SubViewport 里按 1920 宽画完再缩下来，
+	# 屏上那行字多高 = 卡片上的字号 × 预览宽 / 1920。原来卡片上写死 36px，
+	# 预览再宽也白搭（36 × 452 / 1920 = 8.5px），而两条都绿着。
+	# 所以这里把**真预览**和**真字号**接起来量一次。
+	var back: Control = card._back_postcard
+	var pbox: Rect2 = back._message_box(1920.0, 1080.0)
+	var bfs: int = back._message_font_size(ThemeDB.fallback_font, back.get_back_text(),
+			pbox.size.x - back.MSG_PAD * 2.0, pbox.size.y - back.MSG_PAD * 2.0)
+	var on_screen: float = float(bfs) * tw / 1920.0
+	print("    预览 %.0fpx 宽（视口 %dx%d）× 卡片字号 %dpx → 屏上 %.1fpx"
+			% [tw, int(card.get_viewport_rect().size.x), int(vh), bfs, on_screen])
+	_ck("预览里那行字真的读得出来（%.1fpx ≥ 12px）" % on_screen, on_screen >= 12.0)
 
 	# 手动发信号：程序化赋 .text 不发 text_changed（_on_back_confirmed 里也是因此
 	# 才回头再读一次 TextEdit）。这里要的就是"玩家敲了一个键"那一刻发生的事。

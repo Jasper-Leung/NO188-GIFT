@@ -183,6 +183,30 @@ func _section_stations() -> void:
 	_ck(no_name_en.is_empty(), "16 座都有英文名", str(no_name_en))
 	_ck(no_text.is_empty(), "16 座都有中英 text（11 座路边站那句现在有人读了）", str(no_text))
 	_ck(frag_no_dialogue.is_empty(), "五座碎片站都有对白（中文+英文）", str(frag_no_dialogue))
+	# 中英两套对白是**两份独立手抄的副本**，而原来的判据只查"两边都非空"——
+	# 于是中文加到 3 句、英文忘了加（或者反过来），两边一句对不上，
+	# 玩家在英文界面少读一句，而**没有任何一条回归会红**：
+	# 少的那句是个合法的非空数组，key 集合也照样逐字相同。
+	# 这正是 CLAUDE.md 里"三处互相对不上的副本"那一族，所以钉句数。
+	var frag_line_mismatch := []
+	var frag_same_line := []
+	for i in st.size():
+		var s2: Dictionary = st[i]
+		if str(s2.get("fragment", "")) == "":
+			continue
+		var dz: Array = s2.get("dialogue", [])
+		var de: Array = s2.get("dialogue_en", [])
+		if dz.size() != de.size():
+			frag_line_mismatch.append("%s zh=%d en=%d" % [str(s2.get("name", "?")),
+					dz.size(), de.size()])
+			continue
+		for k in mini(dz.size(), de.size()):
+			if str(dz[k]).strip_edges() == str(de[k]).strip_edges():
+				frag_same_line.append("%s #%d" % [str(s2.get("name", "?")), k + 1])
+	_ck(frag_line_mismatch.is_empty(),
+			"五座碎片站中英对白句数一一对应（少一句没人会发现）", str(frag_line_mismatch))
+	_ck(frag_same_line.is_empty(),
+			"没有哪一句中英相同（相同就是漏译）", str(frag_same_line))
 	# 世界里不许出现现实道路编号
 	var names := ""
 	for i in st.size():
@@ -246,3 +270,22 @@ func _section_doc() -> void:
 		var line: String = hit.get_string().strip_edges()
 		_ck(doc.contains(line), "文档里的相机定位与代码逐字一致",
 				"代码是：%s" % line)
+
+	# 5.4 标题页过场的总长。文档里写着一个秒数，代码里是五个常量——
+	# 两边各写一份必然会漂，而漂了没有任何运行时后果（动画照跑，只是慢了），
+	# 唯一还能看见的地方就是这份文档。
+	# 判据从 `GiftBox.gd` 的**常量表**重算，而不是从墙钟：墙钟要带窗口跑两遍
+	# 真实场景切换才看得出零点几秒，实测把 ROAD_HOLD_SEC 改回 1.5 之后
+	# 墙钟那条（5.6s < 20s）照样是绿的。
+	var cmap: Dictionary = load("res://scripts/GiftBox.gd").get_script_constant_map()
+	var tsum := 0.0
+	for k in ["BOX_OUT_SEC", "ROAD_IN_SEC", "ROAD_HOLD_SEC",
+			"ROAD_OUT_SEC", "SWITCH_DELAY_SEC"]:
+		_ck(cmap.has(k), "GiftBox 有 %s 常量（防正则/表名失效的空跑）" % k)
+		tsum += float(cmap.get(k, 0.0))
+	_ck(absf(float(cmap.get("START_TRANSITION_SEC", -1.0)) - tsum) < 0.001,
+			"START_TRANSITION_SEC 等于五段之和",
+			"常量表写 %s，五段和 %.2f" % [str(cmap.get("START_TRANSITION_SEC")), tsum])
+	_ck(tsum <= 1.5, "标题页过场没有回到三秒（%.2fs ≤ 1.5s）" % tsum, "%.2fs" % tsum)
+	_ck(doc.contains("%.2f" % tsum),
+			"文档里写的过场总长与代码一致", "代码算出来是 %.2fs" % tsum)

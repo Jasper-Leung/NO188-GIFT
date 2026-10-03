@@ -123,7 +123,11 @@ func _shop_section() -> void:
 	# 铺子范围就自动收摊"，而 `_nearby_shop_idx` 是每帧按距离算的。
 	# 第一版直接 `_open_shop(0)`，于是买完的下一帧铺子自己收了，
 	# 断言读到的 visible=false 是测试自己造出来的，不是被测代码的问题。
-	w._player.position = w._stations[0].position + Vector3(0, 1.0, 3)
+	# 停在**墙外最近的那一点**而不是站中心：`World3D._apply_station_keepout()`
+	# 会把钻进驿站占地的车摆回边界，所以写死 3m 的话，下一物理帧就变成 7.1m。
+	# 两者都在 15m 打卡圈内，够用；但按真实可达的距离站，后面的等待条件才稳定。
+	var r0: float = w.station_keepout_radius(0)
+	w._player.position = w._stations[0].position + Vector3(0, 1.0, maxf(r0, 3.0) + 0.6)
 	if not await _until(func(): return w._nearby_shop_idx == 0, "站到驿铺跟前（_nearby_shop_idx=%d）"
 			% w._nearby_shop_idx):
 		return

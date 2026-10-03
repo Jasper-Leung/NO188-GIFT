@@ -34,7 +34,7 @@ var _loc: Node = null
 var _pc_script: GDScript = null
 var _frag_idx: Array = []
 var _shots := 0
-const EXPECTED_SHOTS := 18
+const EXPECTED_SHOTS := 19
 
 
 func _ck(label: String, cond: bool, detail: String = "") -> void:
@@ -65,6 +65,11 @@ func _fill_inventory(tier: int, extras: Array, ending: String) -> void:
 	_gm.reset()
 	for st_idx in _frag_idx:
 		_gm.collected[st_idx] = 3
+	# 正面顶上那张路线图读的就是 seen_stations（十六个点哪些实心）。
+	# 只摆 collected 的话图上会写着「已过 0/16 驿」配着一圈实心碎片站，
+	# 那是一张玩家永远不会拿到的卡 —— 定妆照得是挣的那层的完整形态。
+	for st_idx in _frag_idx:
+		_gm.seen_stations[st_idx] = true
 	_gm.inv.clear()
 	if tier > 0:
 		_gm.inv["postcard_tier"] = tier
@@ -223,6 +228,14 @@ func _run() -> void:
 	_fill_inventory(3, ["paper", "ink", "seal", "env"], "keep")
 	await _snap("07_背面_留门_写上了那句", _make_back(_loc.t("back_keep")))
 
+	# 写满 200 字（MAX_CHARS 上限）时的样子。字号是**按这块纸自动定的**，
+	# 所以字最多和字最少是两种排版——07 与 07b 必须成对看：只有 07 那一张，
+	# "字变大了"看着像是把默认那句排得好看，而写满时缩回 60px 那一档
+	# 才是玩家真正会遇到的第二种排版。
+	_fill_inventory(3, ["paper", "ink", "seal", "env"], "keep")
+	await _snap("07b_背面_写满200字",
+			_make_back(("落霞把这条路染成了一段可以再来的理由。" as String).repeat(7).substr(0, 200)))
+
 	# 放手：背面是空的。那句话退成了写字界面的占位提示，不落纸。
 	_fill_inventory(3, ["paper", "ink", "seal", "env"], "break")
 	await _snap("08_背面_放手_留白", _make_back(""))
@@ -264,10 +277,13 @@ func _run() -> void:
 	_gm.inv["postcard_tier"] = 1
 	await _snap("09_未竟_三碎片缺格", _make_postcard())
 
-	# 4 块 → 大师，靠新加的第五格体现「缺一件」
+	# 4 块 → 大师，靠新加的第五格体现「缺一件」。
+	# 顺带把 seen_stations 摆上：正面顶部那张路线图读的是它，只摆 collected
+	# 的话图上会写「已过 0/16 驿」配着一圈实心站——玩家永远拿不到的那种卡。
 	for i in _frag_idx.size():
 		if i < 4:
 			_gm.collected[_frag_idx[i]] = 1
+			_gm.seen_stations[_frag_idx[i]] = true
 	await _snap("09c_未竟_大师四碎片缺第五格", _make_postcard())
 
 	await _snap("09b_未竟_背面留白", _make_back(""))

@@ -196,6 +196,100 @@ and the game will let you stop there via the pause panel.
 
 ---
 
+## How it's verified
+
+The project ships **34 regressions (27 headless + 7 window-only), 8 screenshot
+suites, and 2 probes**.
+One command runs the headless lot; the other seven need `--window`.
+
+```bash
+bash tools/check_all.sh
+```
+
+```
+=== headless 回归 ===
+  verify_8_shape               PASS             1s    7 ok / 0 fail
+  verify_water                 PASS             3s   23 ok / 0 fail
+  ...
+=== 自检摘要 ===
+  跑过 27 条：PASS 27 / FAIL 0 / 没跑成 0
+  断言 1396 条，其中 0 条红
+  没跑（要开窗口，--headless 跑出来的 PASS 是假的）：7 条
+```
+
+Four verdicts, each meaning something different:
+
+| Verdict | Meaning |
+|---|---|
+| `PASS` | assertions printed, and no `[FAIL]` among them |
+| `FAIL` | an `[FAIL]` line, or a non-zero exit code |
+| `TIMEOUT` / `NO-ASSERT` | **not a single assertion printed** — it didn't run, and that is not a pass |
+
+The last row is the whole reason this exists: when a regression throws an
+exception, `--quit-after` reaps the process with exit code **0**, so a run that
+never printed an assertion looks exactly like one that passed. So the runner
+ignores exit codes and trusts two things instead — whether any `[FAIL]` appeared,
+and whether any assertion appeared at all.
+
+**Seven checks need a real window** (`bash tools/check_all.sh --window`):
+`verify_panel_keyboard`, `verify_checkin_all5`, `verify_mini_game_keys`,
+`verify_bamboo_done`, `verify_bamboo_world`, `verify_demo_path`,
+`verify_camera_bike`. They measure
+**real focus routing** and the **real 16:9 viewport** — `--headless` uses a dummy
+display server that does no focus routing, so key events never reach `_gui_input`
+and the resulting PASS is fake. They are excluded from the default round because
+a check that did not run has to say so out loud and print the command to run it;
+silence is not an acceptable substitute.
+
+**The 8 screenshot suites** (`bash tools/check_all.sh --lookdev`) write to
+`user://` and assert on **pixels**. They also cannot take `--headless`: the dummy
+renderer doesn't compile shaders and `_draw()` never lands a single mark. Some
+defects are only visible by looking — while every size assertion was green. The
+grass once became a field of 0.34×0.15 m cards: the regressions said "placement
+correct, count correct", and the screenshot said agave.
+
+### A few load-bearing invariants
+
+| Quantity | Value | Guarded by |
+|---|---|---|
+| Loop length | 1228.8 m (±2.0) | `verify_8_shape` |
+| Centreline points | 961 | `verify_8_shape` |
+| Midline crossings of the figure-8 | 4 (each loop in and out) | `verify_8_shape` |
+| Stations | 16, with names/models/fragment order all matching | `verify_stations` |
+| CN/EN string key sets | character-for-character identical | `verify_story` |
+| Road height returns the upper surface | `-INF` off-road, never 0 | `verify_road_height` |
+| Every plant sits on the ground | deviation < 0.05 m | `verify_vegetation` |
+| Shoreline stands above the road surface | ≥ 0.35 m (measured 0.67 / 0.40 / 0.40) | `verify_water` |
+| Fragment colours, two copies | `Postcard` and `FragmentBar` identical value by value | `verify_postcard_ending` |
+| Top-bar label positions | not one pixel may shift when income lands | `verify_mood_mask` |
+
+### The part that's actually worth something isn't the regression count
+
+It's the **trap list** at the end of `CLAUDE.md` — close to a hundred entries of
+"this project has been bitten by this, and the symptom doesn't look like a bug",
+each with its cause and its guard. Three examples:
+
+- **`Transform3D.scaled()` scales the origin too.** It is not "scale the basis
+  only". Plant instances once landed at "ground height × scale", leaving bushes
+  floating an average of 0.74 m and trees 7.79 m — up to 102 m — which reads as
+  large swaths of shrub suspended in mid-air, with nothing thrown.
+- **`ALPHA_SCISSOR_THRESHOLD` tests `ALPHA`, and `ALPHA` defaults to 1.0.** Set
+  the threshold without writing `ALPHA` and the scissor discards nothing: the
+  whole card renders opaque and the grass becomes a field of green polygons.
+  Found by looking at a screenshot — headless doesn't compile shaders, so the
+  regression stayed green the whole time.
+- **A regression can be green because it is standing on the very bug it guards.**
+  The question to ask about a test is not "what does it assert" but "how does it
+  manage to pass": if it turns red the moment you fix the bug underneath it,
+  suspect that it was passing by exploiting it.
+
+Every new assertion gets proved red first — break it on purpose, watch it fail,
+revert. The first `verify_8_shape` hand-copied the road-point table out of
+`road_data.gd` and compared the copy against the original; the product was never
+loaded once. Rewriting `road_data.gd` into a straight line left it fully green.
+
+---
+
 ## Honest scope notes
 
 **Shipped:** full loop, three-visit progression, 15 rotating minigames, PNG

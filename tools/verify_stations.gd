@@ -27,6 +27,14 @@ const STATION_GLB_CONFIG: Array = [
 	{"path": "res://assets/models/station_亭灯.glb", "scale": 14.0, "label_y": 10.0, "glow_y": 6.0, "glow_range": 10.0},
 ]
 
+## 站名牌那一节的几把尺子（见 `_audit_name_plates()` 的注释）。
+## 站心离路心线——和 `road_data.STATION_OFFSET` 一份。
+const STATION_OFFSET := 18.0
+## `_add_label()` 给有碎片的站用的是 font_size 48，回归按这一档量。
+const LABEL_FONT_PX := 48
+## 一个字在骑行那一档折到屏上至少要多高。12px 是"认得出是个字"的下限。
+const LABEL_MIN_PX := 12
+
 func _ok(msg: String) -> void:
 	print("[OK]   ", msg)
 
@@ -268,16 +276,95 @@ func _run() -> void:
 	_check("广场盘上的驿站已推到盘外",
 			plaza_overlap.is_empty(), "仍在盘内的 idx: " + str(plaza_overlap))
 
+	_audit_name_plates(stations)
+
 	print("")
 	print("[verify_stations] 驿站 → GLB 配置验证完成")
 	quit(0)
 
 
-## 实例化 GLB 后取世界空间 AABB 的 XZ 半宽（原点即模型中心）。
-func _half_extents(path: String, scale: float, rot_y_deg: float) -> Vector2:
+## 站名牌：从骑行那一档读不读得出自己是谁。
+##
+## 16 座站只用 12 个模型，三对是同一个 GLB 摆出来的——两座一模一样的亭子立在
+## 同一条路肩上，玩家分不出谁是谁。而每座站**本来就带自己的名字**（`_add_label()`
+## 建的 Label3D），所以这一节量的不是"模型够不够多"，是"那个名字在玩家唯一
+## 看得到它的那一档上是不是真的读得出来"。
+##
+## 两件玩家读得出的事：
+## · **牌子露在屋顶上方**——判据调的是产品里那个 `World3D.label_y_for()`，
+##   不是把那一行的算式抄一遍（抄一遍的话改画不动测、测会一直绿）。
+## · **一个字在骑行距离上折成多少像素**——这是**乘积**：字高(m) × 屏上每米
+##   多少像素。原来写死 `pixel_size = 0.002`，字高 9.6cm，在 18m 上折合 3px，
+##   而"牌子在"这一条照样绿。同一族的病：明信片背面那条量的是
+##   「卡片字号 × 预览宽 / 1920」，只量任一个因子都量不到它。
+func _audit_name_plates(stations: Array) -> void:
+	print("")
+	print("---- 站名牌（骑行视角：站心离路心线 %.0fm，720p / fov 60）----" % STATION_OFFSET)
+	var w3 = load("res://scripts/World3D.gd")
+	var cmap = w3.get_script_constant_map()
+	var pixel_size: float = float(cmap.get("STATION_LABEL_PIXEL_SIZE", 0.0))
+	var label_y_for = w3.get("label_y_for")
+	_check("World3D.label_y_for() 是个能调的 static", label_y_for != null
+			and w3.get_script_method_list().any(func(m): return m["name"] == "label_y_for"))
+
+	# 屏上每米多少像素：站心离路心线 STATION_OFFSET，牌子就悬在那儿正上方。
+	# 取一个**偏保守**的画幅（1080p 换算到 720p 的字高不变，所以这里只按 720p 算）。
+	var view_h := 720.0
+	var fov := 60.0
+	var dist := STATION_OFFSET
+	var px_per_m: float = view_h / (2.0 * dist * tan(deg_to_rad(fov) * 0.5))
+	_check("骑行那一档每米 %.1fpx（%.0fm 处 / %dpx 高 / fov %d）" % [
+			px_per_m, dist, int(view_h), fov], px_per_m > 0.0)
+
+	# 每座站各自量：牌子在屋顶上方吗、字折到屏上多高。
+	var buried: Array[int] = []
+	var too_small: Array[int] = []
+	var worst_px := INF
+	var worst_who := ""
+	for i in range(stations.size()):
+		var mp: int = int(stations[i].get("model_idx", -1))
+		if mp < 0 or mp >= STATION_GLB_CONFIG.size():
+			continue
+		var cfg = STATION_GLB_CONFIG[mp]
+		var ab := _world_aabb(str(cfg.get("path", "")), float(cfg.get("scale", 1.0)),
+				float(cfg.get("rot_y", 0.0)))
+		if ab.size.length() < 0.01:
+			continue
+		var top := ab.end.y
+		var y := float(label_y_for.call(top))
+		var glyph_m: float = LABEL_FONT_PX * pixel_size
+		var glyph_px: float = glyph_m * px_per_m
+		if glyph_px < worst_px:
+			worst_px = glyph_px
+			worst_who = str(stations[i].get("name", ""))
+		if y - top < 1.0:
+			buried.append(i)
+		if glyph_px < LABEL_MIN_PX:
+			too_small.append(i)
+		print("    %-16s 屋顶 %5.2fm → 牌子 %5.2fm（净空 %4.2fm）  字高 %.2fm = 屏上 %4.1fpx" % [
+				str(stations[i].get("name", "")), top, y, y - top, glyph_m, glyph_px])
+
+	_check("每一座站的牌子都露在屋顶上方（净空 ≥ 1m）",
+			buried.is_empty(), "还埋在里面的 idx: " + str(buried))
+	_check("牌子在骑行那一档读得出来（≥ %dpx，最小的 %s %.1fpx）" % [
+			LABEL_MIN_PX, worst_who, worst_px], too_small.is_empty(),
+			"太小的 idx: " + str(too_small))
+
+	# 画笔真的调了那个 static：几何纯函数对不对、和画笔有没有去调它是两件事。
+	# 把 `_measure_station_aabb()` 里那行改成写死的数，上面那十几条照样全绿。
+	var src := FileAccess.get_file_as_string("res://scripts/World3D.gd")
+	_check("World3D 真的调 label_y_for() 摆牌子（读源码文本）",
+			src.contains("lbl.position.y = label_y_for(box.end.y)"))
+	_check("牌子字号走 STATION_LABEL_PIXEL_SIZE，不是又写死了一个数（读源码文本）",
+			src.contains("label.pixel_size = STATION_LABEL_PIXEL_SIZE")
+			and not src.contains("label.pixel_size = 0.0"))
+
+
+## 实例化 GLB 后取世界空间 AABB（原点即模型中心，含 scale 与 rot_y）。
+func _world_aabb(path: String, scale: float, rot_y_deg: float) -> AABB:
 	var res = load(path)
 	if res == null or not (res is PackedScene):
-		return Vector2.ZERO
+		return AABB()
 	var sc2: Node = res.instantiate()
 	var sc3: Node3D = sc2 as Node3D
 	if sc3 != null:
@@ -301,7 +388,15 @@ func _half_extents(path: String, scale: float, rot_y_deg: float) -> Vector2:
 					maxv = maxv.max(Vector3(w.x, w.y, w.z))
 	root.remove_child(sc2)
 	sc2.free()
-	return Vector2((maxv.x - minv.x) * 0.5, (maxv.z - minv.z) * 0.5)
+	if minv.x > maxv.x:
+		return AABB()
+	return AABB(minv, maxv - minv)
+
+
+## 世界空间 AABB 的 XZ 半宽。
+func _half_extents(path: String, scale: float, rot_y_deg: float) -> Vector2:
+	var b := _world_aabb(path, scale, rot_y_deg)
+	return Vector2(b.size.x * 0.5, b.size.z * 0.5)
 
 
 ## 到中心线折线的最近距离。

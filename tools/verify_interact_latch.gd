@@ -28,6 +28,11 @@ extends SceneTree
 ##      不知道 `_villain_playing`，于是圈一边写着「空格 · 完成乐事」，
 ##      一边在同一次按键里变灰成「这里现在进不去」，而那一次按键正在推进对白。
 ##      7  铺子最终可达（这条回归的终点：不再需要重开游戏）
+##      8  驿站占地不许骑进去：半径必须小于打卡半径（否则被墙挡住打不了卡）、
+##         从站心放开要真被摆出去、满速撞 3 秒钻不进去
+##      9  **郑铎打断的落点**：贴着碎片站时不起播、骑开了才起播、
+##         一次只排一场（阈值被一口气冲掉也只放一场）、入场提示浮得出来、
+##         收尾时相机锁与 look_at 都还回去
 ##
 ## 第 6 节要注入真空格，但**加不加 --headless 都跑得过**（两种都实测过）：
 ## `DialoguePopup` 推进对白走的是 `Node._input()`，不走焦点路由，注入的空格照样到得了。
@@ -43,8 +48,22 @@ var _fails := 0
 var _gm: Node = null
 var _world: Node = null
 
+## 第 10 节的收尾旗 + 断言条数下限。
+##
+## 加这条是因为真的踩了一次：`_section10` 里写了个不存在的
+## `Player3D.get_can_move()`，抛异常把**整节**掐断，而 `await` 一个抛异常的
+## 协程不会把异常往上抛——`_run()` 接着走完、照样打出
+## `PASS (失败 0)`。**一整节断言一行没跑，报告却全绿**，
+## 跟 CLAUDE.md 里记的「一条回归自己抛异常时退出码是 0」是同一族。
+## 旗子必须由这一节**自己**在末尾置位，中途抛异常就永远置不上。
+var _s10_done := false
+var _ck_total := 0
+var _s10_ck_at_start := 0
+const _S10_MIN_CK := 20
+
 
 func _ck(label: String, cond: bool, detail: String = "") -> void:
+	_ck_total += 1
 	if cond:
 		print("[OK]   ", label)
 	else:
@@ -75,15 +94,65 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 
-func _teleport(station_idx: int) -> void:
-	_world._close_shop()
-	_world._player.position = _world._stations[station_idx].position + Vector3(0, 1.0, 3.0)
+## 站到这座站**最近能站的地方**（`STATION_KEEPOUT_PAD` 之外 0.6m）。
+##
+## 不能随手写死 3m/1.2m：`World3D._apply_station_keepout()` 会把钻进占地的车
+## 摆回墙外，于是回归"瞬移到站中心"量到的其实是墙外那个位置——
+## 而且是隔了几帧才摆过去的，中间态连断言的时序都不对。要贴脸就得贴着墙站。
+func _teleport_close(station_idx: int) -> Vector3:
+	var r: float = _world.station_keepout_radius(station_idx)
+	if r <= 0.0:
+		# 模型还没流进来（这条回归开跑时 GLB 是异步加载的），先按最小的一座估
+		r = 5.0
+	var pos: Vector3 = _world._stations[station_idx].position + Vector3(0, 1.0, r + 0.6)
+	_world._player.position = pos
 	_world._last_global_pos = _world._player.global_position
 	_world._has_last_pos = true
 	_world._interact_cooldown = 0.0
 	_world._recheck_armed = true
 	_world._check_in_in_progress = false
 	_world._mini_game_state = -1
+	return pos
+
+
+func _teleport(station_idx: int) -> void:
+	_world._close_shop()
+	_teleport_close(station_idx)
+
+
+## 把车摆到**离所有待到访碎片驿站都远**的路面上。
+##
+## 第 6 节原来 `_teleport(4)`，而 4 正是五座碎片站之一（`[7,10,13,14,4]`）。
+## 第 9 节那道落点闸（`VILLAIN_MIN_TARGET_DIST`）会据此判定"玩家正贴着目标"
+## 而一直不起播，于是第 6 节等的是一个**永远不会到达的状态**、`_until` 走满
+## 超时后把后面所有断言一起染红——而报上来的现象是"被测代码坏了"。
+## 回归自己站到了一个游戏已经不触发的地方，就得把它挪到游戏真的会触发的地方去。
+##
+## "远"按游戏自己的判据算（离**还要去**的碎片站最远），不写死一个距离：
+## 写死的话，哪天碎片站的顺序变了、或者这一轮已经收齐了，这个位置就不再远，
+## 而第 6 节又会开始等一个等不到的东西。
+func _teleport_open_road() -> Vector3:
+	var rd = _world._road_builder.get_road_data()
+	var best := Vector3.ZERO
+	var best_d := -1.0
+	for line in _world._road_builder.get_all_centerlines():
+		for p in line:
+			var d := 1e9
+			for i in rd.stations.size():
+				if not _gm.fragment_station_needs_visit(i):
+					continue
+				var sp: Vector3 = _world._stations[i].position
+				d = minf(d, Vector2(p.x - sp.x, p.z - sp.z).length())
+			if d > best_d:
+				best_d = d
+				best = p
+	var pos := Vector3(best.x, _world._get_terrain_height(best.x, best.z), best.z)
+	_world._player.position = pos
+	_world._last_global_pos = _world._player.global_position
+	_world._has_last_pos = true
+	_world._interact_cooldown = 0.0
+	_world._recheck_armed = true
+	return pos
 
 
 ## 带窗口跑这一节才对：`CheckInPrompt` 靠真实按键事件驱动，而 headless 用的是
@@ -175,8 +244,12 @@ func _run() -> void:
 	await process_frame
 	_world._villain_playing = true
 	_world._play_villain_scene(0)      # 挂起在第一段对白上
-	await process_frame
-	await process_frame
+	# 现在对白前面有一段入场（提示 + 镜头收束，`VILLAIN_CAM_PULL_SEC` +
+	# `VILLAIN_CAM_HOLD_SEC`，合计 1.8s），所以这里必须**等它真的弹出来**，
+	# 不能再用"两帧之后应该在"——那一版量到的是入场中间态，
+	# 报上来的现象是"对白没起来"，而真相是"还没到"。
+	await _until(func(): return _world._dialogue_popup.visible,
+			"郑铎第一段对白弹出来")
 	_ck("郑铎第一段对白正在播",
 			_world._dialogue_popup.visible and _world._villain_playing,
 			"对白没起来的话这一节是空测")
@@ -268,9 +341,7 @@ func _run() -> void:
 	_ck("提示圈铺满视口", cp.size.x > 1000.0 and cp.size.y > 500.0,
 			"size=%s" % str(cp.size))
 	var st_pos: Vector3 = _world._stations[4].position
-	_teleport(4)
-	_world._player.position = st_pos + Vector3(0, 1.0, 1.2)   # 贴脸，投影落进画面下半
-	_world._last_global_pos = _world._player.global_position
+	_teleport_close(4)   # 贴到墙外最近的那一点，投影落进画面下半
 	await process_frame
 	await process_frame
 	var cam: Camera3D = _world._player_cam
@@ -321,6 +392,14 @@ func _run() -> void:
 			and _world._can_start_check_in(4),
 			"圈目标=%s can_start=%s" % [str(cp6._prompt_target()),
 					str(_world._can_start_check_in(4))])
+	# 基线量完就挪到空路上：4 号站本身是碎片站，第 9 节的落点闸会一直按住
+	# 反派戏不放（这正是它该做的），而第 6 节要量的是"戏一起播那半边"。
+	var open_p: Vector3 = _teleport_open_road()
+	_ck("挪到了离所有待到访碎片站都远的地方（否则第 6 节会等一个不触发的状态）",
+			not _world._too_close_to_target(),
+			"最近 %s，距站 4 %.1fm" % [str(_world._too_close_to_target()),
+					Vector2(open_p.x - _world._stations[4].position.x,
+					open_p.z - _world._stations[4].position.z).length()])
 
 	# 上膛。触发条件是"路过 4 座驿"（VILLAIN_SCENES[0].seen = 4）；回归是瞬移的，
 	# 前面几节路过几座全看瞬移顺序，所以这里显式补足，不靠巧合。
@@ -345,6 +424,12 @@ func _run() -> void:
 				_world._interact_blocked_reason() == "",
 				"报的是 %s" % _world._interact_blocked_reason())
 		var dp6 = _world._dialogue_popup
+		# `_villain_playing` 现在比对白弹起来早 1.8 秒（入场那一下），
+		# 所以必须等弹窗真的可见再往下量。少了这一句，`_typewriter_done`
+		# 读的是上一轮留下的 true，于是空格打在**入场那一段**上——
+		# 那一段没有对白在接，于是"空格推进了一行"永远量到 0 → 0，
+		# 报上来的现象是"按键被吃掉了"，而真相是"对白还没开始"。
+		await _until(func(): return dp6.visible, "反派戏的对白真的弹出来")
 		# 打字机没走完时按空格只是把这一行补全（`_on_next_pressed` 的第一个分支），
 		# 不换行。所以这里等它走完再量"空格推进了一行"，否则量的是补字。
 		await _until(func(): return dp6._typewriter_done, "第一行打字机走完")
@@ -390,6 +475,64 @@ func _run() -> void:
 	_ck("铺子能开（回归的终点：不再需要重开游戏）",
 			_world._can_open_shop(_world._nearby_shop_idx))
 
+	# ---------- 8 驿站占地不许骑进去 ----------
+	# `Player3D` 是直接 `position += forward * speed * delta` 的，没有碰撞求解器，
+	# 而 16 座站的亭子最大一座占地近 16m 宽。车能直接开进亭子里，相机跟着穿进
+	# 模型内壁，贴脸那一屏的下半屏全是内壁。修法是一圈硬推出（不是软力：
+	# 15m/s 一帧 0.25m，力推拦不住）。
+	#
+	# 这三条各自盯一件会悄悄坏掉的事：
+	#   · 半径全部 < STATION_PASS_RADIUS —— 否则玩家被挡在打卡圈外面，
+	#     顶栏「下一处 … Nm」永远减不到 0、圈永远不亮；
+	#   · 从站心放开会被摆到墙外 —— 推出真的在跑；
+	#   · 满速冲 3 秒穿不过去 —— 半径不是只在慢速下才拦得住。
+	await _until(func(): return _world.station_keepout_radius(4) > 0.0,
+			"站 4 的模型流进来（半径量出来了）")
+	var worst_r := 0.0
+	for i in _world._stations.size():
+		worst_r = maxf(worst_r, _world.station_keepout_radius(i))
+	_ck("16 座站都量出了占地（没有一座半径是 0）",
+			worst_r > 0.0, "最大 %.2fm" % worst_r)
+	_ck("挡车半径全部小于打卡半径（玩家被墙挡住就打不了卡了）",
+			worst_r < float(_world.STATION_PASS_RADIUS),
+			"最大 %.2fm vs STATION_PASS_RADIUS %.1fm"
+			% [worst_r, _world.STATION_PASS_RADIUS])
+	var r4: float = _world.station_keepout_radius(4)
+	var c4: Vector3 = _world._stations[4].position
+	_world._player.position = c4
+	_world._last_global_pos = _world._player.global_position
+	await create_timer(0.5).timeout
+	var d4 := Vector2(_world._player.position.x - c4.x, _world._player.position.z - c4.z).length()
+	_ck("从站心放开会被摆到墙外（不是留在亭子里）", d4 >= r4 - 0.05,
+			"停在 %.2fm，半径 %.2fm" % [d4, r4])
+	_ck("摆到墙外之后仍然打得到卡（这一屏还是到站那一屏）",
+			_world._can_start_check_in(4) and d4 <= _world.STATION_PASS_RADIUS,
+			"距站 %.2fm" % d4)
+	# 满速撞墙：位置每帧被摆回边界，速度每帧被 damp_speed 掉一点，测的是有没有哪一帧钻了进去。
+	# 先把操纵权要回来——第 4/6 节走完真打卡之后 `_can_move` 可能还锁着，
+	# 而 `Player3D._physics_process` 开头就 return，车根本不动，那样测的是空气。
+	_world._player.set_can_move(true)
+	_world._player.position = c4 + Vector3(r4 + 4.0, 0, 0)
+	_world._player.rotation.y = atan2(-(c4.x - _world._player.position.x),
+			-(c4.z - _world._player.position.z))
+	_world._player._speed = 15.0
+	var thru := 0
+	var t_end := Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < t_end:
+		await process_frame
+		if Vector2(_world._player.position.x - c4.x,
+				_world._player.position.z - c4.z).length() < r4 - 0.5:
+			thru += 1
+	_ck("满速 15m/s 撞 3 秒钻不进亭子", thru == 0,
+			"有 %d 帧人在墙里（末速度 %.1f）" % [thru, _world._player.get_speed()])
+	_ck("撞墙之后车真的慢下来了（不是贴着墙蹭着走）",
+			_world._player.get_speed() < 15.0,
+			"末速度 %.1f" % _world._player.get_speed())
+
+	await _section9_villain_placement()
+	await _section10_synthesis_choice()
+	_verify_section10_completed()
+
 	_gm._clear_save()
 	print("\n[verify_interact_latch] %s  (失败 %d)" % [
 			"PASS" if _fails == 0 else "FAIL", _fails])
@@ -398,6 +541,156 @@ func _run() -> void:
 
 func _root_loc() -> Node:
 	return root.get_node("Localization")
+
+
+## 郑铎打断的**落点**：什么时候才该把他叫出来。
+##
+## 实测（`.review/play_newcomer2.txt` ~146s）：玩家离目标还有 15m、正全速冲刺，
+## 车突然停住，一个不认识的人开始讲 9 行台词——第一次读到这一屏的人，
+## 报上来的现象是"游戏卡了"。所以这里钉三件事：
+##   1  贴着碎片站时**不起播**，而且是"不消费"（armed 还在，等骑开了再放）
+##   2  阈值被一口气冲掉时**一次只放一场**（不是三场连着灌）
+##   3  入场真的有一个可归因的边界：一行提示 + 一次镜头收束，然后才是对白；
+##      散场时相机锁和 look_at 都还回去
+##
+## 第 3 条的收尾是这里最容易漏的一处：`_play_villain_scene()` 现在
+## `set_camera_locked(true)` 并置 `_cam_look_at_active`，而漏掉其中任何一个
+## 的话，相机就再也不跟车了——车照跑、镜头定死在原地，而且**没有任何断言会红**。
+func _section9_villain_placement() -> void:
+	print("\n---- 9. 郑铎打断的落点 ----")
+	var hud = _world._hud3d
+	var loc = _root_loc()
+	_gm._clear_save()
+	_gm.headless_mode = false
+	_world._headless_mode = false
+	_gm.seen_villain = 0
+	_world._villain_playing = false
+	_world._villain_last_play_seen = -999
+	_world._villain_armed = [true, true, true]
+	_world._player.set_camera_locked(false)
+	_world._player.set_can_move(true)
+
+	# -- 1. 站在碎片站边上：不该起播，且这一场不能被消费掉 --
+	_teleport(4)
+	await process_frame
+	await process_frame
+	for i in range(0, 4):
+		if i != 4:
+			_gm.on_station_pass(i)
+	await process_frame
+	await process_frame
+	_ck("贴着碎片站时反派戏不起播（正冲刺的人被冻住读成'卡了'）",
+			not _world._villain_playing,
+			"_villain_playing=%s" % str(_world._villain_playing))
+	_ck("贴着目标时这一场**没有被消费掉**（是延后，不是取消）",
+			bool(_world._villain_armed[0]) and _gm.seen_villain == 0,
+			"armed=%s seen_villain=%d" % [str(_world._villain_armed), _gm.seen_villain])
+	_ck("这一条闸确实判的是距离（站到站里就是'太近'）",
+			_world._too_close_to_target(), "")
+
+	# -- 2. 骑到空路上：这一场该放了 --
+	var open: Vector3 = _teleport_open_road()
+	await process_frame
+	if not await _until(func(): return _world._villain_playing,
+			"骑离目标之后第 0 场起播（位置 %s）" % str(open)):
+		return
+
+	# 入场：提示 + 镜头收束。这一段在第 9 条改动之前根本不存在。
+	await process_frame
+	var cue: Label = hud._cue_label
+	var cue_name: Label = hud._cue_name_label
+	_ck("起播后浮出了入场提示（让'刚才那一下'有出处）",
+			cue != null and str(cue.text) == loc.t("villain_cue_1"),
+			"写着「%s」" % ("" if cue == null else str(cue.text)))
+	_ck("入场提示带着角色名", cue_name != null
+			and str(cue_name.text) == loc.t("villain_speaker"),
+			"写着「%s」" % ("" if cue_name == null else str(cue_name.text)))
+
+	# 镜头真的被收束了：相机被冻住，且注视目标被接管。
+	var moved := false
+	var t_cue := Time.get_ticks_msec() + 1200
+	while Time.get_ticks_msec() < t_cue:
+		await process_frame
+		if _world._cam_look_at_active:
+			moved = true
+	var cam_locked: bool = _world._player.is_camera_locked()
+	_ck("入场时相机被锁住并接管了注视目标",
+			cam_locked and moved and _world._cam_look_at_active,
+			"locked=%s look_at=%s" % [str(cam_locked), str(_world._cam_look_at_active)])
+
+	# 对白弹起来之前，入场提示必须先收掉：两层底板叠着是字压在字上。
+	if await _until(func(): return _world._dialogue_popup.visible, "入场之后对白弹出来"):
+		_ck("对白弹起时入场提示已经让位",
+				str(cue.text) == "" and float(hud._cue_holder.modulate.a) <= 0.001,
+				"text=「%s」a=%.2f" % [str(cue.text),
+				float(hud._cue_holder.modulate.a)])
+
+	# -- 3. 把整场推完，验收尾把相机还回去了 --
+	var guard := Time.get_ticks_msec()
+	while _world._villain_playing and Time.get_ticks_msec() - guard < 20000:
+		_push_space()
+		await process_frame
+		await process_frame
+	_ck("整场推完后 _villain_playing 归位", not _world._villain_playing, "")
+	_ck("整场推完后相机锁还回去了（漏了它车还在跑、镜头定死）",
+			not _world._player.is_camera_locked(), "locked=%s" % str(_world._player.is_camera_locked()))
+	_ck("整场推完后 look_at 也还回去了（漏了它镜头再也回不到车后面）",
+			not _world._cam_look_at_active, "active=%s" % str(_world._cam_look_at_active))
+	_ck("本场确实播的是第 0 场", _gm.seen_villain == 1,
+			"seen_villain=%d" % _gm.seen_villain)
+
+	# -- 4. 一次只排一场：阈值一口气冲到 12，也只该再放一场 --
+	# 场景就是玩家从 4 驿一路骑到 12 驿：三场同时武装、同时够阈值。
+	# 没有场次间隔闸的话，第 1 场刚结束第 2 场立刻顶上来，一口气灌完。
+	#
+	# 必须真的把 seen 顶到 **12 以上**，不然第 3 场自己的阈值就没到、
+	# 它压根不武装 —— 于是"第 3 场没排上"这条断言在闸被删掉之后照样绿。
+	# 这一版第一遍只过了 11 座（0~10），第 3 场从来没到过阈值，量的是空气。
+	_teleport_open_road()
+	_world._villain_armed = [true, true, true]
+	for i in [5, 6, 7, 8, 9, 10, 11, 12]:
+		_gm.on_station_pass(i)
+	await process_frame
+	await process_frame
+	# 这里只钉前提的"数量"那一半。`armed` 那一半**不能**在这里断言：
+	# 上面已经让了两帧物理时间，第 3 场要么被闸挡住（armed 仍为 true）、
+	# 要么已经起播（armed 已翻 false）——两种都是对的行为，
+	# 写进前提里只会在闸被删掉时误报一条与被测无关的红。
+	_ck("驿数真的顶到第 3 场的阈值了（否则下面几条量的是空气）",
+			_gm.get_seen_station_count() >= int(_world.VILLAIN_SCENES[2]["seen"]),
+			"seen=%d 阈值=%d" % [_gm.get_seen_station_count(),
+			int(_world.VILLAIN_SCENES[2]["seen"])])
+	_ck("阈值一口气冲过之后立刻又放了一场",
+			_world._villain_playing and _gm.seen_villain == 2,
+			"playing=%s seen_villain=%d" % [str(_world._villain_playing), _gm.seen_villain])
+	# 就在这场开着的时候，第 3 场不许也排上队
+	_ck("第 3 场没有同时排上（一次只排一场）",
+			bool(_world._villain_armed[2]),
+			"armed=%s" % str(_world._villain_armed))
+
+	guard = Time.get_ticks_msec()
+	while _world._villain_playing and Time.get_ticks_msec() - guard < 20000:
+		_push_space()
+		await process_frame
+		await process_frame
+	# 必须再等几个物理帧再断言：`while` 是在 `_villain_playing` 变 false 的**那一帧**
+	# 退出的，而第 3 场要等下一个 `_physics_process` 才起播。不等的话量到的
+	# 是"还没轮到它"，而不是"它被闸挡住了"——这一版回归在闸被删掉之后照样全绿。
+	await create_timer(0.5).timeout
+	_ck("第 2 场收尾后第 3 场仍未排上（场次间隔闸在起作用）",
+			bool(_world._villain_armed[2]) and _gm.seen_villain == 2
+			and not _world._villain_playing,
+			"armed=%s seen_villain=%d playing=%s" % [str(_world._villain_armed),
+			_gm.seen_villain, str(_world._villain_playing)])
+	# 闸的值是从上一场开演时的驿数算的，所以再过两驿它就该放了。
+	var need: int = _world._villain_last_play_seen + int(_world.VILLAIN_MIN_STATION_GAP)
+	_ck("闸的下限确实是「上一场开演时的驿数 + 间隔」",
+			_gm.get_seen_station_count() < need,
+			"seen=%d < %d + %d" % [_gm.get_seen_station_count(),
+			_world._villain_last_play_seen, int(_world.VILLAIN_MIN_STATION_GAP)])
+	_ck("上一场开演时的驿数被记下来了",
+			_world._villain_last_play_seen >= 0,
+			"=%d" % _world._villain_last_play_seen)
 
 
 ## 问提示圈自己现在打算写哪句话（走的是它自己的 _label()，不是重演一遍逻辑）
@@ -412,3 +705,191 @@ func _cp_label() -> String:
 	var cp = _world._check_in_prompt
 	var t: Array = cp._prompt_target()
 	return _root_loc().t("desktop_checkin_prompt") if t.is_empty() else str(cp._label(t))
+
+
+## ===================== 10 集齐二选一面板 =====================
+## 第一次集齐五块碎片时弹的那块面板。它是**这一趟的落点**：
+## 以前这里只浮一句「顶栏的圆点还是空的」就把操纵权还回去了，而唯一的出口
+## 「收下明信片」藏在暂停面板深处、没有任何一句话告诉玩家它在那儿。
+## 一趟 20~30 分钟，评委玩不到终点就已经还回去了。
+##
+## 这节量的三件事，和第 6 节是同一个家族：
+##   1  面板是个真模态：世界冻住、空格漏不进来、脚下的圈跟着收
+##   2  「再骑一圈」真的把一切还回去，**而且 `_all_done` 仍然是 false**
+##      （拿 `_all_done` 当这个闸门会让 `verify_minimap.gd` 第 9 节变红，
+##        而那条是对的：面板期间这一趟并没有走完）
+##   3  只弹一次
+##
+## 全部走真实 `check_in()` 驱动，不直接写 `collected` —— 直接写不发信号，
+## 那一节量的是一个不存在的世界（CLAUDE.md「测试里的存档摆弄必须走真实入口」）。
+func _section10_synthesis_choice() -> void:
+	print("\n---- 10. 集齐二选一面板 ----")
+	_s10_ck_at_start = _ck_total
+	var loc = _root_loc()
+	var panel = _world._synthesis_panel
+	_gm._clear_save()
+	_gm.headless_mode = false
+	_world._headless_mode = false
+	_world._villain_playing = false
+	_world._synthesis_choice_open = false
+	panel.visible = false
+
+	var rd = _world._road_builder.get_road_data()
+	var frag: Array = rd.FRAGMENT_SLOT_STATION_IDX
+	for i in frag.size() - 1:
+		_teleport(int(frag[i]))
+		await process_frame
+		_gm.check_in(int(frag[i]))
+		# `all_fragments_collected` 是状态翻转信号，第 5 次才发；
+		# 前四次之后确认面板没被提前弹出来（弹早了玩家还没集齐就被问
+		# 「要不要收下明信片」，而他手上还差一个站）。
+		if i < frag.size() - 1:
+			await create_timer(0.15).timeout
+			_ck("集齐 %d/%d 时面板没有提前弹出" % [i + 1, frag.size()],
+					not panel.visible and not _world._synthesis_choice_open)
+	# 合成动画 2.5s + 一点余量。判据只能等墙钟：`--quit-after` 的单位是帧。
+	var waited := 0.0
+	while not _world._synthesis_choice_open and waited < 8.0:
+		await create_timer(0.1).timeout
+		waited += 0.1
+	_ck("五块碎片集齐后面板弹出来了", _world._synthesis_choice_open and panel.visible,
+			"等了 %.1fs，open=%s visible=%s" % [waited,
+			str(_world._synthesis_choice_open), str(panel.visible)])
+	if not panel.visible:
+		# 面板没起来就别往下量了：后面每一条都在量"面板开着的时候…"，
+		# 继续跑只会把"面板根本没弹"报成四五条不相干的失败。
+		return
+
+	# -- 1 它是个真模态 --
+	_ck("面板开着时操纵权没还回来", not bool(_world._player._can_move),
+			"能骑 = %s" % str(bool(_world._player._can_move)))
+	_ck("面板开着时相机还锁着", _world._player.is_camera_locked())
+
+	# 空格在这个面板上是**按钮的 ui_accept**，可同一个键又是全局 interact
+	#（`Input.is_action_just_pressed` 拦不住）。少了 `_can_start_check_in`
+	# 里那一格，玩家按「收下明信片」的那一下会顺手再走一遍 interact 分支。
+	_teleport(int(frag[0]))
+	await process_frame
+	await process_frame
+	_ck("面板开着时打卡闸是关着的（空格漏不进来）",
+			not _world._can_start_check_in(int(frag[0])),
+			"按「收下明信片」的那一下空格会顺手再开一轮打卡")
+	# 圈必须跟着收：`_physics_process` 那张早退单子把 `_nearby_*` 清成 -1，
+	# `CheckInPrompt._prompt_target()` 只读 `_nearby_*`、不知道有这个状态。
+	# 漏了的话圈上写着「空格 · 再办一次」，而空格正在按钮上。
+	_ck("面板开着时脚下的圈不画了", _world._nearby_station_idx == -1
+			and _visit_prompt_label() == "",
+			"nearby=%d，圈上写着「%s」" % [_world._nearby_station_idx,
+			_visit_prompt_label()])
+	_ck("面板开着时不冒「这里进不去」那句话",
+			_world._interact_blocked_reason() == "",
+			"说的是「%s」" % _world._interact_blocked_reason())
+
+	# -- 2 键盘可达性 --
+	# 只钉 focus_mode：headless 的 dummy display server 不做焦点路由，
+	# `has_focus()` 在这里恒为 false —— 那是量不出来的，不是坏的。
+	# 真按键走通那一条是 `verify_panel_keyboard.gd`（带窗口）的活。
+	var take_btn = panel.get_node_or_null("Panel/Margin/VBox/TakePostcardBtn")
+	var keep_btn = panel.get_node_or_null("Panel/Margin/VBox/KeepRidingBtn")
+	_ck("两个按钮都建出来了", take_btn != null and keep_btn != null)
+	if take_btn != null and keep_btn != null:
+		_ck("两个按钮都能被键盘走到（focus_mode 不是 NONE）",
+				take_btn.focus_mode != Control.FOCUS_NONE
+				and keep_btn.focus_mode != Control.FOCUS_NONE)
+		# 尺寸：都在屏内、且不叠。"不叠"比"不越界"更容易被忽略——
+		# 两个都铺满屏的按钮在屏内，可玩家怎么按都只有下面那个能按。
+		var tr: Rect2 = take_btn.get_global_rect()
+		var kr: Rect2 = keep_btn.get_global_rect()
+		var vp: Vector2 = _world.get_viewport().get_visible_rect().size
+		_ck("两个按钮都在屏内", tr.intersects(Rect2(Vector2.ZERO, vp))
+				and kr.intersects(Rect2(Vector2.ZERO, vp)),
+				"take=%s keep=%s 屏=%s" % [str(tr), str(kr), str(vp)])
+		_ck("两个按钮不叠", not tr.intersects(kr),
+				"两块都铺满屏的话，玩家按上面那个永远没反应")
+		_ck("按钮上写的是人话，不是 key 名",
+				take_btn.text == loc.t("synthesis_take_postcard")
+				and keep_btn.text == loc.t("synthesis_keep_riding"),
+				"写着「%s」/「%s」" % [take_btn.text, keep_btn.text])
+	_ck("面板上写清了这一趟已经跑通了",
+			panel.get_node_or_null("Panel/Margin/VBox/Hint").text
+				== loc.t("synthesis_choice_hint"),
+			"这句是「让玩家深刻了解这游戏是做什么的」那句话本身")
+
+	# -- 3 选「再骑一圈」：什么都得还回去，而且这一趟**没有**走完 --
+	keep_btn.emit_signal("pressed")
+	await create_timer(0.2).timeout
+	_ck("「再骑一圈」后面板关掉了", not panel.visible
+			and not _world._synthesis_choice_open)
+	_ck("「再骑一圈」把操纵权还回去了", bool(_world._player._can_move))
+	_ck("「再骑一圈」把相机还回去了", not _world._player.is_camera_locked())
+	_ck("「再骑一圈」没有把这一趟判成走完（`_all_done` 仍是 false）",
+			not _world._all_done,
+			"拿 `_all_done` 当这个闸门的话，顶栏「再访 · 还差 2 次」当场变成谎言")
+	_ck("「再骑一圈」没有把评级顶到完满", not _gm.all_fragments_maxed())
+	_ck("「再骑一圈」给了一段空格静默期", _world._interact_cooldown > 0.0,
+			"玩家手上多半还按着空格")
+	_teleport(int(frag[0]))
+	await process_frame
+	await process_frame
+	_ck("「再骑一圈」之后回到站边还能继续打卡", _world._can_start_check_in(int(frag[0])))
+
+	# -- 3b 收面板的责任在 World3D 侧，不只在按钮侧 --
+	# 上面那条是**点按钮**走出来的，面板自己收自己。而 `synthesis_choice` 是个
+	# 公开信号：定妆照脚本、以后的自动导览、任何 `emit()` 都走不到按钮那一行。
+	# 面板原先只在 `_emit()` 里收，于是这些路子里 `_synthesis_choice_open` 已经
+	# 归零（操纵权还回去了）而模态还亮着——`lookdev_journey.gd` 的 `13c` 就是这么
+	# 拍出一张"还骑一圈之后"却和上一张一模一样的图的：断言量的是操纵权，图上量
+	# 的是屏幕，而那一条当时两边都在说谎。
+	panel.open()
+	await process_frame
+	_ck("信号这条路也能把面板打开（前提：面板此刻可见）", panel.visible)
+	panel.synthesis_choice.emit(false)
+	await create_timer(0.2).timeout
+	_ck("直接发信号收工时面板也被收掉了（不点按钮也收）", not panel.visible)
+	_ck("直接发信号收工时闩锁也放下了", not _world._synthesis_choice_open)
+
+	# -- 4 只弹一次 --
+	# `all_fragments_collected` 是带 `_collected_fired` 闩锁的状态翻转信号。
+	# 不需要额外闩锁，但要有断言证明它：回访一轮之后如果又弹一次，
+	# 玩家每去一站就被问一遍"要不要收下明信片"。
+	_gm.check_in(int(frag[0]))
+	await create_timer(0.6).timeout
+	_ck("回访之后面板没有第二次弹出来", not panel.visible
+			and not _world._synthesis_choice_open)
+	_ck("回访之后操纵权是玩家的", bool(_world._player._can_move))
+
+	# -- 5 另一条：选「收下明信片」要去结算页 --
+	# 真的按下去会 `go_to_end_card()` 换场景，把整条回归的 _world 抽掉，
+	# 所以这里只量**信号契约**：面板发什么，由 World3D 去落地。
+	# `_synthesis_choice_open` 是 World3D 的闩锁、`open()` 是面板自己的方法，
+	# 两者刻意不耦合——所以这里不能拿 `panel.open()` 之后闩锁有没有按上来当判据，
+	# 那是拿测试的捷径去量产品。
+	_gm._clear_save()
+	await create_timer(0.3).timeout
+	var got_choice: Array = []
+	panel.synthesis_choice.connect(func(take: bool): got_choice.append(take),
+			CONNECT_ONE_SHOT)
+	panel.open()
+	await process_frame
+	_ck("面板可以再打开（第二条路不是死路）", panel.visible)
+	take_btn.emit_signal("pressed")
+	await create_timer(0.3).timeout
+	_ck("「收下明信片」发的是 take_postcard=true",
+			got_choice.size() == 1 and bool(got_choice[0]), str(got_choice))
+	_ck("发了选择之后面板自己收掉了", not panel.visible)
+	_ck("「收下明信片」这条路没有把 `_all_done` 提前翻过来（落地在 World3D 侧）",
+			not _world._all_done)
+	_s10_done = true
+
+
+## 第 10 节跑完之后在调用点验一次。
+##
+## 旗子由这一节**自己**在末尾置位，所以它测的是"这一节的函数体真的跑到了
+## 最后一行"，而不是"我写了一个 await"。第 10 节头一版就栽在这里：
+## 一个不存在的 `get_can_move()` 抛异常掐断了整节，而 `await` 一个抛异常的
+## 协程不会把异常往上抛，`_run()` 接着走完、照样打出 `PASS (失败 0)`。
+func _verify_section10_completed() -> void:
+	var got := _ck_total - _s10_ck_at_start
+	_ck("第 10 节跑到了最后一行（不是抛异常掐在半路）", _s10_done)
+	_ck("第 10 节打出的断言一条不少（实测 %d 条）" % got, got >= _S10_MIN_CK,
+			"少于 %d 条说明中间被掐了，而上面的旗子已经报过" % _S10_MIN_CK)
