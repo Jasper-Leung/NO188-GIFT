@@ -1,6 +1,6 @@
 extends Control
 ## HUD3D — 3D 场景顶部栏 + 右上角多按钮 + 帮助面板 (PRD F-29/F-31/F-32)
-## 显示：碎片 n/5、已过 n/16 驿、旅币、心神
+## 显示：碎片 n/5、已过 n 驿、旅币、心神
 ## 按钮：暂停 / 全局静音 / BGM 静音 / SFX 静音 / 帮助
 ## 挂载：World3D/HUD3D，全屏锚点
 ##
@@ -205,7 +205,7 @@ func _process(delta: float) -> void:
 	# 所以只能每帧重算。16 站的字典 size() 是常数级，开销可以忽略。
 	if _road_data != null:
 		_progress_label.text = Localization.t("stations_seen",
-				[GameManager.get_seen_station_count(), _road_data.stations.size()])
+				[GameManager.get_seen_station_count()])
 	_station_label.text = Localization.t("fragments", [GameManager.get_collected_count()])
 	# 余额只显示余额，永不被入账提示顶掉。提示走独立的一条 toast（见 _setup_lvbi_toast），
 	# 因为把「旅币 120」换成「+20 旅币」会让这个 Label 的宽度一变，顶栏 HBox 里
@@ -539,7 +539,7 @@ func show_blocked_hint(key: String) -> void:
 
 ## 路过非碎片驿时浮出的那一句。
 ##
-## 16 座驿里只有 5 座给碎片，剩下 11 座以前路过时除了顶栏「已过 n/16 驿」
+## 16 座驿里只有 5 座给碎片，剩下 11 座以前路过时除了顶栏「已过 n 驿」
 ## 之外什么都没有——而它们其实早就各写好了一句风景话（road_data 的 text/text_en），
 ## 只是永远没人读得到：_nearby_station_idx 只会收碎片驿，而那条 text 唯一的
 ## 调用点在打卡之后。这一行就是把那份已经存在的数据接上。

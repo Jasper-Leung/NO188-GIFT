@@ -386,7 +386,7 @@ func _recap_lines() -> Array:
 			unread.append(rd.station_display_name(i))
 			if unread.size() >= 3:
 				break
-		lines.append(Localization.t("recap_seen", [seen, total]))
+		lines.append(Localization.t("recap_seen", [seen]))
 		if unread.size() > 0:
 			lines.append(Localization.t("recap_unread", [_join_names(unread)]))
 

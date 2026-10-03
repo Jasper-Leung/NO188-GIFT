@@ -80,7 +80,7 @@ func _build_ui() -> void:
 	spacer1.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(spacer1)
 
-	# 「这是什么」排在按键前面。顶栏从第一帧就摆着旅币 / 已过 n/16 驿 / 心神 /
+	# 「这是什么」排在按键前面。顶栏从第一帧就摆着旅币 / 已过 n 驿 / 心神 /
 	# 下一处，玩家能学会怎么骑车，却不知道自己在干什么——这是首屏最该补的一课。
 	var glossary_title = _make_label(Localization.t("glossary_title"), _font_size(18, 17), Color(0.85, 0.85, 0.85))
 	vbox.add_child(glossary_title)

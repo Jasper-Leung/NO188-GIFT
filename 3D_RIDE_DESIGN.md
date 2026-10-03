@@ -24,7 +24,8 @@
 不出现在任何玩家可见的界面上。真实环路只有 1228.8m，按 15 m/s 满速折算约 2 km/s，
 顶栏挂着那个数玩家骑三十秒就能算出 7200 km/h，然后整个数字连同它承载的门槛一起变噪音。
 
-**顶栏走的是驿数口径**：`GameManager.get_seen_station_count()`，写「已过 n/16 驿」。
+**顶栏走的是驿数口径**：`GameManager.get_seen_station_count()`，写「已过 n 驿」——**不带分母**，
+那个总数是 `RoadData.stations.size()`，扩充驿站时它留在代码里，不进文案。
 已从 km 门迁走的：灯铺解锁（`shop_data.gd` 的 `seen_unlock = 6`）和
 `World3D.VILLAIN_SCENES` 三场郑铎戏（`seen = 4/8/12`）。
 回归：`verify_economy.gd` 的 `_check_km_offscreen()` 扫全部文案里的
@@ -506,12 +507,12 @@ README 花了整节解释「它是编号不是里程」，世界里却没有任�
 `GameManager.get_seen_station_count()`，五件的到访次数走 `collected[station_idx]`，
 所以玩家在导出前改了存档，拿到的那张 PNG 就是改过的那张。
 
-抬头分两列。左列（`postcard_map_title` / `已过 n/16 驿` / 图例）从地图方框右边
+抬头分两列。左列（`postcard_map_title` / `已过 n 驿` / 图例）从地图方框右边
 22k 起排；右列（`postcard_joys_title` + 五行，每行是那件乐事的名字配右对齐的
 `postcard_visit_n`）从 `_caption_col_w()` 量出来的左列最宽处再往右 5% 宽起排，
 一直排到 `w - 150k`（再右是那只禽的地盘）。名字用它自己那件的颜色，
 和下面五格画区是同一把钥匙。**这一列原来不存在**：五个到访次数挤在
-「已过 n/16 驿」底下那一行，于是抬头的右三分之一约 880×410px 是一张空白的纸。
+「已过 n 驿」底下那一行，于是抬头的右三分之一约 880×410px 是一张空白的纸。
 
 中间那五格碎片画区是**收了几件**，顶部那张图是**在哪儿收的**——原来正面只有前者，
 谁拿出去都是同一张卡。留门 / 放手的差别仍然只落在封口蜡上（`seal_broken()`）。

@@ -66,7 +66,7 @@ func _fill_inventory(tier: int, extras: Array, ending: String) -> void:
 	for st_idx in _frag_idx:
 		_gm.collected[st_idx] = 3
 	# 正面顶上那张路线图读的就是 seen_stations（十六个点哪些实心）。
-	# 只摆 collected 的话图上会写着「已过 0/16 驿」配着一圈实心碎片站，
+	# 只摆 collected 的话图上会写着「已过 0 驿」配着一圈实心碎片站，
 	# 那是一张玩家永远不会拿到的卡 —— 定妆照得是挣的那层的完整形态。
 	for st_idx in _frag_idx:
 		_gm.seen_stations[st_idx] = true
@@ -279,7 +279,7 @@ func _run() -> void:
 
 	# 4 块 → 大师，靠新加的第五格体现「缺一件」。
 	# 顺带把 seen_stations 摆上：正面顶部那张路线图读的是它，只摆 collected
-	# 的话图上会写「已过 0/16 驿」配着一圈实心站——玩家永远拿不到的那种卡。
+	# 的话图上会写「已过 0 驿」配着一圈实心站——玩家永远拿不到的那种卡。
 	for i in _frag_idx.size():
 		if i < 4:
 			_gm.collected[_frag_idx[i]] = 1

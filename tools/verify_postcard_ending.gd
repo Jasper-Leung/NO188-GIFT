@@ -340,9 +340,14 @@ func _audit_route_map() -> void:
 	_gm.seen_stations[4] = true
 	_gm.seen_stations[7] = true
 	_eq("图上的驿数就是存档里的驿数", _gm.get_seen_station_count(), 2)
+	# 驿数那行**不带分母**：原来写死「已过 %d/%d 驿」，那个 16 长在文案里，
+	# 扩充驿站就得回来改字符串，改漏了顶栏就在说一个世界里已经没有的数。
 	_ck("驿数那行是渲染后的整句，不是 key 本身",
-			_loc.t("stations_seen") % [2, 16] == "已过 2/16 驿",
-			"got=%s" % (_loc.t("stations_seen") % [2, 16]))
+			_loc.t("stations_seen") % [2] == "已过 2 驿",
+			"got=%s" % (_loc.t("stations_seen") % [2]))
+	_ck("驿数那行不写死分母（扩充驿站不用改文案）",
+			not str(_loc.t("stations_seen")).contains("/"),
+			"got=%s" % _loc.t("stations_seen"))
 	_eq("云那格的次数就是存档里的次数", int(_gm.collected[7]), 2)
 	_eq("茶那格的次数就是存档里的次数", int(_gm.collected[10]), 1)
 	# 五个数逐个点过：抄一份下标表而顺序错了的话，只有这条会红
@@ -379,6 +384,9 @@ func _audit_route_map() -> void:
 func _audit_joys_column() -> void:
 	print("\n---------- 3d. 抬头右半：五件乐事那一列 ----------")
 	var font: Font = ThemeDB.fallback_font
+	# 驿数那一行的最宽情形取**驿站总数**。从 road_data 独立取一次而不是读
+	# `pc._rd`——那个字段正是被测的画笔自己算的，拿它当判据等于拿自己测自己。
+	var total_stations: int = load("res://scripts/road_data.gd").new().stations.size()
 	for lang in ["zh", "en"]:
 		_loc.set_language(lang)
 		for cw in [900.0, 1920.0]:
@@ -409,9 +417,10 @@ func _audit_joys_column() -> void:
 			col_a_w = maxf(col_a_w, font.get_string_size(
 					_loc.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1,
 					int(20 * k)).x)
-			# 用这一趟**真的会画出来**的那句（含实际的驿数，最多两位）
+			# 用**最宽的情形**那句（驿数最大时），和画笔里 `_caption_col_w()`
+			# 同一个口径 —— 它取的是 `RoadData` 的驿站总数，不是这一趟的实际值。
 			col_a_w = maxf(col_a_w, font.get_string_size(
-					_loc.t("stations_seen") % [16, 16], HORIZONTAL_ALIGNMENT_LEFT, -1,
+					_loc.t("stations_seen") % [total_stations], HORIZONTAL_ALIGNMENT_LEFT, -1,
 					int(28 * k)).x)
 			col_a_w = maxf(col_a_w, font.get_string_size(
 					_loc.t("postcard_map_legend"), HORIZONTAL_ALIGNMENT_LEFT, -1,
@@ -863,9 +872,14 @@ func _audit_run_recap() -> void:
 			lines.has(_loc.t("recap_frag_missing") % _join(missing)),
 			"lines=" + str(lines))
 
-	# 驿数按实际 seen_stations 报，不按「游戏跑了多久」编
-	_ck("驿数按存档报 5/%d" % total_stations,
-			lines.has(_loc.t("recap_seen") % [seen.size(), total_stations]), str(lines))
+	# 驿数按实际 seen_stations 报，不按「游戏跑了多久」编。
+	# 同样**不带分母**——原来写死「路过 %d/%d 座驿站」，那个总数长在文案里，
+	# 扩充驿站就得回来改字符串（顶栏那行已经是这个毛病）。
+	_ck("驿数按存档报 5 座（不带分母）",
+			lines.has(_loc.t("recap_seen") % [seen.size()]), str(lines))
+	_ck("回执那行也不写死分母",
+			not str(_loc.t("recap_seen")).contains("/"),
+			"got=%s" % _loc.t("recap_seen"))
 
 	# 没赢过的：只赢了 _frag_idx[0]，另外四个都要被点名
 	var lost: Array = []
@@ -967,7 +981,7 @@ func _audit_run_recap() -> void:
 	var full: Array = card._recap_lines()
 	_eq("走到头：正文只剩一行", full.size(), 1)
 	_eq("走到头：剩的就是另一边", full, [_loc.t("recap_ending") % _loc.t("ending_keep")])
-	_ck("走到头：不再报驿数", not str(full).contains(_loc.t("recap_seen") % [16, 16]))
+	_ck("走到头：不再报驿数", not str(full).contains(_loc.t("recap_seen") % [total_stations]))
 	_ck("走到头：不再报没赢过", not str(full).contains(_loc.t("recap_mini_lost")))
 	_ck("走到头：不报没花完", not str(full).contains(_loc.t("recap_lvbi")))
 	await _free(card)

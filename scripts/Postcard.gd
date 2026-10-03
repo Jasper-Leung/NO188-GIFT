@@ -337,7 +337,7 @@ func _draw_route_map(w: float, band_h: float) -> void:
 	_draw_map_caption(w, band_h, k)
 
 
-## 地图右边那一列字：一句标题、一句「已过 n/16 驿」、五件乐事各到访几次、
+## 地图右边那一列字：一句标题、一句「已过 n 驿」、五件乐事各到访几次、
 ## 外加图例。数字全部现算自存档，一个字都不另存——明信片是在
 ## `go_to_end_card()` 那一刻现画的，玩家改了存档再导出，拿到的就该是改过的那张。
 func _draw_map_caption(w: float, band_h: float, k: float) -> void:
@@ -349,10 +349,10 @@ func _draw_map_caption(w: float, band_h: float, k: float) -> void:
 		Localization.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1,
 		int(20 * k), dim)
 	draw_string(font, Vector2(x, band_h * 0.56),
-		Localization.t("stations_seen") % [GameManager.get_seen_station_count(), 16],
+		Localization.t("stations_seen") % [GameManager.get_seen_station_count()],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, int(28 * k), _ink)
 
-	# 五件乐事的到访次数。**这一列原来挤在「已过 n/16 驿」底下那一行**，
+	# 五件乐事的到访次数。**这一列原来挤在「已过 n 驿」底下那一行**，
 	# 于是整条带子的右三分之一——约 880x410px——是一张空白的纸，
 	# 而这一带本来就是玩家唯一带走的那张卡的抬头。挪成一列五行之后，
 	# 「每处去过三次、于是五件乐事轮换着来」这件事才第一次真的读得出来。
@@ -375,17 +375,19 @@ func _draw_map_caption(w: float, band_h: float, k: float) -> void:
 			BIRD_COL, 1.0, 0.8 * k)
 
 
-## 列 A（标题 / 已过 n/16 驿 / 图例）最宽的那一条有多宽。列 B 靠它起步，
+## 列 A（标题 / 已过 n 驿 / 图例）最宽的那一条有多宽。列 B 靠它起步，
 ## 所以这一段必须**量出来**：英文那一列比中文长一截，写死一个间距的话
 ## 英文界面下两列会压在一起。
 ##
-## 拿 `[16, 16]` 而不是这一趟的实际值：要的是这一列在**任何存档**下的最宽情形。
-## 按实际值起步的话，玩家到过的驿越多、后面的列离字越近。
+## 驿数那一行拿**驿站总数**而不是这一趟的实际值：要的是这一列在**任何存档**下的
+## 最宽情形（走完全程时那个数最大）。按实际值起步的话，玩家到过的驿越多、
+## 后面的列离字越近。总数从 `RoadData` 取——原来这里写死 `[16, 16]`，而扩充
+## 驿站时这一行会静默按旧数起算。
 func _caption_col_w(font: Font, k: float) -> float:
 	var a: float = font.get_string_size(
 			Localization.t("postcard_map_title"), HORIZONTAL_ALIGNMENT_LEFT, -1, int(20 * k)).x
 	var b: float = font.get_string_size(
-			Localization.t("stations_seen") % [16, 16], HORIZONTAL_ALIGNMENT_LEFT, -1,
+			Localization.t("stations_seen") % [_rd.stations.size()], HORIZONTAL_ALIGNMENT_LEFT, -1,
 			int(28 * k)).x
 	var c: float = font.get_string_size(
 			Localization.t("postcard_map_legend"), HORIZONTAL_ALIGNMENT_LEFT, -1,

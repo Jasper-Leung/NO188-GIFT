@@ -22,7 +22,7 @@ const STRINGS := {
 		"road_preview": "五件小乐事 · 即将开启",
 		"onboarding_title": "188号礼物",
 		"onboarding_subtitle": "沿 188 号环线，重演五件小乐事",
-		# 引导页的「这是什么」。顶栏从第一帧就摆着旅币/已过 n/16 驿/心神/下一处
+		# 引导页的「这是什么」。顶栏从第一帧就摆着旅币/已过 n 驿/心神/下一处
 		# 四个数字，但以前这里只讲按键——玩家学完怎么动，仍然不知道自己在干什么。
 		# 四个词就是顶栏和碎片栏里出现的全部名词，一次讲完，不用翻帮助。
 		"glossary_title": "先认这四样",
@@ -87,7 +87,11 @@ const STRINGS := {
 		# （stations_seen）了。但 key 没删，于是 verify_economy 的 km 扫描
 		# 不得不为它单开一条豁免 —— 一条看起来齐全的回归，恰好漏掉了全表里
 		# 唯一真带着里程的一句。删掉 key，豁免也跟着删，扫描不再有后门。
-		"stations_seen": "已过 %d/%d 驿",
+		# 驿数**不带分母**。原来写死「已过 %d/%d 驿」，那个 16 是驿站总数，
+		# 而它长在**文案**里——往后扩充驿站就得回来改这一行，改漏了顶栏就在说
+		# 一个世界已经没有的数。改成只报已过的数：分母是 `RoadData.stations.size()`，
+		# 要显示的时候让代码去取，不要让它进字符串。进度感由小地图和「下一处」给。
+		"stations_seen": "已过 %d 驿",
 		"fragments": "碎片 %d/5",
 		"hud_next_target": "下一处 %s %s · %dm",
 		"hud_revisit_target": "再访 %s %s · 还差 %s 次",
@@ -147,7 +151,7 @@ const STRINGS := {
 		"postcard_map_title": "这一趟的路线",
 		"postcard_map_legend": "实心 = 到过　空心 = 未至",
 		# 抬头右半那列。**原来那一带是空白的纸**——五个到访次数挤在
-		# 「已过 n/16 驿」底下那一行，剩下三分之一什么也没有。
+		# 「已过 n 驿」底下那一行，剩下三分之一什么也没有。
 		"postcard_joys_title": "五件乐事",
 		"postcard_visit_n": "%d 次",
 		# ---- 重新开始前的「这一趟」回执（EndCard._show_run_recap）----
@@ -157,7 +161,7 @@ const STRINGS := {
 		"recap_title": "这一趟还剩下这些",
 		"recap_frag_missing": "还差这几块没拿到：%s",
 		"recap_frag_one": "还差这一块没拿到：%s",
-		"recap_seen": "路过 %d/%d 座驿站",
+		"recap_seen": "路过 %d 座驿站",
 		"recap_unread": "没读到它们的话：%s",
 		"recap_mini": "五件小乐事赢了 %d 件",
 		"recap_mini_lost": "没赢过：%s",
@@ -323,7 +327,7 @@ const STRINGS := {
 		"quality_hint": "Low turns off sun shadows and pulls grass and trees in to 70m - vegetation range applies on your next ride",
 		"help_overlay": "WASD / Arrows   Move\nSpace / Enter   Station check-in\nESC             Pause menu\nM               Mute all\nTap shard icon  View shard story\nBGM/SFX mute    Control music and sounds",
 		"help_close": "Click outside the panel to close",
-		"stations_seen": "Posts passed %d/%d",
+		"stations_seen": "Posts passed %d",
 		"fragments": "Shards %d/5",
 		"hud_next_target": "Next %s %s · %dm",
 		"hud_revisit_target": "Revisit %s %s · %s to go",
@@ -378,7 +382,7 @@ const STRINGS := {
 		"recap_title": "What this run left out",
 		"recap_frag_missing": "Still missing: %s",
 		"recap_frag_one": "Still missing: %s",
-		"recap_seen": "Passed %d/%d stations",
+		"recap_seen": "Passed %d stations",
 		"recap_unread": "You never read what they had to say: %s",
 		"recap_mini": "You won %d of the five small joys",
 		"recap_mini_lost": "Never won: %s",
