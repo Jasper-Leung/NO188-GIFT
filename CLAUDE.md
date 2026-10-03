@@ -360,7 +360,11 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						必须真的算成完满评级、`reset` 收回演示模式、标题页中英按钮的秒数
 						不许和 `DEMO_BUDGET_SEC` 漂）；第 2 节真的点「演示 · 90 秒」，
 						真的骑，量累计里程 / 到过几驿 / **小游戏有没有真的弹出来**——
-						后一条是唯一能证伪「DemoDirector 一行都没执行」的判据。
+						后一条是唯一能证伪「DemoDirector 一行都没执行」的判据；
+						**外加「收工前那一行交代真的打在屏上了」**（见下面陷阱清单
+						里「补齐的那些数得说出口」那条，判据量的是 `_pass_label` 的
+						正文而不是某个字段为真）。打印行里那串小游戏脚本名是量出来的
+						事实（**62 秒只够停两站，最近那座是禽不是茶**），别当装饰删掉
 						断言总数钉在 `EXPECTED_CKS`，中途抛错会静默少跑一半而汇总照样全绿
   web_smoke.gd + .tscn     **Web 导出实测用，不是产品的一部分**。设成主场景导出 Web，
 						在浏览器里打开两遍：第一遍走真实 `check_in()` 写盘 + 导 PNG，
@@ -673,10 +677,34 @@ echo. > .editor_mode
 - 改 `MiniGameTea` / `MiniGameZither` / `MiniGameBamboo` 等五个小游戏里的输入处理前跑 `verify_mini_game.gd` 第 5 节（五个都必须能用 ESC 取消 —— 取消按钮是 `_draw()` 画的假按钮，键盘点不到，茶最糟：既放弃不了又失败不了，键盘玩家唯一出路是干等 30s 超时）。注意 ESC 的插入位置各不相同：琴要放在示范阶段的早退之前、竹要放在 1.6s 成功停留之后（那一下不许跳）
 - 改五个小游戏里的**提示文案**或 `MiniGameBird.SHOW_DURATION` / `countdown_fraction()` 前跑 `verify_mini_game.gd` 第 6 节（先量机制、再拿文案对答案）+ `lookdev_journey.gd` 看 5 张 `minigame_*.png`。这一节的判据是"字和代码不许互相拆台"，所以改文案时不能只改文案——先确认代码到底怎么做的
 - 改 `GiftBox` 那五个过场常量（`BOX_OUT_SEC` / `ROAD_IN_SEC` / `ROAD_HOLD_SEC` / `ROAD_OUT_SEC` / `SWITCH_DELAY_SEC`）前跑 `verify_story.gd` 第 5 节 + `measure_cold_start.gd`。这五段是冷启动里**唯一**一段纯机器等待，而墙钟判据太粗：把过场调慢一秒，总时长那条（4.6s < 20s）照样绿，只有常量那条会红
-- 改 `DemoDirector.gd` 的任何一段（`RAIL_LEAD` / `APPROACH_ARC` / `PRESS_DIST` / `MINIGAME_LINGER_SEC` / `_steer()` 那一整套）前跑 `verify_demo_path.gd`（**不能加 --headless**）。这一族回归断言的是**演示真的骑了**：累计里程、到过几驿、以及小游戏有没有真的弹出来。只断言「62 秒后到了结算页」的话，`DemoDirector` 一行都不执行、驾驶员在起点站到时间到，照样全绿
+- 改 `DemoDirector.gd` 的任何一段（`RAIL_LEAD` / `APPROACH_ARC` / `PRESS_DIST` / `MINIGAME_LINGER_SEC` / `HANDOFF_NOTICE_SEC` / `_steer()` 那一整套）前跑 `verify_demo_path.gd`（**不能加 --headless**）。这一族回归断言的是**演示真的骑了**：累计里程、到过几驿、以及小游戏有没有真的弹出来。只断言「62 秒后到了结算页」的话，`DemoDirector` 一行都不执行、驾驶员在起点站到时间到，照样全绿
 - 改 `GameManager.enter_demo()` / `fill_finished_run()` / `demo_mode` 或标题页那个「演示 · 90 秒」按钮前跑 `verify_demo_path.gd` 第 1 节（秒级）。`fill_finished_run()` 走的是**直写字段**而不是 `check_in()`：后者会把 `all_fragments_maxed_reached` 闩锁翻过来，于是 `World3D._on_all_maxed()` 当场锁死操纵权、2.5 秒后自己跳去结算页——而那时候演示还在半路
 
 ## 已知陷阱
+
+- **「补齐的那些数」和「说没说它们是补的」是两件事，而后者是玩家的**：
+  90 秒演示里 `DemoDirector` 每个小游戏放 4 秒就 ESC 走人，而
+  `GameManager.check_in()` 是小游戏做完之后才调的——于是这一趟演示骑行
+  **一块碎片也拿不到**（实测收工前采样：700m、2 驿、碎片 0/5），
+  而 62 秒时 `fill_finished_run()` 把整趟补成十六驿全到过、五件乐事各三次。
+  评审亲手看的是 2 座驿站加一个小游戏弹出来又消失，手里拿到的是一张满卡。
+  **试过让它真赢一次**：茶是长按空格三秒，一条通用按键序列就通吃，
+  于是写了一整段"按住不放"的逻辑——量出来是**一次都没走到**：62 秒只够停
+  两站，起点最近的那座碎片站是**禽**（槽位 4 / 驿站 4）而茶在更远的环上；
+  禽要数字键认图、答错立刻判失败，没有通用序列。
+  两条教训：**①"能通用按键序列通吃的那一件"在有六个站的世界里是运气，
+  而演示的路线不是你能挑的**——量之前先量它到底停在哪；**②补齐不是谎，
+  闷声补齐才是**，所以收工改成两拍：先在屏上打一行
+  `demo_card_notice`（"演示到这里 —— 下面这张明信片，是走完全程的样子"）
+  停 `HANDOFF_NOTICE_SEC` 再换场。空卡教会评审的东西比满卡少得多，
+  而**满卡 + 一句交代**教会的东西和满卡 + 沉默一样多，外加一个被拆穿的风险。
+  回归钉的是**玩家看得见的那一半**（`HUD3D._pass_label` 的正文），
+  而且**只在 `DemoDirector._handed_off` 之后采样**——那一行平时浮的是
+  开场提示和十六座驿站的旁白（`road_data` 里 11 座站的 `text` 一直只写在
+  数据里没人读，现在由 `_pass_inside` 边沿交给 `show_pass_line`），
+  量它们等于没量。删除突变验过：撤掉那句 `show_pass_line` 那条立刻红，
+  而报出来的 got 是一条驿站旁白（"编号 188。这条路认得每一个走过的人。"）
+  ——这正是"取样窗口取错了一格"长出来的样子
 
 - **「写进字段」不等于「读进世界」，而这一族断掉时两侧各自都绿**：画质档位
   靠一个 `radius_override` 把半径推给 `GrassScatter` / `TreeScatter`。它写在

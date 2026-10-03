@@ -12,11 +12,21 @@ extends Node
 ## 和终局二选一。**不替评审做选择**——二选一停在屏上，让他自己按。
 ##
 ## 演示**不替评审打小游戏**：每个小游戏放 `MINIGAME_LINGER_SEC` 秒就 ESC 走人。
-## 这是有代价的——`GameManager.check_in()` 是小游戏做完之后才调的，所以这一趟
-## 演示骑行本身一块碎片也拿不到，62 秒时的完满评级全部来自 `fill_finished_run()`。
-## 想让演示真的赢下小游戏就得替评审操作，而五个小游戏的操作各不相同（茶要按住
-## 空格三秒、竹要卡时机、云要描路径、琴要复述音序、禽要认图），没有一条通用的
-## 按键序列能通吃。摆在这几秒是给评审看清楚"到站之后会发生什么"用的。
+##
+## 这不是省事，是**试过了**：五个小游戏的通关键各不相同（茶长按空格三秒、
+## 竹要卡五个时机、云要描一条路径、琴要复述十三徽、禽要认出刚才那只是第几只，
+## 而答错立刻判失败），没有一条通用按键序列能通吃。中间试过"至少让演示按住
+## 空格把茶赢下来"——`HOLD_WIN_SCRIPT` 那条路写完了，量出来是**一次都没走到**：
+## 62 秒只够停两站，而起点最近的那座碎片站是禽（槽位 4，驿站 4），茶在更远的
+## 环上。`GameManager.check_in()` 是小游戏做完之后才调的，于是这一趟演示骑行
+## 确实一块碎片也拿不到。
+##
+## 于是**交出去那张卡上的数全是补的**（`fill_finished_run()`），而这正是必须
+## **说出口**的话：评审亲眼看了 62 秒，看到的是 2 座驿站和一个小游戏弹出来又
+## 消失，卡上却写着十六驿全到过、五件乐事各三次。所以收工时先在屏上打一行
+## `demo_card_notice` 停一拍再换场。**补齐不是谎，闷声补齐才是。**
+## 想让卡上那些数是真的，只有两条路：把演示做到真能通关（一趟 20~30 分钟，
+## 评审不会等），或者干脆别补——而空卡教会评审的东西比满卡少得多。
 ##
 ## 全程只用 `Input.parse_input_event()` / `Input.action_press()`，
 ## 也就是玩家真按的那些键走的那条管线：不直接挪玩家、不直接调 `check_in()`。
@@ -55,6 +65,9 @@ const PRESS_INTERVAL_SEC := 1.2
 ## 要吃掉 13 秒左右，而 62 秒里只塞得下两站。放太久的话演示走到第二个亭子
 ## 就得收工，评审看到的是一整趟里只有一次到站。
 const MINIGAME_LINGER_SEC := 4.0
+## 收工到跳结算页之间留的一拍，用来把 `demo_card_notice` 那句交代打在屏上。
+## 必须留：换场之后那一行就没了，而"卡上那些数是补的"这件事就只剩下没人说。
+const HANDOFF_NOTICE_SEC := 2.6
 
 var _world: Node = null
 var _player: Node3D = null
@@ -68,6 +81,8 @@ var _t0 := 0
 var _next_press := 0
 var _minigame_started_ms := 0
 var _handed_off := false
+var _handoff_done := false
+var _handoff_at_ms := 0
 var _phase := 0
 var _space_down := false
 var _space_up_at := 0
@@ -105,11 +120,20 @@ func _process(_delta: float) -> void:
 	if _world._paused:
 		return
 
-	# 收工：补齐这一趟 → 结算页。必须在**换场之前**改存档——
-	# `go_to_end_card()` 之后明信片是现算的，而 go_to_gift_box() 才 reset。
+	# 收工分两拍：**先在屏上交代一句**，停 HANDOFF_NOTICE_SEC，再补齐 + 换场。
+	# 必须在**换场之前**改存档——`go_to_end_card()` 之后明信片是现算的，
+	# 而 go_to_gift_box() 才 reset。
 	if _sec() >= END_AT_SEC and not _handed_off:
 		_handed_off = true
 		_release()
+		_world._hud3d.show_pass_line(Localization.t("demo_card_notice"))
+		_handoff_at_ms = Time.get_ticks_msec()
+		return
+	if _handed_off and not _handoff_done:
+		if Time.get_ticks_msec() - _handoff_at_ms < int(HANDOFF_NOTICE_SEC * 1000.0):
+			return
+		_handoff_done = true
+		_release_interact()
 		GameManager.fill_finished_run()
 		GameManager.go_to_end_card()
 		return
@@ -276,6 +300,19 @@ func _send_space() -> void:
 	ev.pressed = true
 	Input.parse_input_event(ev)
 	_space_up_at = Time.get_ticks_msec() + 80
+
+
+## 松掉空格，并把本脚本的节流闩一起清掉。收工时调：`go_to_end_card()` 之后
+## 这份演示脚本就没人管了，而一个一路按着的空格键会跟着进结算页。
+func _release_interact() -> void:
+	if _space_down:
+		var up := InputEventKey.new()
+		up.keycode = KEY_SPACE
+		up.physical_keycode = KEY_SPACE
+		up.pressed = false
+		Input.parse_input_event(up)
+	_space_down = false
+	_space_up_at = 0
 
 
 ## 松开空格。**必须和按下分在两帧里**：挤在同一帧的话，`World3D` 那条

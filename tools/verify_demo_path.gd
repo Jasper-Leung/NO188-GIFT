@@ -22,7 +22,7 @@ var _loc: Node = null
 ## 协程就被掐断、后面的断言一行都不跑，而汇总照样打「PASS 失败 0」——
 ## 第 2 节第一次跑就是这样跑出假绿的（换场之后 `world` 已经 free，
 ## 下一帧再读 `world._player` 直接抛，第 6 条之后的断言全没了）。
-const EXPECTED_CKS := 27
+const EXPECTED_CKS := 28
 
 
 func _ck(label: String, cond: bool, detail: String = "") -> void:
@@ -164,15 +164,20 @@ func _section_end_to_end() -> void:
 	# 都必须在收工**之前**采样，因为 `fill_finished_run()` 随后就把存档补齐了。
 	#
 	# 这里断言的是"弹出来过"而不是"碎片 ≥1"：`GameManager.check_in()` 要等小游戏
-	# 做完才调，而演示是每个小游戏放 6 秒就 ESC 走人的（五个小游戏的操作各不相同，
-	# 没有一条通用按键序列能替评审赢下来）。碎片由 `fill_finished_run()` 补齐，
-	# 拿它当判据等于拿自己测自己。
+	# 做完才调，而演示是每个小游戏放 4 秒就 ESC 走人的。**试过让它真赢一次**：
+	# 茶是长按空格三秒，一条通用按键序列就能通吃，于是写了一段按住不放的逻辑。
+	# 量出来是**一次都没走到**——62 秒只够停两站，而起点最近的那座碎片站是
+	# 禽（槽位 4 / 驿站 4），茶在更远的环上；而禽要数字键认图、答错立刻判失败，
+	# 没有通用序列。所以碎片确实全由 `fill_finished_run()` 补，拿它当判据等于
+	# 拿自己测自己；补齐这件事改由下面那条"收工前在屏上交代了一句"来守。
 	var waited := 0.0
 	var ridden := 0.0
 	var last_pos: Vector3 = world._player.global_position
 	var frags := -1
 	var seen := -1
 	var mg_seen := 0
+	var mg_names := {}
+	var notice_shown := ""
 	while current_scene == world:
 		await process_frame
 		waited = (Time.get_ticks_msec() - t_press) / 1000.0
@@ -184,6 +189,19 @@ func _section_end_to_end() -> void:
 			last_pos = p
 			if world._mini_game_state == world.MG_RUNNING:
 				mg_seen += 1
+				var mg: Node = world._mini_game_node
+				if mg != null and is_instance_valid(mg):
+					var sc: Script = mg.get_script()
+					if sc != null:
+						mg_names[str(sc.resource_path).get_file()] = true
+			# 收工那一拍留在屏上的字。判据量的是**玩家看得见的那一半**：
+			# `fill_finished_run()` 之后卡上十六驿全到过、五件乐事各三次，
+			# 而评审亲眼看的是 2 座驿加一个小游戏。补齐不是谎，闷声补齐才是。
+			# 只在收工那一拍采样：平时那一行浮的是路过驿站的旁白和开场那句
+			# `demo_hint`，量它们等于没量。
+			var dd: Node = world.get_node_or_null("DemoDirector")
+			if notice_shown == "" and dd != null and bool(dd.get("_handed_off")):
+				notice_shown = String(world._hud3d._pass_label.text)
 		if frags < 0 and waited > _gm.DEMO_END_AT_SEC - 12.0:
 			frags = _gm.get_collected_count()
 			seen = _gm.get_seen_station_count()
@@ -191,8 +209,9 @@ func _section_end_to_end() -> void:
 			break
 	var card: Node = current_scene
 	var took := (Time.get_ticks_msec() - t_press) / 1000.0
-	print("    （收工前采样：累计骑行 %.0fm，到过 %d 驿，碎片 %d/5，小游戏在跑 %d 帧）"
-			% [ridden, seen, frags, mg_seen])
+	var mg_list := ", ".join(PackedStringArray(mg_names.keys()))
+	print("    （收工前采样：累计骑行 %.0fm，到过 %d 驿，碎片 %d/5，小游戏在跑 %d 帧：%s）"
+			% [ridden, seen, frags, mg_seen, mg_list])
 	_ck("车真的骑了一段（≥200m，不是站在起点等时间到）", ridden > 200.0,
 			"%.0fm" % ridden)
 	# 门槛是 1 不是 2：连跑两次量到的是 1 驿/466m 与 2 驿/677m，而它随"第二座
@@ -204,6 +223,14 @@ func _section_end_to_end() -> void:
 	_ck("真的路过驿站（≥1 座）", seen >= 1, "%d（实测在 1~2 之间摆动）" % seen)
 	_ck("真的把车骑到亭子跟前、打卡开出了一场小游戏", mg_seen > 0,
 			"%d 帧" % mg_seen)
+
+	# 卡上那些数是补的，而"补"这件事必须在换场**之前**被说出来。
+	# 判据量的是玩家看得见的那一半（`HUD3D._pass_label` 的正文），不是
+	# `DemoDirector` 某个字段为真——字段翻了而那行字没画出来，症状是
+	# 评审照样拿到一张他没挣来的满卡、而没人对他说过一句话。
+	_ck("收工前在屏上交代了一句（补齐的那趟不是他骑的）",
+			notice_shown == _loc.t("demo_card_notice"),
+			"got=%s" % notice_shown)
 
 	_ck("演示在预算内自己走到了结算页", card != world and card != null,
 			"%.1fs" % took)
