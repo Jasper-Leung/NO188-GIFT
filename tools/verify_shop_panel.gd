@@ -5,7 +5,7 @@ extends SceneTree
 ## World3D 那一侧的开店触发由集成回归负责。
 ##
 ## 覆盖：
-##   1. setup() 按铺子行数展开（驿铺 6 / 灯铺 2 / 茶铺 1），标题与余额对得上
+##   1. setup() 按铺子行数展开（驿铺 6 / 灯铺 2 / 茶铺 2），标题与余额对得上
 ##   2. 素笺 0 旅币 = 「明信片永远拿得到」：没钱也能买
 ##   3. 旅币不足 / 碎片不足 / 明信片档位互斥 / 数量封顶 —— 四种阻塞原因各走各的文字
 ##   4. purchased 信号只在该买时发；买失败不发、不改账
@@ -147,7 +147,7 @@ func _run() -> void:
 	_ck("初始不可见", not _panel.visible)
 
 	# ---- 1. 三铺行数 + 标题 ----
-	for pair in [["驿铺", 6], ["灯铺", 2], ["茶铺", 1]]:
+	for pair in [["驿铺", 6], ["灯铺", 2], ["茶铺", 2]]:
 		_panel.setup(str(pair[0]))
 		_eq("%s 行数" % pair[0], _panel._rows.size(), int(pair[1]))
 		_eq("%s 标题" % pair[0], _panel._title_lbl.text, str(pair[0]))
@@ -276,6 +276,39 @@ func _run() -> void:
 	_eq("香囊买到了", int(_gm.get_item_count("sachet")), 1)
 	_panel._refresh()
 	_eq("香囊买满后提示买满了", _state(i_sachet), _loc.t("shop_maxed"))
+
+	# ---- 6b. 清心茶：心神的唯一一个上行口 ----
+	# 心神原来满工程只有 cost_mood() 一个写点、零个恢复点，是一条单向的下水道；
+	# 收满五块碎片正好 4→1，而 1 是遮罩最浓那一档，于是玩家最需要看清世界的
+	# 那一刻最暗。这一节量的是**真的涨回来了**，不是"按钮能点"。
+	_clear_inv()
+	_gm.mood = 2
+	_panel.setup("茶铺")
+	var i_tea := _find("tea_clear")
+	_gm.earn(200)
+	_panel._refresh()
+	_ck("心神 2 时清心茶可买", not _btn(i_tea).disabled)
+	_btn(i_tea).pressed.emit()
+	_eq("买完心神真的涨了一格", int(_gm.mood), 3)
+	# 满心神时不能买：买了就是白花旅币。这一条必须落在 can_buy 里——
+	# 灰按钮只是画给人看的，绕过 disabled 的程序化触发照样能把钱花掉。
+	_gm.mood = int(_gm.MOOD_CEIL)
+	_panel._refresh()
+	_ck("满心神时清心茶买不了", _btn(i_tea).disabled)
+	_eq("满心神的锁定文案", _state(i_tea), _loc.t("shop_mood_full"))
+	var lvbi_before := int(_gm.lvbi)
+	_btn(i_tea).pressed.emit()          # 绕过 disabled 直接 emit
+	_eq("满心神时点了也不扣钱", int(_gm.lvbi), lvbi_before)
+	_eq("满心神时点了也不涨", int(_gm.mood), int(_gm.MOOD_CEIL))
+	# 封顶 3 件
+	_gm.mood = 1
+	_panel._refresh()
+	for i in 3:
+		_btn(i_tea).pressed.emit()
+	_eq("清心茶买满 3 件", int(_gm.get_item_count("tea_clear")), 3)
+	_panel._refresh()
+	_ck("第四杯买不到", _btn(i_tea).disabled)
+	_eq("封顶原因文案", _state(i_tea), _loc.t("shop_maxed"))
 
 	# ---- 7. 换语言全量重刷 ----
 	_clear_inv()

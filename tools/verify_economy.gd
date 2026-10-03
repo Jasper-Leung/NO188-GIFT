@@ -162,8 +162,8 @@ func _run() -> void:
 		b["full"], b["sensible"], b["gap"], b["ride_only"]])
 
 	_eq("全清总额 = 799", b["full"], 799)
-	_eq("合理全购 = 890", b["sensible"], 890)
-	_eq("缺口 = 91", b["gap"], 91)
+	_eq("合理全购 = 1010", b["sensible"], 1010)
+	_eq("缺口 = 211", b["gap"], 211)
 	_eq("只骑全程 = 424", b["ride_only"], 424)
 	_ck("缺口 ≥ 90（必须做一次减法）", b["gap"] >= 90)
 	_eq("素笺 0 旅币（明信片永远拿得到）", b["plain"], 0)
@@ -172,7 +172,7 @@ func _run() -> void:
 	_ck("全清买得起珍藏", b["full"] >= b["rare"])
 
 	# ---- 2. 商品表与铺子 ----
-	_eq("商品数 9", int(_sd.GOODS.size()), 9)
+	_eq("商品数 10", int(_sd.GOODS.size()), 10)
 	_eq("铺子数 3", int(_sd.SHOPS.size()), 3)
 	for sn in ["驿铺", "茶铺", "灯铺"]:
 		_ck("%s 有货可卖" % sn, not _sd.goods_for_shop(sn).is_empty())

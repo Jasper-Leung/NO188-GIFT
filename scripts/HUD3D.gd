@@ -220,7 +220,7 @@ func _process(delta: float) -> void:
 			_lvbi_gain_text = ""
 			if _lvbi_toast != null:
 				_lvbi_toast.text = ""
-	_mood_label.text = Localization.t("mood_label", [GameManager.mood])
+	_mood_label.text = Localization.t("mood_label", [GameManager.mood, GameManager.MOOD_CEIL])
 	if _hint_left > 0.0:
 		_hint_left -= delta
 		# 留最后 0.35s 淡出，不要"啪"地一下消失

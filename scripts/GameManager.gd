@@ -16,7 +16,7 @@ const MAX_VISITS_PER_STATION := 3
 ## ---- 旅币（lvbi）经济 ----
 ## 预算口径见 tools/verify_economy.gd 按公式重算：
 ##   全清 799 旅币（376 里程 + 48 路过 + 75 首次打卡 + 50 重复打卡 + 100 小游戏 + 150 碎片）
-##   合理全购 890 旅币，缺口 91 ≈ 一盏灯笼 —— 必须在视野和纸面之间做减法。
+##   合理全购 1010 旅币，缺口 211 —— 必须在视野和纸面之间做减法。
 const LVBI_PER_KM := 2            # 每骑过 1 整公里
 const LVBI_PER_PASS := 3         # 首次路过任意驿站（16 站每一座都有）
 const LVBI_FIRST_CHECKIN := 15   # 碎片站首次打卡
@@ -37,7 +37,7 @@ const VILLAIN_SCENE_COUNT := 3
 const MOOD_CEIL := 5
 const MOOD_FLOOR := 1
 const MOOD_INITIAL := 4
-const MOOD_MASK_MAX := 0.52      # 心神 1 时遮罩不透明度上限（绝不盖满，不做失败态）
+const MOOD_MASK_MAX := 0.34      # 心神 1 时遮罩不透明度上限（绝不盖满，不做失败态）
 ## 视野系数：心神 5 → 1.00 全开，心神 1 → 0.65
 const MOOD_VIS_MAX := 1.00
 const MOOD_VIS_MIN := 0.65
@@ -387,8 +387,28 @@ func cost_mood(amount: int = 1) -> int:
 	return delta
 
 
-## 心神 → 视野遮罩不透明度。0 = 完全看得清，0.52 = 雾最浓。
+## 心神的上行口。原来满工程只有 `cost_mood()` 一个写点、**零个**恢复点，
+## 于是它是一条单向的下水道：收满五块碎片正好把 4 打到 1，而 1 正是遮罩最浓
+## 那一档——玩家最需要看清世界的那一刻（集齐二选一那面面板）恰恰最暗。
+## 灯笼/香囊只对冲视野半径、把雾留着，所以它们没有、也不该堵这条下水道；
+## 这就是那个出口。返回实际涨了几格，满的时候返回 0（买东西不能白花旅币）。
+func restore_mood(amount: int = 1) -> int:
+	var before := mood
+	mood = mini(MOOD_CEIL, mood + amount)
+	var delta := mood - before
+	if delta != 0:
+		mood_changed.emit(mood)
+		_save_game()
+	return delta
+
+
+## 心神 → 视野遮罩不透明度。0 = 完全看得清，0.34 = 雾最浓。
 ## 只有心神进这条：灯笼/香囊走 get_visibility_factor()，不把雾买散。
+## 0.52 → 0.34：原来那一档正好落在**集齐二选一那面面板**上（五块碎片收完
+## 心神 4→1，遮罩最浓），于是全场信息量最大的那一刻是最暗的。降下来之后
+## 心神 1 是 0.34、心神 2 是 0.17——梯度还在，屏幕不再糊掉。
+## 降它的前提是心神有一条上行口（`restore_mood()` + 茶铺的清心茶），
+## 否则玩家只剩一条单向的下水道。
 ## 「你听见过去越多，眼前的世界越看不见；要不要花钱让眼睛重新看见，是你自己的事。」
 func get_mood_mask_alpha() -> float:
 	return clampf(MOOD_MASK_MAX * float(MOOD_CEIL - mood) / float(MOOD_CEIL - MOOD_FLOOR),
@@ -431,6 +451,12 @@ func can_buy(g: Dictionary) -> bool:
 		return false
 	if str(g.get("grant", "")) == "postcard_tier":
 		return get_postcard_tier() < int(g.get("tier_rank", 1))
+	if str(g.get("grant", "")) == "mood_up":
+		# 满心神时买它等于白花旅币，所以这条要**真的挡在 can_buy 里**，
+		# 不能只让 ShopPanel 把按钮画灰 —— 灰按钮玩家看得见，但绕过
+		# disabled 的程序化触发照样会把钱花掉。
+		if mood >= MOOD_CEIL:
+			return false
 	return get_item_count(str(g["id"])) < int(g.get("max_own", 1))
 
 
@@ -444,6 +470,8 @@ func buy(g: Dictionary) -> bool:
 		inv["postcard_tier"] = int(g.get("tier_rank", 1))
 	else:
 		inv[gid] = get_item_count(gid) + 1
+		if str(g.get("grant", "")) == "mood_up":
+			restore_mood(int(g.get("mood_up", 1)))
 	lvbi_changed.emit(-price, lvbi)
 	item_purchased.emit(gid)
 	_save_game()

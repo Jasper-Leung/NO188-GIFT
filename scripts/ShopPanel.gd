@@ -333,6 +333,8 @@ func _buy_block_reason(g: Dictionary) -> String:
 		if tier > rank:
 			return Localization.t("shop_lower_tier")
 		return Localization.t("shop_bought")
+	if str(g.get("grant", "")) == "mood_up" and int(GameManager.mood) >= int(GameManager.MOOD_CEIL):
+		return Localization.t("shop_mood_full")
 	if int(GameManager.get_item_count(str(g["id"]))) >= int(g.get("max_own", 1)):
 		return Localization.t("shop_maxed")
 	return ""

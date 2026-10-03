@@ -17,8 +17,12 @@ extends SceneTree
 ##
 ## 第 4 条的"可读上限"是这个文件存在的主要理由。改之前遮罩是常驻的：心神初始 4、
 ## 每收一块碎片 −1，于是从第 3 块碎片起（5 块里最长的一半流程）屏幕永久挂着
-## 0.52 的雾 —— 玩家在最需要看清路去找剩下几块碎片的时候看得最差。MOOD_MASK_MAX
+## 一层雾 —— 玩家在最需要看清路去找剩下几块碎片的时候看得最差。MOOD_MASK_MAX
 ## 仍然是叙事档的天花板，只是不该在骑行时长期占着它。
+## 天花板本身也从 0.52 降到 0.34：收满五块碎片正好把心神打到 1，而 1 就是
+## 那一档，于是**集齐二选一那面面板**——全场信息量最大的那一刻——是最暗的。
+## 降它的前提是心神有一条上行口（`restore_mood()` + 茶铺的清心茶），
+## 否则玩家只剩一条单向的下水道。
 ##
 ## 用法： godot --headless --path . --script tools/verify_mood_mask.gd --quit-after 30000
 ## 注意 --quit-after 单位是帧不是秒（本机 280+FPS，90 帧只有 0.3 秒，
@@ -175,7 +179,14 @@ func _run() -> void:
 	_ck("心神标签挂在 TopBar", box.is_ancestor_of(_hud._mood_label))
 	await process_frame
 	_eq("旅币标签文字对得上", _hud._lvbi_label.text, _loc.t("lvbi_label", [int(_gm.lvbi)]))
-	_eq("心神标签文字对得上", _hud._mood_label.text, _loc.t("mood_label", [int(_gm.mood)]))
+	_eq("心神标签文字对得上", _hud._mood_label.text, _loc.t("mood_label", [int(_gm.mood), int(_gm.MOOD_CEIL)]))
+
+	# 上面那条是拿标签去比**同一个 key 渲染出来的句子**，它证明"接线通了"，
+	# 不证明"玩家看得见上限"——key 里的 %d 掉了几个它照样全绿。补一条量成品：
+	# 顶栏上必须真的看得见 "/上限"，否则玩家永远不知道自己掉到了 1/5 还是 3/5。
+	_ck("顶栏上看得见心神的分母",
+		str(_hud._mood_label.text).contains("/%d" % int(_gm.MOOD_CEIL)),
+		"got=%s want 含有 /%d" % [_hud._mood_label.text, int(_gm.MOOD_CEIL)])
 
 	# ---- 2b. 三个音频开关在顶栏上必须彼此可分 ----
 	# BGM 和音效原来共用一个字形「♪」和同一句话「♪ 开」，两个按钮长得一模一样，
@@ -280,7 +291,7 @@ func _run() -> void:
 	_eq("余额 123 时标签跟着变", _hud._lvbi_label.text, _loc.t("lvbi_label", [123]))
 	_gm.mood = 2
 	await process_frame
-	_eq("心神 2 时标签跟着变", _hud._mood_label.text, _loc.t("mood_label", [2]))
+	_eq("心神 2 时标签跟着变", _hud._mood_label.text, _loc.t("mood_label", [2, int(_gm.MOOD_CEIL)]))
 
 	# 余额标签的位置在入账前后必须一模一样：入账提示走独立 toast，不许顶栏重排。
 	# 记录位置前先让一帧走完——HBox 的排布是 _process 写完 text 之后才生效的。

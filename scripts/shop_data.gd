@@ -5,7 +5,7 @@ class_name ShopData
 ## 加商品只改这里的数组，ShopPanel 不硬编码任何价格或名字。
 ##
 ## 预算口径（见 tools/verify_economy.gd 重算，不要照抄）：
-##   理想全清总收入 799 旅币；合理全购 890 旅币；缺口 91 ≈ 一盏灯笼。
+##   理想全清总收入 799 旅币；合理全购 1010 旅币；缺口 211（两盏半灯笼）。
 ##   素笺 0 旅币 = 「明信片永远拿得到」的机器证明。
 
 ## 三铺。key 与 road_data.gd 的 stations[i]["shop"] 完全一致（中文原名）。
@@ -78,6 +78,14 @@ const GOODS := [
 		"grant": "vision_half_penalty", "max_own": 1,
 		"desc": "心神每失一分，代价只算一半。",
 		"desc_en": "Halves whatever the next lapse of mind costs you."},
+
+	# 茶铺而不是灯铺：灯铺 seen_unlock=6，而收满五块碎片心神就见底了，
+	# 放到灯铺等于"要等路况变差才准买解药"。
+	{"id": "tea_clear", "name": "清心茶", "name_en": "Clear Heart Tea",
+		"price": 40, "sell_at": "茶铺", "requires_fragments": 0,
+		"grant": "mood_up", "mood_up": 1, "max_own": 3,
+		"desc": "心神回一格。收一块碎片低一格，所以这是条来回的路。",
+		"desc_en": "Composure back by one. Each fragment costs one; this is the way back."},
 ]
 
 ## 「无价」栏：渲染出来，不可购买。买得到纸，买不到云。
