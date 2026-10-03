@@ -277,6 +277,7 @@ func _audit_variant_independent() -> void:
 					entry[1] == (entry[0] < 0), "entry=%s" % str(entry))
 
 	await _audit_panel_identity()
+	await _audit_bird_shape()
 	await _audit_route_map()
 
 
@@ -388,6 +389,30 @@ func _audit_route_map() -> void:
 ## 继续空着）、**不压在左边那一列的字上**、**每一行放得下**——
 ## 最后这条是必须的，因为 `draw_string` 的宽度参数是**裁切宽度**，
 ## 而次数是右对齐画上去的：字比列宽就整段被裁掉，而尺寸断言照样全绿。
+## 右上角那枚完满金印的 **(横向偏移, 半径)** —— x = 圆心离卡片右边多远，
+## y = 圆的半径。两者都**从 `Postcard.gd` 的源码里正则抓**，不抄进判据。
+##
+## 为什么必须读源码：它是 `_draw()` 里的**局部变量**（`var seal_x: float = w - 90`
+## 加上紧接着那个 `draw_circle(…, 32, …)`），既不是常量也不在任何成员上。
+## 判据里写死 `90` / `32` 的话，画笔把它挪到 w-80 而判据没动，
+## **两边各自都是绿的**——而金印会盖住「N 次」那一列。
+##
+## 匹配的是**整行**而不是某个子串，理由和 `verify_story.gd` 钉相机那一行一样：
+## `w - 90` 写成 `w-90` 时子串就匹配不上，而"匹配不上"和"画错了"在
+## 报错时长得一模一样。这里退化成 `seal.x == 0` 由上一条兜住。
+func _seal_circle() -> Vector2:
+	var src: String = FileAccess.get_file_as_string("res://scripts/Postcard.gd")
+	var rx := RegEx.new()
+	rx.compile("var\\s+seal_x[^\\n]*?w\\s*-\\s*([0-9]+(?:\\.[0-9]+)?)")
+	var rr := RegEx.new()
+	rr.compile("draw_circle\\(Vector2\\(seal_x,\\s*seal_y\\),\\s*([0-9]+(?:\\.[0-9]+)?)")
+	var hx := rx.search(src)
+	var hr := rr.search(src)
+	if hx == null or hr == null:
+		return Vector2.ZERO
+	return Vector2(hx.get_string(1).to_float(), hr.get_string(1).to_float())
+
+
 func _audit_joys_column() -> void:
 	print("\n---------- 3d. 抬头右半：五件乐事那一列 ----------")
 	var font: Font = ThemeDB.fallback_font
@@ -441,8 +466,25 @@ func _audit_joys_column() -> void:
 			# 下沿不许压进中间那五格画区
 			_ck("%s 这一列不压到五格画区（下沿 %.0f ≤ 带高 %.0f）"
 					% [tag, r.end.y, band], r.end.y <= band + 0.5)
-			# 右沿要给那只禽让开道（它画在 w-120k，半径 14.4k）
-			_ck("%s 这一列和禽不叠" % tag, r.end.x <= cw - 150.0 * k + 0.5)
+			# 右沿要让开**右上角那枚完满金印**。它是**不缩放**画的（圆心写死
+			# w-90、半径 32），所以金印的左沿恒是 w-122——与卡片多大无关。
+			#
+			# 原来这一格量的是**那只禽**（画在 w-120k、半径 14.4k）。禽已经去掉了，
+			# 而"列的右沿"这个量本身还在，于是断言跟着换了主角：去掉那只禽之后
+			# 谁在管这一格？不换的话这一格就成了纯恒真——`r.end.x <= cw - 150k+0.5`
+			# 两边读的是**同一行算式**，helper 怎么改它都绿。
+			# 真正的约束对象是金印，而金印那条**原来一条断言都没有**。
+			#
+			# 金印那几行坐标**从源码里读**，不当常量抄一份：它是 `_draw()` 里的
+			# 局部变量，抄一个 90 进判据的话，画笔改成 w-80 而这里没动，
+			# 两边各自都绿——这就是「文档不许说谎」那一族的老办法。
+			var seal: Vector2 = _seal_circle()
+			_ck("%s 源码里找得到金印的圆心与半径" % tag, seal.x > 0.0 and seal.y > 0.0,
+					"没匹配到 Postcard.gd 里的 seal_x / 半径")
+			if seal.x > 0.0:
+				_ck("%s 这一列和完满金印不叠（右沿 %.0f ≤ 金印左沿 %.0f）"
+						% [tag, r.end.x, cw - seal.x - seal.y],
+						r.end.x <= cw - seal.x - seal.y)
 			# **每一行放得下**：名字 + 次数，右对齐在列宽之内
 			var worst := 0.0
 			for slot in 5:
@@ -590,6 +632,162 @@ func _audit_panel_identity() -> void:
 		_eq("完满第 %d 格不是占位" % [i], layout[i][1], false)
 		seen[cols[slot].to_html(false)] = true
 	_ck("五格颜色恰好覆盖五件碎片", seen.size() == 5, "seen=%s" % str(seen.keys()))
+
+
+## 3b-2. 禽那一只剪影。
+##
+## 这一族坏过两回，两回都**不是**"画错了"，是**三处各画一遍**：
+## 顶栏底栏与单碎片放大图是同一个「圆 + 棍」（读成棒棒糖），明信片是另一套
+## 「填实的圆 + 同色的翅」（两块并成一颗疙瘩）。而玩家一路在底栏看着的是
+## 底栏那只，最后带走的那张纸上根本不是它——和云那一族同一句话，禽更糟：
+## 云至少三份是抄开的**同一个**算法。
+##
+## 所以判据钉两件事：
+##   ① **三处调的是同一个出处**（读源码文本 —— `_draw` 在 headless 下一笔都不落盘，
+##      而"两处形状一样"这件事量笔法是量不出来的）；
+##   ② **那只剪影本身**认不认得出是鸟。`bird_parts()` 是不碰画笔的纯函数，
+##      `paint_bird` 只是把它重放一遍，所以这里量的是剪影而不是画笔。
+##      「认得出」拆成五条可量的：尾甩到左下（剪影不是上下左右对称的圆）、
+##      喙是尖的且在头右边、脚下有栖枝、身子是椭圆而不是正圆、
+##      以及**翅是留白**——墨色的翅压在墨色的身上等于没画，那正是明信片
+##      那份读不出来的原因，也是这一节里唯一一条从像素图上量得到的东西。
+func _audit_bird_shape() -> void:
+	print("\n---------- 3b-2. 禽那一只剪影：三处同一个出处，且认得出是鸟 ----------")
+	for f in ["res://scripts/FragmentBar.gd", "res://scripts/Postcard.gd",
+			"res://scripts/FragmentIcon.gd"]:
+		var src: String = FileAccess.get_file_as_string(f)
+		_ck("%s 的画笔里调的是 FragmentIcon.paint_bird" % f.get_file(),
+				src.contains("paint_bird(self,"),
+				"没调它 = 这一处自己画了一份，三处就会各说各话")
+
+	var parts: Array = FragmentIconScript.bird_parts()
+	_ck("bird_parts() 有料（%d 笔）" % parts.size(), parts.size() >= 7)
+
+	# ① 翅：必须**留白**，且是一片**够大**的多边形
+	var wing := _part_of_kind(parts, "poly", "wing")
+	_ck("翅是**留白**不是墨色（墨色的翅压在墨色的身上等于没画——"
+			+ "明信片那份原来就是这么画的，两块并成一颗疙瘩）", not wing.is_empty())
+	if not wing.is_empty():
+		_ck("翅够大（%.0f ≥ 40 单位²，压得住 22px 的盘）" % _poly_area(wing["p"]),
+				_poly_area(wing["p"]) >= 40.0)
+
+	# ② 身子：椭圆，且 rx > ry —— 正圆读成球
+	var body := _part_of_kind(parts, "ellipse", "ink")
+	_ck("身子是椭圆", not body.is_empty())
+	if not body.is_empty():
+		_ck("身子是**扁**的（rx %.1f > ry %.1f，正圆读成球）"
+				% [float(body["rx"]), float(body["ry"])],
+				float(body["rx"]) > float(body["ry"]) * 1.1)
+
+	# ③ 尾：楔子甩到**左下**。上下左右对称的剪影读成一颗圆。
+	var ink_polys: Array = _parts_of(parts, "poly", "ink")
+	var tail := PackedVector2Array()
+	var best := Vector2.ZERO
+	for p in ink_polys:
+		var far: Vector2 = _leftmost(p["p"])
+		if tail.is_empty() or far.x < best.x:
+			tail = p["p"]
+			best = far
+	_ck("有一片楔子甩到左边（最左 x = %.1f ≤ -10）" % best.x, best.x <= -10.0)
+	if tail.size() > 0:
+		var tip: Vector2 = _leftmost(tail)
+		_ck("尾甩到身子的**左下方**（%.1f, %.1f 都要越出身子中心）"
+				% [tip.x, tip.y], tip.x < 0.0 and tip.y > 0.0)
+
+	# ④ 喙：尖的，往前伸（原来那根"棍"是两头不沾的棒棒糖）
+	var beak := PackedVector2Array()
+	var beak_x := -999.0
+	for p in ink_polys:
+		var r: Rect2 = _poly_rect(p["p"])
+		if r.position.x > beak_x:
+			beak_x = r.position.x
+			beak = p["p"]
+	_ck("有喙", beak.size() > 0)
+	var head := _part_of_kind(parts, "circle", "ink")
+	if beak.size() > 0 and not head.is_empty():
+		var br: Rect2 = _poly_rect(beak)
+		var hr := float(head["r"])
+		# 喙是**往前伸**的楔子：宽大于高（竖着的那一挂是耳朵不是喙），
+		# 高还要比头细一半以上（粗过头的喙读成第二颗头）
+		_ck("喙是往前伸的楔子（宽 %.1f > 高 %.1f）" % [br.size.x, br.size.y],
+				br.size.x > br.size.y)
+		_ck("喙比头细（高 %.1f ≤ 头半径 %.1f）" % [br.size.y, hr], br.size.y <= hr)
+		_ck("喙伸出头外（尖端 x %.1f > 头的右沿 %.1f，不缩在头里）"
+				% [br.end.x, float(head["ctr"].x) + hr],
+				br.end.x > float(head["ctr"].x) + hr)
+
+	# ⑤ 栖枝：脚下要有一条横线。缺了它，剪影再对也读成一块漂浮的墨。
+	var perch_y := -999.0
+	for part in parts:
+		if String(part["k"]) == "line" and String(part["c"]) == "ink" \
+				and part["b"] is Vector2 and part["a"] is Vector2:
+			var a: Vector2 = part["a"]
+			var b: Vector2 = part["b"]
+			if absf(a.y - b.y) < 0.6 and absf(b.x - a.x) > 20.0:
+				perch_y = a.y
+	_ck("脚下有一根栖枝（y = %.1f，须在身子底下）" % perch_y,
+			perch_y > float(body.get("ctr", Vector2.ZERO).y))
+
+	# ⑥ 整只鸟要装得进 FragmentBar 那个 22px 的盘 —— 盘外 23~26.5m 那一圈
+	# 是"这一格是哪一件"的扫视信号，图标伸进去就把那条判据量废了。
+	var far_r := 0.0
+	for part in parts:
+		for pt in _part_points(part):
+			far_r = maxf(far_r, pt.length())
+	_ck("整只鸟落在 22px 的盘里（最远 %.1f ≤ 22）" % far_r, far_r <= 22.0)
+
+
+func _parts_of(parts: Array, kind: String, col: String) -> Array:
+	var out: Array = []
+	for part in parts:
+		if String(part["k"]) == kind and String(part["c"]) == col:
+			out.append(part)
+	return out
+
+
+func _part_of_kind(parts: Array, kind: String, col: String) -> Dictionary:
+	var got: Array = _parts_of(parts, kind, col)
+	return {} if got.is_empty() else got[0]
+
+
+func _part_points(part: Dictionary) -> Array:
+	match String(part["k"]):
+		"poly":
+			return part["p"]
+		"ellipse":
+			var e: Vector2 = part["ctr"]
+			return [e + Vector2(-float(part["rx"]), -float(part["ry"])),
+				e + Vector2(float(part["rx"]), float(part["ry"]))]
+		"circle":
+			var o: Vector2 = part["ctr"]
+			var r: float = float(part["r"])
+			return [o + Vector2(-r, -r), o + Vector2(r, r)]
+		"line":
+			return [part["a"], part["b"]]
+	return []
+
+
+func _poly_area(p: PackedVector2Array) -> float:
+	var s := 0.0
+	for i in p.size():
+		var j := (i + 1) % p.size()
+		s += p[i].x * p[j].y - p[j].x * p[i].y
+	return absf(s) * 0.5
+
+
+func _poly_rect(p: PackedVector2Array) -> Rect2:
+	var r := Rect2(p[0], Vector2.ZERO)
+	for i in range(1, p.size()):
+		r = r.expand(p[i])
+	return r
+
+
+func _leftmost(p: PackedVector2Array) -> Vector2:
+	var v: Vector2 = p[0]
+	for pt in p:
+		if pt.x < v.x:
+			v = pt
+	return v
 
 
 func _audit_ending_choice() -> void:

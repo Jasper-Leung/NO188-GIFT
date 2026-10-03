@@ -250,12 +250,13 @@ func _draw_bamboo(c: Vector2, col: Color, a: float) -> void:
 			draw_line(Vector2(bx - 4, by), Vector2(bx + 4, by), Color(col.r, col.g, col.b, a), 1.5)
 
 
+## 禽：走 `FragmentIcon.paint_bird` 那一份，和单碎片放大图、明信片五格
+## 同一个剪影。原来的「一颗圆 + 一根棍」在这一格上尤其读不出来——外圈色盘
+## 已经把"这一格是哪一件"交代了，图标要交代的是"这是个什么"，棒棒糖两头
+## 都不沾。设计坐标最大半径 21.7m < `r`(22)，所以没有一笔伸进外圈那条
+## 23~26.5m 的盘上——`lookdev` 那条量环的判据量的仍然只有环自己。
 func _draw_bird(c: Vector2, col: Color, a: float) -> void:
-	draw_arc(c + Vector2(0, 2), 9.0, 0, TAU, 16, Color(col.r, col.g, col.b, a), 2)
-	draw_line(c + Vector2(9, 2), c + Vector2(18, -2), Color(col.r, col.g, col.b, a), 2)
-	draw_line(c + Vector2(12, -4), c + Vector2(17, -9), Color(col.r, col.g, col.b, a), 1.5)
-	draw_line(c + Vector2(12, -4), c + Vector2(14, -8), Color(col.r, col.g, col.b, a), 1.5)
-	draw_arc(c + Vector2(18, -2), 3.0, -PI * 0.2, PI * 0.8, 8, Color(col.r, col.g, col.b, a), 1.5)
+	FragmentIconScript.paint_bird(self, c, col, a, 1.0)
 
 
 func _create_hint_popup() -> Control:

@@ -89,8 +89,68 @@ func _draw_bamboo(col: Color) -> void:
 
 
 func _draw_bird(col: Color) -> void:
-	draw_arc(Vector2(0, 2), 9.0, 0, TAU, 16, col, 2.0)
-	draw_line(Vector2(9, 2), Vector2(18, -2), col, 2.0)
-	draw_line(Vector2(12, -4), Vector2(17, -9), col, 1.5)
-	draw_line(Vector2(12, -4), Vector2(14, -8), col, 1.5)
-	draw_arc(Vector2(18, -2), 3.0, -PI * 0.2, PI * 0.8, 8, col, 1.5)
+	paint_bird(self, Vector2.ZERO, col, alpha, 0.9)
+
+
+## 禽那只鸟画过三遍：顶栏底栏（`FragmentBar._draw_bird`）、单碎片放大图
+## （`FragmentIcon._draw_bird`）、明信片五格（`Postcard._draw_bird`）。
+## 原来是**三份**画法，其中两份还是**两套不同的**——底栏与放大图是同一个
+## 「一颗圆 + 一根棍」，明信片那份是「一颗填实的圆 + 一片同色的翅」。
+## 两份都读不出是鸟：圆加棍读成棒棒糖，而明信片那份的翅膀是**同一个墨色**
+## 画在身子上的，两块并成一颗疙瘩。云那一族是三份抄开的同算法，禽更糟：
+## 玩家一路看着它长大，最后带走的那张纸上根本不是同一只东西。
+##
+## 所以形状收成**这一处** static，三处都调它。
+static func paint_bird(ci: CanvasItem, c: Vector2, col: Color, a: float, sc: float) -> void:
+	for part in bird_parts():
+		var out := Color(col.r, col.g, col.b, a)
+		match String(part["c"]):
+			"wing": out = Color(1, 1, 1, a * 0.30)
+			"eye": out = Color(1, 1, 1, a * 0.9)
+		var pts := PackedVector2Array()
+		match String(part["k"]):
+			"line":
+				ci.draw_line(c + Vector2(part["a"]) * sc, c + Vector2(part["b"]) * sc,
+						out, float(part["w"]) * sc)
+			"poly":
+				for p in part["p"]:
+					pts.append(c + Vector2(p) * sc)
+				ci.draw_colored_polygon(pts, out)
+			"ellipse":
+				for i in range(28):
+					var t := TAU * float(i) / 28.0
+					pts.append(c + (Vector2(part["ctr"])
+							+ Vector2(cos(t) * float(part["rx"]), sin(t) * float(part["ry"]))) * sc)
+				ci.draw_colored_polygon(pts, out)
+			"circle":
+				ci.draw_circle(c + Vector2(part["ctr"]) * sc, float(part["r"]) * sc, out)
+
+
+## 禽的单位设计坐标。**这一份同时是画法和不碰画笔的纯函数**，回归直接调它：
+## `paint_bird` 只是把它重放一遍，而几何断言要量的正是这只剪影本身
+## （有尾、有尖喙、有栖枝、翅是留白、整体落在 FragmentBar 那个 22px 盘里）。
+##
+## 认得出鸟要三样同时在，缺一样就退回一块墨：
+##   · **尾**——楔子，往左下甩出去，和身子拉开角；没有它剪影上下左右对称，
+##     读成一颗圆。
+##   · **喙**——尖角，不是那根棍；棍状的东西接在圆上读成棒棒糖。
+##   · **栖枝**——脚下那条横线。它给了这只鸟一个"站着"的地面，缺了它
+##     剪影再对也读成一块漂浮的墨。
+## 另有两条量得到的：身子是**椭圆**（rx > ry，正圆读成球），
+## 翅是**留白**——墨色的翅压在墨色的身上等于没画，那正是明信片那份读不出来的
+## 原因，也是这一族回归要单独钉住的一条。
+static func bird_parts() -> Array:
+	return [
+		{"k": "line", "a": Vector2(-14, 14), "b": Vector2(14, 14), "w": 2.0, "c": "ink"},
+		{"k": "line", "a": Vector2(-2, 5), "b": Vector2(-2, 13.5), "w": 1.2, "c": "ink"},
+		{"k": "line", "a": Vector2(3, 5), "b": Vector2(3, 13.5), "w": 1.2, "c": "ink"},
+		{"k": "poly", "p": PackedVector2Array([
+			Vector2(3, 0), Vector2(-15, 12), Vector2(-14, 15), Vector2(5, 6)]), "c": "ink"},
+		{"k": "ellipse", "ctr": Vector2(-1, -2), "rx": 11.0, "ry": 8.5, "c": "ink"},
+		{"k": "circle", "ctr": Vector2(8, -9), "r": 6.0, "c": "ink"},
+		{"k": "poly", "p": PackedVector2Array([
+			Vector2(12, -11), Vector2(20, -8.5), Vector2(12, -6)]), "c": "ink"},
+		{"k": "poly", "p": PackedVector2Array([
+			Vector2(-7, -5), Vector2(-1, -8), Vector2(1, -1), Vector2(-6, 1)]), "c": "wing"},
+		{"k": "circle", "ctr": Vector2(9.5, -10), "r": 1.4, "c": "eye"},
+	]

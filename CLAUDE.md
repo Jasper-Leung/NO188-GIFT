@@ -140,6 +140,21 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
   verify_vegetation_grounding.gd 每株植物都站在地上（Transform3D.scaled 缩放 origin 的回归）
   verify_pavilion_bushes.gd 驿站周围灌木清除验证
   verify_terrain_shader.gd  地形草地质感 shader 回归（材质/剔除pragma/顶点色）
+  verify_asphalt_shader.gd  路面着色器回归，**判据全部读源码文本**（`--headless`
+						用的是 dummy renderer，**不编译着色器**，所以语法错和观感错在
+						无头下都静默通过）。守的是一条已经真实发生过一次的缺陷：
+						`edge_line_color` 这个 uniform **声明了整整一个项目、从来没有
+						被任何一行读过**——它在着色器里合法、没有任何报错、也没有任何
+						回归会红，而 CLAUDE.md 那一节正写着路面有"双黄虚线"，于是
+						**文档和代码各说各的，两边都绿**。所以头一条断言是"声明了的
+						uniform 被 fragment() **真的读过**"，不是"声明在不在"（那正是
+						它本来的样子）。另有：边线贴着沥青外沿内侧且位置从
+						`road_half_width` 推（不许写死米数）、它是**实线**（不跟中央线
+						的 dash）、`plaza_mode` 下一律不画、两个线的默认色够亮且属
+						同一族白、以及**着色器里的宽度默认值 == `RoadBuilder` 的常量表**
+						——后者走 `get_script_constant_map()` 读引擎**求值之后**的那份，
+						因为 `ROAD_HALF_WIDTH := ROAD_WIDTH * 0.5` 正则会读到那个 `0.5`，
+						量的是"除数是不是 0.5"、恒绿
   verify_grass_scatter.gd  草皮放置/确定性/流式回归（贴地、离路、让位、各环嵌套、
 						驻留环、池预算、骑行中零重建零隐藏、单帧 CPU 预算）
   lookdev_grass.gd        草皮五张定妆照 4/15/45/100/190m（**不能加 --headless**、**不能加 --quit-after**）
@@ -422,7 +437,7 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 
 ## 关键约束
 
-1. **零纹理资产（WebGL 友好）**: 路面 asphalt 用 `assets/shaders/asphalt.gdshader` 程序化生成（颗粒、胎痕、路缘起灰、潮斑、路肩泥土、双黄虚线），地形用 `assets/shaders/terrain_grass.gdshader`（低频色块、中频草丛斑驳、高频麻点、随距离淡出的法线扰动），近处草皮用 `assets/shaders/grass.gdshader` 的实例化卡片。植被 mesh 用 `SphereMesh`+`StandardMaterial3D` 程序化或 GLB。
+1. **零纹理资产（WebGL 友好）**: 路面 asphalt 用 `assets/shaders/asphalt.gdshader` 程序化生成（颗粒、胎痕、路缘起灰、潮斑、路肩泥土、**中央白色虚线 + 两侧白色实边线**——原来是"双黄虚线"，而代码从头到尾只画过一条白虚线，`edge_line_color` 那个 uniform 声明了从没被读过），地形用 `assets/shaders/terrain_grass.gdshader`（低频色块、中频草丛斑驳、高频麻点、随距离淡出的法线扰动），近处草皮用 `assets/shaders/grass.gdshader` 的实例化卡片。植被 mesh 用 `SphereMesh`+`StandardMaterial3D` 程序化或 GLB。
 2. **路线是自行构造的贝塞尔 8 字图案**: `scripts/road_data.gd` 的 `LEMNISCATE_LOCAL` 是解析式采样的 49 点 lemniscate，经旋转/缩放后生成 3D 路网。**不引用任何外部 SVG 或现实道路数据**。任何"几何简化"或"手调节点"都只影响游戏内观感，不涉及外部数据一致性。
 3. **8 字交叉点高度查询**: 玩家 Y 必须用 `RoadBuilder.get_road_ribbon_height(x, z)`（三角形质心插值 + max 聚合），不能用 `get_road_height_at_xy`（会跳变 0.143m）。
 4. **MiniMap 是 3D 在线组件**: `MiniMap.gd` 在 `World3D.gd` 启动时初始化，**不能删**（过去差点被误删）。
@@ -613,7 +628,8 @@ echo. > .editor_mode
 
 - 一类改动一个 commit；commit message 用动词开头（如 `fix:`, `feat:`, `refactor:`, `docs:`）
 - 中文 commit subject 可，body 用中文或英文均可
-- 修改 `assets/shaders/asphalt.gdshader` 前先在 headless 跑 `verify_road_height.gd` + `verify_crossing.gd`
+- 修改 `assets/shaders/asphalt.gdshader` 前先在 headless 跑 `verify_road_height.gd` + `verify_crossing.gd` + `verify_asphalt_shader.gd`，改完再跑 `lookdev_journey.gd` 看 `04_ride_骑行中` 的路面（**不能加 --headless**：dummy renderer 不编译着色器，语法错在无头下照样全绿）。`verify_asphalt_shader.gd` 守的是**"声明了却被读过"**那一族：路面标线那几行里曾经有一个 `edge_line_color` 声明了从没被读过，而它在着色器里完全合法、不报错、也没有任何回归会红——**症状是另一个人在文档里写下的一句"双黄虚线"，而不是任何一条断言**
+- 改 `FragmentIcon.paint_bird` / `bird_parts()` / `FragmentBar._draw_bird` / `Postcard._draw_bird` 前跑 `verify_postcard_ending.gd` **第 3b-2 节** + `lookdev_postcard.gd`。禽这只鸟**画过三遍**（顶栏底栏、单碎片放大图、明信片五格），原来是**三份**画法、其中两份还是**两套不同的**：底栏与放大图是「圆 + 棍」（读成棒棒糖），明信片是「填实的圆 + **同色的**翅」（两块并成一颗疙瘩）。云那一族是三份抄开的**同一个**算法，禽更糟——玩家一路看着它长大，最后带走的那张纸上根本不是同一只东西，所以现在三处都调 `FragmentIcon.paint_bird` 一个出处。第 3b-2 节钉两件事：①**三处调的是同一个出处**（读源码文本，`_draw` 在 headless 下一笔都不落盘，"两处形状一样"量笔法量不出来）；②**那只剪影本身**认不认得出是鸟——`bird_parts()` 是不碰画笔的纯函数，`paint_bird` 只是把它重放一遍，所以量的是剪影：有尾（甩到左下）、喙是往前伸的尖楔且伸出头外、脚下有栖枝、身子是**扁**椭圆、翅是**留白**、整只装得进 `FragmentBar` 那个 22px 的盘。**翅是留白这一条只有像素量得到**（几何全绿而两块并成疙瘩），`lookdev_postcard.gd` 在 `10_终局二选一` 的底栏量它：亮一截取 0.05，禽实测 **93**，翅改回墨色（或退回旧画法）只剩 **10**（那是眼睛），门槛 60 正落中间；相对量而不是绝对的白，因为底板是深色屏、翅是 0.30 白压在橙上，AGX 之后两色被拉近。另四件实测 云40 / 茶10 / 琴110 / 竹0，所以这条**只断禽**，别拿去当"五格谁最亮"的排序。**写完先证明它会红**（突变一个一个撤）：翅改回 `"c": "ink"` → 无头红 1 条、定妆照红 1 条；`Postcard._draw_bird` 退回自己画一颗圆 → 红 1 条；撤掉栖枝那条 line → 红 1 条
 - 修改 `scripts/TerrainBuilder.gd` / `assets/shaders/terrain_grass.gdshader` 前先跑 `verify_terrain_shader.gd` + `verify_road_height.gd` + `verify_crossing.gd`
 - 修改 `scripts/road_data.gd` / `scripts/RoadBuilder.gd` 前先在 headless 跑 `verify_8_shape.gd`
 - 改 `World3D` 的站名牌（`STATION_LABEL_PIXEL_SIZE` / `_FONT_PX` / `_FONT_PX_SMALL` /
@@ -752,6 +768,48 @@ echo. > .editor_mode
   量它们等于没量。删除突变验过：撤掉那句 `show_pass_line` 那条立刻红，
   而报出来的 got 是一条驿站旁白（"编号 188。这条路认得每一个走过的人。"）
   ——这正是"取样窗口取错了一格"长出来的样子
+
+- **「声明了却从没被读过」的 uniform，症状是另一个人在文档里写下的那句话**：
+  `asphalt.gdshader` 声明过 `edge_line_color`，**整个项目周期里一次都没被读**
+  ——GDScript/shader 都不对未使用的 uniform 报错，也没有任何一条无头回归会红，
+  于是"两侧各自都绿"又出现了一次，只不过这次绿的两侧是**代码**和**文档**：
+  `CLAUDE.md` 那一行写着路面是「中央白色虚线 + 两侧白色实边线——原来是"双黄虚线"，
+  而代码从头到尾只画过一条白虚线」，一句话同时说了现状和历史，而**现状那半句
+  一直是假的**。可推广的一条：**"这个东西配了吗"要去搜它的读取点，而不是看它
+  的声明**——`.gdshader` 里 `uniform` 的名字和它在 `fragment()` 里的名字长得
+  一模一样，只差一次 `grep`；而**文档里那句"原来是 X"更可信**，因为它记录的是
+  有人真的以为那里有 X。对策不是改文档了事，是把边线补画出来（断的是那个承诺，
+  不是那句话），同时补一条"每个 uniform 都出现在 fragment 源码里"的纯文本回归。
+  同族：`--headless` 不编译着色器，所以这一族**没有一条无头回归能量**，
+  补画之后只能靠 `lookdev_journey.gd` 看图（`04_ride`）。
+
+- **常量是一条链时，正则抄算式量到的是除数而不是求值结果**：
+  `ROAD_HALF_WIDTH := ROAD_WIDTH * 0.5`，拿源码去匹配 `ROAD_HALF_WIDTH`
+  读出来的是字符串 `"ROAD_WIDTH * 0.5"`——于是"两侧边线的位置对不对路宽"
+  这条断言要么恒绿（比的是字符串里那个 `0.5`）要么恒红，而**两种都不含信息**。
+  正解是 `GDScript.get_script_constant_map()`：它返回的是引擎**求值之后**的常量，
+  所以那条链读出来是真正的 `3.25`。可推广的一条同族：**拿源码文本量东西时先问
+  "这一行会被求值成什么"**——凡是 `:=` 右边带运算的，文本里躺着的就不是玩家
+  用的那个数。（和前面「用文本断言钉某条性质之前先确认那个性质真的会在文本里
+  留下一个可搜的痕迹」是同一条的两头：一个是搜不到，一个是搜到了却搜错了东西。）
+
+- **同一件东西三处各画一遍，而三份画法不一样时，"修好一处"只改了三分之一**：
+  禽这只鸟画过三遍（`FragmentBar._draw_bird` / `FragmentIcon._draw_bird` /
+  `Postcard._draw_bird`），云画过三遍（同名三个函数）。区别在于：**云那三份是
+  同一个算法的三份抄写**（逐列取最上面的鼓包），所以"抄错了一个数"仍然像云；
+  而禽那三份里**有两套不同的算法**——底栏与放大图是「一颗圆 + 一根棍」（读成
+  棒棒糖），明信片那份是「一颗填实的圆 + 一片**同色**的翅」（两块并成一颗疙瘩）。
+  玩家一路在底栏看着的是一只，进游戏在明信片上拿到的是另一只，而**这正是最贵
+  那一屏在拆台**。可推广的一条：**"同一个形状在 N 处出现"时，先确认那 N 处
+  是 N 份抄写还是 N 种实现**——前者靠对拍就能发现漂移，后者对拍永远绿，
+  因为两份各自自洽。而收成一处之后要量的不是"三处一样"（那是**读源码文本**
+  钉得住的），是**"这个形状认得出它是什么"**：禽那一条被拆成尾/喙/栖枝/椭圆身/
+  **翅是留白**/装得进 22px 盘六件，前四件几何能量到，**翅是留白只有像素量得到**
+  （墨色的翅压在墨色的身上等于没画，而所有几何断言照绿），
+  所以 `lookdev_postcard.gd` 那一条的门槛是**量出来的**：翅在 93、翅没画只剩 10，
+  门槛取 60；而且"亮一截"取的是**相对量**（比那件自己的颜色亮 0.05）不是绝对白——
+  底板是深色屏、翅是 0.30 白压在橙上，AGX 之后两色被拉近，绝对阈值量的是
+  tonemap 落在哪一档。
 
 - **「写进字段」不等于「读进世界」，而这一族断掉时两侧各自都绿**：画质档位
   靠一个 `radius_override` 把半径推给 `GrassScatter` / `TreeScatter`。它写在

@@ -34,6 +34,7 @@ var _loc: Node = null
 var _pc_script: GDScript = null
 var _frag_idx: Array = []
 var _shots := 0
+var _last_img: Image = null
 const EXPECTED_SHOTS := 19
 
 
@@ -128,6 +129,7 @@ func _snap(name: String, node: Control) -> Color:
 	node.queue_free()
 	svp.queue_free()
 	await process_frame
+	_last_img = img
 	return _band_avg(img)
 
 
@@ -219,6 +221,7 @@ func _run() -> void:
 
 	_fill_inventory(3, ["paper", "ink", "seal", "env"], "")
 	await _snap("05_tier3_满配", _make_postcard())
+	await _check_no_bird_in_header()
 
 	# 没买套餐、只买宣纸：散件的帘纹不能被档位挡掉
 	_fill_inventory(0, ["paper"], "")
@@ -371,6 +374,52 @@ func _click(card: Control) -> void:
 	card.gui_input.emit(ev)
 
 
+## 抬头右半那只"飞禽"不许回来。
+##
+## 它原来画在 `(w - 120k, band_h*0.52)`，半径 `18 × 0.8k`，用的是
+## **`BIRD_COL` —— 也就是「禽」自己那件的颜色**。于是它落在「N 次」那一列的
+## 中段、禽那一行的高度上：一只和禽同色的东西出现在禽那一行里，
+## 读成"这是禽那一行多出来的一个记号"，而不是一只鸟。几何上它没压着任何
+## 控件，`verify_postcard_ending.gd` §3d 三十几条**全绿**——
+## 因为"这是一只误画的装饰"根本不是几何量。
+##
+## 所以判据落在**它原来的那块地**上：那一块里不许再出现禽的颜色。
+## 之所以量"那块地"而不是"整条带子里没有橙色"：带子里本来就有三样橙色——
+## 「禽」那个名字（`FRAGMENT_COLS[4].darkened(0.35)`）和右上角那枚金印
+## （`D4AF37`，离 `BIRD_COL` 只差 0.09/0.06/0.09），整条扫会把这三样一起算进来。
+## 而那块地里只有纸和「N 次」那几行**墨色**的字，量得到 0 是干净的。
+##
+## 那个 ±0.20 的窗是量出来的分界：禽的名字 darkened(0.35) 之后红通道 0.59，
+## 离 0.91 有 0.32，本来就在窗外——窗再宽也不会把它算进来。
+func _check_no_bird_in_header() -> void:
+	var img: Image = _last_img
+	if img == null:
+		_ck("抬头里没有那只误画的禽", false, "上一张图没拿到（_last_img 是 Nil）")
+		return
+	var w: float = CONTENT_SIZE.x
+	var h: float = CONTENT_SIZE.y
+	var k: float = w / 900.0
+	var band_h: float = float(load("res://scripts/Postcard.gd").MAP_BAND_FRAC) * h
+	# 圆心 ± 半径，x 再留出上下摆动那 5k。全部换算成图上的坐标。
+	var bcx: float = w - 120.0 * k
+	var bcy: float = band_h * 0.52
+	var rad: float = 18.0 * 0.8 * k
+	var x0: int = int(MARGIN + bcx - rad - 6.0 * k)
+	var x1: int = int(MARGIN + bcx + rad + 6.0 * k)
+	var y0: int = int(MARGIN + bcy - rad)
+	var y1: int = int(MARGIN + bcy + rad)
+	var want: Color = load("res://scripts/Postcard.gd").BIRD_COL
+	var n := 0
+	for y in range(maxi(0, y0), mini(img.get_height() - 1, y1)):
+		for x in range(maxi(0, x0), mini(img.get_width() - 1, x1)):
+			var c: Color = img.get_pixel(x, y)
+			if absf(c.r - want.r) < 0.20 and absf(c.g - want.g) < 0.20 \
+					and absf(c.b - want.b) < 0.20:
+				n += 1
+	_ck("抬头里没有那只误画的禽（禽色像素 %d，必须 0）" % n, n == 0,
+			"它原来那块地里又有 %d 个像素是 BIRD_COL" % n)
+
+
 ## 抉择屏底下那一行五件乐事：**图上真的画出来了没有**。
 ##
 ## 几何断言（`verify_postcard_ending.gd` §4）量的是控件摆在哪、有没有叠——
@@ -399,10 +448,12 @@ func _check_choice_joys_pixels(card: Control) -> void:
 		return
 	var per: Array = []
 	var on_name: Array = []
+	var lift: Array = []
 	for i in icons.size():
 		var r: Rect2 = icons[i].get_global_rect()
 		var want: Color = cols[i]
 		var n := 0
+		var hi := 0
 		for dy in range(0, int(r.size.y)):
 			for dx in range(0, int(r.size.x)):
 				var c2: Color = img.get_pixel(int(r.position.x) + dx, int(r.position.y) + dy)
@@ -411,7 +462,21 @@ func _check_choice_joys_pixels(card: Control) -> void:
 				if absf(c2.r - want.r) < 0.22 and absf(c2.g - want.g) < 0.22 \
 						and absf(c2.b - want.b) < 0.22:
 					n += 1
+				# 禽那只鸟的翅是**留白**。这是这一族唯一一条**只有像素量得到**
+				# 的东西：翅压在墨色的身上，两块并成一颗疙瘩，而所有几何断言
+				# （有没有尾 / 喙尖不尖 / 是不是同一份画法）全绿。
+				# 旧版那只「圆 + 棍」一根白笔都没有，所以这一格应当 ≥60。
+				# 门槛是量出来的，不是拍的：亮一截取 0.05，禽实测 **93**
+				#（翅 46 单位² × 缩放 1.5² ≈ 105 px²，扣掉抗锯齿），
+				# 而翅改回墨色（或退回旧画法）之后只剩**10**——那是眼睛那一颗。
+				# 门槛取 60 正落在这两数中间。相对量而不是绝对的白：底板是深色屏，
+				# 翅是 0.30 白压在橙上，AGX 之后两色被拉近，绝对阈值量的是
+				# tonemap 落在哪一档。另四件实测 云40 / 茶10 / 琴110 / 竹0，
+				# 所以这条只断禽，不拿它当"五格谁最亮"的排序。
+				if c2.get_luminance() > want.get_luminance() + 0.05:
+					hi += 1
 		per.append(n)
+		lift.append(hi)
 		# 同一个颜色有没有跑到**名字那一行**上去。这一条量的是玩家看得见的
 		# 那一件事：五件的设计范围并不是 ±16（竹到 y −24..+20、禽到 x +21），
 		# 而 `FragmentIcon` 按 `size.x` 缩放、以控件中心为原点——框开成方形
@@ -433,6 +498,8 @@ func _check_choice_joys_pixels(card: Control) -> void:
 			per.min() >= 8, "实际 %s" % str(per))
 	_ck("没有一件的笔画压到自己名字那一行（0 像素）",
 			on_name.max() == 0, "实际 %s" % str(on_name))
+	_ck("禽那一只的翅是**留白**（格子里有 ≥60 个明显更亮的像素）",
+			lift[4] >= 60, "五件实测 %s" % str(lift))
 
 
 ## 找出紧贴在某个图标框下面、横向对得上的那个名字 Label 的屏上矩形。

@@ -23,6 +23,11 @@ var _map_max := Vector2.ZERO
 ## 以前正面顶部那块只有云天，谁也说不清它占多少、该被什么压着。
 var _map_rect := Rect2()
 
+## 五件乐事里的禽和另外几件一样，形状只有一份，在 `FragmentIcon`。
+## 用 preload 而不是 class_name（见 CLAUDE.md 已知陷阱：`--script` 模式的
+## 编译期拉依赖）。
+const FragmentIconScript = preload("res://scripts/FragmentIcon.gd")
+
 const CLOUD_COL = Color("B0C4DE")
 const TEA_COL = Color("8FB35A")
 const QIN_COL = Color("C9A26B")
@@ -368,12 +373,6 @@ func _draw_map_caption(w: float, band_h: float, k: float) -> void:
 	draw_string(font, Vector2(x + 44.0 * k, ly), Localization.t("postcard_map_legend"),
 			HORIZONTAL_ALIGNMENT_LEFT, -1, int(14 * k), dim)
 
-	# 飞禽。原先它在天上飞，云天没了就让它飞过这一带。位置躲开两样东西：
-	# 右上角那枚完满金印（半径 32 是**不缩放**的，写死 w-90 附近），
-	# 以及列 B —— 它占的那条道是 `_joys_column_rect()` 量出来的。
-	_draw_bird(Vector2(w - 120.0 * k, band_h * 0.52 + sin(_t * 0.9) * 5.0 * k),
-			BIRD_COL, 1.0, 0.8 * k)
-
 
 ## 列 A（标题 / 已过 n 驿 / 图例）最宽的那一条有多宽。列 B 靠它起步，
 ## 所以这一段必须**量出来**：英文那一列比中文长一截，写死一个间距的话
@@ -397,9 +396,20 @@ func _caption_col_w(font: Font, k: float) -> float:
 
 ## 五件乐事那一列占的那块矩形。不碰画笔，回归量的是它。
 ##
-## 右沿停在 `w - 150k`：那只禽半径 18x0.8k、画在 w-120k，列 B 一起涨过去
-## 就会骑到它身上。宽度算出来是 0 也不画 —— 卡片窄到放不下这一列时，
-## 宁可少一列，也不要两列的字压在一起。
+## 右沿停在 `w - 150k`，为的是**让开右上角那枚完满金印**——它是**不缩放**画的
+## （圆心写死 `w - 90`、半径 32，见 `_draw()` 里那几行），所以它的左沿恒是
+## `w - 122`、底沿恒是 52，与卡片多大无关。900px 那一档两者真的会压上
+## （金印落到 y 0..52，而列 B 的第一行基线在带高 0.305 ≈ 38 处，20px 的字身
+## 往上就顶进金印）；1920 那一档离得开，可右沿不该随分辨率漂，所以取两档
+## 都成立的那条。
+##
+## 宽出来的这一段是**名字和次数之间那份留白**，不是排不下的余量：名字左对齐、
+## 次数右对齐成一本账，两行之间拉得太开就读不成一对。而这一列的**外侧**留白
+## 由 `verify_postcard_ending.gd` 第 3d 节那条「右沿不留死区」看着（< 20% 宽），
+## 1920 下是 16.7%，和地图左边那 200px 的外边距大致对称。
+##
+## 宽度算出来是 0 也不画 —— 卡片窄到放不下这一列时，宁可少一列，
+## 也不要两列的字压在一起。
 func _joys_column_rect(w: float, band_h: float, k: float, x0: float) -> Rect2:
 	var row_h: float = band_h * 0.15
 	return Rect2(x0, band_h * 0.20, maxf(0.0, w - 150.0 * k - x0), row_h * 5.0)
@@ -651,26 +661,8 @@ func _draw_bamboo(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
 		]), ink)
 
 
+## 禽：走 `FragmentIcon.paint_bird` 那一份，和顶栏底栏、单碎片放大图同一个
+## 剪影。原来的这份是另一套画法（一颗填实的圆 + 一片**同色**的翅），两块
+## 并成一颗疙瘩，整格读成"深色的团"；而玩家一路在底栏看着的是另一只。
 func _draw_bird(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var r = 18.0 * sc
-	var ink := Color(col.r, col.g, col.b, a)
-	draw_circle(c + Vector2(0, 4 * sc), r, ink)
-	# 翅膀（三角翼）
-	var wing_pts = PackedVector2Array([
-		c + Vector2(-2 * sc, -4 * sc),
-		c + Vector2(-22 * sc, -16 * sc),
-		c + Vector2(-12 * sc, 2 * sc),
-	])
-	draw_colored_polygon(wing_pts, ink)
-	# 头 + 喙
-	draw_circle(c + Vector2(r - 2 * sc, -2 * sc), 5 * sc, ink)
-	draw_line(c + Vector2(r + 2 * sc, -2 * sc), c + Vector2(r + 12 * sc, 0), ink, 2.0 * sc)
-	# 尾
-	var tail_pts = PackedVector2Array([
-		c + Vector2(-r + 2 * sc, 0),
-		c + Vector2(-r - 10 * sc, -6 * sc),
-		c + Vector2(-r - 10 * sc, 6 * sc),
-	])
-	draw_colored_polygon(tail_pts, ink)
-	# 眼睛：墨色身子上一颗留白，认得出是鸟而不只是一颗圆
-	draw_circle(c + Vector2(r - 2 * sc, -3 * sc), 1.8 * sc, Color(1, 1, 1, a * 0.9))
+	FragmentIconScript.paint_bird(self, c, col, a, sc)
