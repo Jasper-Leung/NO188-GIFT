@@ -26,7 +26,17 @@ scenes/           场景文件 (.tscn)
   GiftBox.tscn    开始界面
   World3D.tscn    3D 骑行主场景
   EndCard.tscn    收集完成
-  FragmentBar.tscn 顶部碎片栏
+  FragmentBar.tscn 底部碎片栏（五格）。**未收的那一格原来画的是
+					「灰圆盘 + 同一个灰的图标 + 一个盖在图标上的灰问号」**——
+					于是图上是五个一模一样的灰方块，玩家只知道"还差 5 个"，
+					不知道那 5 个是什么、哪一格是下一处要去的那件。屏上当时还有
+					**两个**问号：`.tscn` 里每个 Slot 底下挂着一个写着全角问号的
+					占位 Label（收过之后才被 `_process` 换成碎片名），画笔又画了
+					一个。现在：外圈 5px 的**实心色盘**（`RIM_W`，用它自己那件的颜色）
+					+ 不透明中性盘 + 自己那件的彩色图标 + 问号缩成右下角角标。
+					**色盘画在盘外而不是盘内一道细环**，是量图上的硬理由：
+					云是实心多边形、竹的梢伸到半径 25，都压得进盘内 19~21 那一圈，
+					于是定妆照量到的是图标而不是环，把环退回灰色它照样报"五格分得开"
   EditorHUD.tscn  编辑模式侧栏（仅编辑时挂载）
 
 scripts/          GDScript 脚本
@@ -330,6 +340,23 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						黄昏那行红有没有压过蓝（量的是"换了颜色"而不是"降了曝光"），
 						以及衬底底下那一带比 `verify_mood_mask` 第 9 节声明的最坏背景
 						暗不暗（跨脚本的一条：那边无头、量不到像素）
+						**`04_ride` 之后那两条量的是底栏五格「未收时看不看得见自己在收集
+						什么」**，而这一族前两版判据都量错了对象，两次都**安静地报一个
+						很小的数而没有红**：①「40×40 框里饱和度 ≥0.10 的像素占几成」
+						——槽底板是半透明的、底下就是 3D 场景，量到的是背景，把图标
+						整个退回纯灰它照样报 57.9%；②「盘内半径 15px 的平均色两两差
+						≥0.05」——图标只有 1~2px 的细线，摊进 700 多个像素里稀释到
+						0.004，两两差只剩 0.025，是尺子太粗不是产品坏了。现在取
+						**两条通道的并集**：盘外 23~26.5 那一圈**实心色盘**的**颜色**、
+						盘内 r≤15 的**墨掩膜形状**。两条都必须是"整片"而不是"平均"
+						（一个像素就是一个值，不存在稀释）。取样用 Slot 自己的
+						`get_global_rect()`，**不许拿 120px 间距手算**——`HBox` 是
+						`alignment = 1` 而 Slot 的 `custom_minimum_size` 才 120，
+						实测间距 124、盘心 (392/516/640/764/888, 660)，手算那版
+						量到的是隔壁那格。**并集的每一路都要配一条"这一路真的在承重"
+						的正对照**（≥3/10 对靠颜色分开），否则环整条退成灰它照样全绿。
+						墨掩码有个坑：`lums.sort()` 之后按 k 生成掩码比的是**亮度分布**
+						不是形状，报出 0.014 的"形状差"——掩码必须回到空间顺序上填
   verify_economy.gd       旅币/背包/心神/存档回归 + 预算按公式重算 + **里程不许出现在
 						任何玩家可见文案里**（含中文「公里」与英式 kilometre）
   verify_shop_panel.gd / verify_shop_world.gd  驿铺面板 / 真实 3D 世界里的购买链路
@@ -652,6 +679,7 @@ echo. > .editor_mode
 - 改 `scripts/DayCycle.gd` 的任何一档颜色 / 太阳角度 / `FarRidge.set_tint()` 前跑 `verify_day_cycle.gd`（量的是数字）+ `lookdev_journey.gd` 看 `12b_day_正午` 与 `12c_dusk_黄昏` **那两张同机位的 A/B**（量的是观感）。少一张就没法判断"天到底变了没有"——两处只查一个都曾经全部通过而画面纹丝不动
 - 改 `DayCycle` 那六个 `DAY_SKY_*` / `DAY_GND_*` 常量、`_apply()` 里那几行 `.srgb_to_linear()`，或 `World3D.tscn` 里 `Env_sky` 的 `fog_sky_affect` 前跑 `verify_day_cycle.gd`（它守着 `fog_sky_affect == 0` 和线性空间的纵向反差 ≥ 0.50，两条都是**成因**而不是结果）+ `lookdev_journey.gd` 那五条天带像素断言。**那六个常量是按 sRGB 写的**，交给 `ProceduralSkyMaterial` 之前必须过一遍 `Color.srgb_to_linear()`——天空色在引擎里是辐照度、直接当线性值用，不像普通材质那样帮你转一遍；写成"看着对"的那一档渲出来是接近纯白的一整片灰蓝纸。`lerp` 也要**在 sRGB 空间做、换算放最后**（`DAY_X.lerp(DUSK_X, t).srgb_to_linear()`），否则那 9 秒交叉淡入在中段塌成一团发灰的泥
 - 改 `GameManager.fragment_station_needs_visit()` / `all_fragments_maxed()` / `fragment_slot_visits_left()` / `MAX_VISITS_PER_STATION` / `HUD3D._update_next_label()` / `FragmentBar._draw_visit_pips()` / `CheckInPrompt._label()` 的回访分支前跑 `verify_minimap.gd` + `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`（完满是全游戏最强的重玩钩子，三处「还差 N 次」必须同数；任一处退回 `is_collected` 就会把已收的站从导航上摘掉）
+- 改 `FragmentBar.gd` 的 `RIM_W` / `FRAGMENT_COLORS` / 未收那一支的画法，或 `FragmentBar.tscn` 里五个 Slot 底下那几个 `FragLabel` 的 `text` 占位前跑 `lookdev_journey.gd` 看 `04_ride` 的底栏 + 它那两条像素断言。**`RIM_W` 是画笔和定妆照共用的那个数**（回归取样窗口 23~26.5 是按「圆盘 22 + 5」推的），改它要连两边一起改。**`.tscn` 里那几个占位问号曾经和画笔画的那个同时在屏上**——屏上两个「？」，一个在盘心把图标整个盖住，一个在名字那一行；而占位 Label 是**要留着的**（收过之后 `_process` 把它换成碎片名），清的是 `text` 不是节点。另有一条**量图上的硬理由**：色盘画在**盘外**而不是盘内一道细环——云是实心多边形、竹的梢伸到半径 25，都压得进盘内 19~21 那一圈，于是回归量到的是图标而不是环，**把环整条退回灰色它照样报"五格分得开"**（那次突变就是这么溜过去的）。茶(8FB35A) 与竹(6E9C6B) 本来就是两块很近的绿（环上只差 0.015），靠形状分开是设计不是缺陷，所以判据是并集而不是纯颜色；别为了凑颜色判据去动 `FRAGMENT_COLORS`——它和 `Postcard.FRAGMENT_COLS` 逐值同源，改一边要改 `verify_postcard_ending` §3b 和 `verify_story` §4
 - 改 `FarRidge.LAYERS` / `_build_layer()` 的材质前跑 `verify_far_ridge.gd` + `lookdev_horizon.gd` 看图（`disable_fog` 被谁删掉的话三层会塌成一条没有纵深的白带，标志位那关拦得住，颜色那关只有看图）
 - 改 `CrossingMark.gd` 的任何一处（`FACE_W` / `FACE_H` / `FACE_TILT_DEG` / `PLINTH_H` / `PLINTH_CLEAR` / `TRACE_BOX` / `TEXT_Y` / `TEXT_PIXEL` / `TRACE_W` / `face_lift()` / `_quad()` 的缠绕顺序）前跑 `verify_crossing_mark.gd` + `lookdev_crossing.gd` 看 `5_mark` 与 `6_face`。**这族回归有三条只靠图才成立的判据**：缠绕方向（发反了整条刻线是背面、正面看一片空白，而带子/法线/包围盒/逐点对拍全绿——回归靠"法线是 +Z"那条兜底，兜不住的是"看起来粗细对不对"）、刻线在石板上**读不读得出是个 8**（数字量得到两个瓣交叠 0.25，量不到"腰上那两个鼓包会不会把交叉糊掉"）、以及**题字画没画出来**（Label3D，headless 一笔不落盘）。而 `TRACE_BOX` 与 `TEXT_Y` 必须**一起动**：两者抢的是同一块石板，只动一个就会有一边被石板边沿或石台吃掉
 - 改顶栏的经济标签（`_lvbi_label` / `_lvbi_toast` / `_setup_economy_labels`）前跑 `verify_mood_mask.gd` 第 7 节（它断言入账时余额/心神/"下一处"三个标签的横坐标一个像素都不许动）

@@ -312,6 +312,134 @@ func _check_next_target_arrow() -> void:
 	_ck("目标在正右方时箭头是 →", _arrow_in(hud._next_label.text) == "→", _arrow_in(hud._next_label.text))
 
 
+## 底栏那五格：未收的时候**看得见自己在收集什么吗**。
+##
+## 原来未收的一格画的是「灰圆盘 + 同一个灰的图标 + 一个灰的问号」——
+## 图标被问号整个盖住，于是五格在图上是五个一模一样的灰方块，
+## 玩家只知道"还差 5 个"，不知道那 5 个是什么、哪一格是下一处要去的那件。
+## （`.tscn` 里每个 Slot 底下还挂着一个写着全角问号的占位 Label，
+## 屏上于是同时有两个问号，一个在盘心、一个在名字那一行。）
+##
+## 判据分**两条通道**，取并集：盘边那一圈环的**颜色**、盘内图标的**形状**。
+## 这是玩家真正用的两条——22px 的盘上那五个图标本来就得凑近才认得出轮廓，
+## 而"下一处要去的是哪一件"是扫一眼就要知道的，所以产品那一侧也是这么改的：
+## 细线交给"凑近看"，环交给"扫一眼看"。
+##
+## 只量颜色不成立：茶(8FB35A) 与竹(6E9C6B) 本来就是两块很近的绿，环上量出来
+## 只差 0.015，而它们靠形状（杯 / 竹）分开——这是设计好的，不是缺陷。
+## 只量形状也不成立：图标退回同一个灰，形状照样两两不同，可五格于是又是
+## "五块一样的灰方块里各画一件不同的东西"，扫一眼仍然分不出谁是谁。
+## 两条一起量才对得上"玩家分不分得开"这句话。
+##
+## 这一族的前两版都量错了，错法是同一个：**量了一个不是玩家读的那个量**。
+## ①第一版量「40×40 框里饱和度 ≥0.10 的像素占几成」，门槛 3%，报 55.9%；
+## 突变把图标退回纯灰之后它报 57.9% 照样全绿——槽底板是半透明的、底下就是
+## 3D 场景，蓝天和草地从盘外渗进来，量的是背景。
+## ②第二版把圆盘改成不透明、改量「盘内半径 15px 的平均色两两差 ≥0.05」，
+## 背景是挡住了，可图标只有 1~2px 的细线，摊在 700 多个像素里被稀释到
+## 0.004，两两差只剩 0.025——门槛立不住，不是产品坏了，是尺子太粗。
+## ③现在两条通道都取"整片"而不是"细线平均"：环是一整圈连续的色，
+## 形状是一整片墨，两边都是一个像素就是一个值，不存在稀释。
+##
+## 取样用 Slot 自己的 `get_global_rect()`，**不许拿 120px 间距手算**：
+## `HBox` 是 `alignment = 1`（居中）而 Slot 的 `custom_minimum_size` 才是 120，
+## 实测间距 124、盘心 (392/516/640/764/888, 660)。手算的那一版差 8~28px，
+## 量到的是隔壁那格。
+##
+## 实测：颜色分得开 5/10 对、形状 10/10 对（0.227~0.410）。
+## 纯灰那一版：颜色 0/10、形状 ~0。
+func _check_fragbar_slots_coloured(img: Image) -> void:
+	var fb: Node = _world.get_node_or_null("FragmentBarLayer/FragmentBar")
+	if fb == null:
+		_ck("底栏五格未收时各带自己的颜色", false, "找不到 FragmentBar 节点")
+		return
+	var row: Node = fb.get_node_or_null("HBox")
+	if row == null:
+		_ck("底栏五格未收时各带自己的颜色", false, "FragmentBar 下没有 HBox")
+		return
+	# 环：`FragmentBar.RIM_W` 那一圈**盘外**的实心色盘（圆盘 22 + 5 = 27），
+	# 取 23~26.5。**取盘外不是为了好看，是为了量得到环自己**：云是实心多边形、
+	# 竹的梢伸到半径 25，盘内 19~21 那一圈被它们压住，把环退回灰色照样量到
+	# "五格分得开"（那次突变就是这么溜过去的）。这一圈里没有一根图标笔画。
+	const R_IN := 23.0
+	const R_OUT := 26.5
+	# 形状：盘内半径 15px（图标都在这一圈里，色盘和角标都在外面）
+	const R_ICON := 15.0
+	var rings: Array = []
+	var inks: Array = []
+	for i in row.get_child_count():
+		var slot: Control = row.get_child(i)
+		var rect: Rect2 = slot.get_global_rect()
+		var ctr := rect.position + rect.size * 0.5
+		var ring_acc := Vector3.ZERO
+		var ring_n := 0
+		var lums: Array = []
+		var offs: Array = []
+		for dy in range(-28, 29):
+			for dx in range(-28, 29):
+				var ix: int = clampi(int(ctr.x) + dx, 0, img.get_width() - 1)
+				var iy: int = clampi(int(ctr.y) + dy, 0, img.get_height() - 1)
+				var c: Color = img.get_pixel(ix, iy)
+				var d: float = sqrt(float(dx * dx + dy * dy))
+				if d >= R_IN and d <= R_OUT:
+					ring_acc += Vector3(c.r, c.g, c.b)
+					ring_n += 1
+				if float(dx * dx + dy * dy) <= R_ICON * R_ICON:
+					lums.append(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b)
+					offs.append(Vector2i(dx, dy))
+		if ring_n == 0 or lums.is_empty():
+			_ck("底栏第 %d 格的取样框取到像素" % (i + 1), false, "环或盘内没采到像素")
+			return
+		rings.append(ring_acc / float(ring_n))
+		# 墨 = 比**这一格自己的中位亮度**高 0.035 以上。用中位数而不是某个常数：
+		# 底栏底下是 3D 场景加一层心神遮罩，同一个 0.13 的盘在草地上读成 0.20、
+		# 在沥青上读成 0.09，写死一个阈值有一半的机位是错的。
+		#
+		# **阈值从排序后的表上取，掩码必须回到空间顺序上填。**第一版直接在
+		# `lums.sort()` 之后按 k 生成掩码，于是两格比的是"第 k 暗的像素对第 k 暗的
+		# 像素"——那比的是**亮度分布**，不是形状，五格各画各的却报出 0.014 的
+		# "形状差"。判据量错了东西的时候它不会红，它会安静地报一个很小的数。
+		lums.sort()
+		var med: float = lums[lums.size() / 2]
+		var ink := PackedByteArray()
+		ink.resize(lums.size())
+		for k in offs.size():
+			var o: Vector2i = offs[k]
+			var ix2: int = clampi(int(ctr.x) + o.x, 0, img.get_width() - 1)
+			var iy2: int = clampi(int(ctr.y) + o.y, 0, img.get_height() - 1)
+			var c2: Color = img.get_pixel(ix2, iy2)
+			var l2: float = 0.2126 * c2.r + 0.7152 * c2.g + 0.0722 * c2.b
+			ink[k] = 1 if l2 > med + 0.035 else 0
+		inks.append(ink)
+
+	var worst := ""
+	var bad := 0
+	var by_colour := 0
+	for i in inks.size():
+		for j in range(i + 1, inks.size()):
+			var cd: float = (rings[i] as Vector3).distance_to(rings[j] as Vector3)
+			var ink_i: PackedByteArray = inks[i]
+			var ink_j: PackedByteArray = inks[j]
+			var diff := 0
+			for k in ink_i.size():
+				if ink_i[k] != ink_j[k]:
+					diff += 1
+			var sd: float = float(diff) / float(ink_i.size())
+			if cd >= 0.05:
+				by_colour += 1
+			if cd < 0.05 and sd < 0.05:
+				bad += 1
+				worst += " %d/%d(色 %.3f 形 %.3f)" % [i + 1, j + 1, cd, sd]
+	_ck("底栏五格未收时两两分得开（颜色或形状至少有一条够）", bad == 0,
+			"分不开的有 %d 对：%s" % [bad, worst])
+	# 正对照。**只写上面那一条的话，一个把环画成纯灰的版本照样全绿**——
+	# 形状那一路还是十对全过。可推广的一条：并集里的每一路都得单独配一条
+	# "这一路真的在承重"的断言，否则它可以悄悄死掉而没人知道。
+	# 门槛取 3（实测 5）：要能抓住"环整条退成灰"（0 对），又留得住渲染上的浮动。
+	_ck("底栏五格的环真的在承重（靠颜色分开的 ≥3 对）", by_colour >= 3,
+			"实际 %d/10 对" % by_colour)
+
+
 func _arrow_in(label_text: String) -> String:
 	for a in ["↑", "↗", "→", "↘", "↓", "↙", "←", "↖"]:
 		if label_text.contains(a):
@@ -446,7 +574,8 @@ func _run() -> void:
 	_check_next_target_arrow()
 	_check_arrival_reachable(0)
 	_check_bike_on_screen()
-	await _snap("04_ride_骑行中")
+	var img_ride: Image = await _snap("04_ride_骑行中")
+	_check_fragbar_slots_coloured(img_ride)
 
 	# ---- 04a 暂停面板：唯一一处改过行数的地方 ----
 	# 画质档位往这一列里加了一个按钮和一行提示，而 VBox 装不下时**不报错**，

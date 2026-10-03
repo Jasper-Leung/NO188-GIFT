@@ -10,6 +10,10 @@ const FRAGMENT_COLORS = [
 
 const FragmentIconScript = preload("res://scripts/FragmentIcon.gd")
 
+## 未收那一格外面那圈**实心色盘**的宽度。定妆照 `_check_fragbar_slots_coloured()`
+## 量的就是它（半径 23~26.5），所以改这个数要连那边一起改。
+const RIM_W := 5.0
+
 var _slots = []
 var _collected = [false, false, false, false, false]
 var _hint_popup: Control = null
@@ -109,10 +113,41 @@ func _draw() -> void:
 			_draw_fragment_icon(ctr, i, col, 1.0)
 			_draw_visit_pips(ctr, r, i)
 		else:
-			var gray = Color(0.35, 0.35, 0.35, 0.55)
-			draw_circle(ctr, r, gray)
-			_draw_fragment_icon(ctr, i, gray, 0.6)
-			draw_string(ThemeDB.fallback_font, ctr + Vector2(-7, 6), "?", HORIZONTAL_ALIGNMENT_CENTER, -1, 18, Color(0.5, 0.5, 0.5))
+			# 未收。**原来这一格画的是：灰圆盘 + 同一个灰的图标 + 一个灰的问号**——
+			# 图标被问号整个盖住，五格于是读成"五个一模一样的灰方块里各有一个问号"。
+			# 玩家看不见自己在收集什么，只知道"还差 5 个"。
+			# 现在图标用它**自己那件的颜色**画（压暗，不发光、不给访问点的圈），
+			# 于是未收的时候五格就已经是五件不同的东西，"下一处"要去的那一格
+			# 认得出来。问号挪到圆的右下角当角标——它要说的是"还没拿到"，
+			# 不该压在"是什么"上面。
+			# 圆盘**不透明**、三路同值：底栏底下就是 3D 场景，半透明的盘会让图标
+			# 跟着底下的树冠/沥青漂——"这一格是云"在草地上和在沥青上读成两种颜色；
+			# 而三路同值是为了让"那点颜色"成为盘内唯一的颜色来源，
+			# 定妆照那条判据才量得到自己画的那一圈、量不到背景。
+			#
+			# 问号**只画角标这一个**。`.tscn` 里每个 Slot 底下原来还挂着一个
+			# `text = "？"` 的 Label 占位（收过之后才被 `_process` 换成碎片名），
+			# 于是屏上同时有两个问号：一个在盘心、一个在名字那一行。占位清空了，
+			# Label 留着——它就是收过之后显示碎片名的那一个。
+			var col0: Color = FRAGMENT_COLORS[i]
+			# 外圈那 5px 的**实心色盘**用的是**自己那件的颜色**。图标本身只有
+			# 1~2px 的细线，在 22px 的盘上是"凑近才认得出"的东西——五格于是仍然
+			# 读成五块一样的灰。这一圈是"扫一眼"那一路的信号：不用盯着看就知道
+			# 下一处要去的是哪一件。细线交给凑近看，色盘交给扫一眼看。
+			# 收过之后是外圈光晕 + 实心亮盘 + 满亮图标，两档不会互相读错。
+			#
+			# 画成**盘外一圈**而不是盘内一道细环，还有一层量图上的理由：
+			# 云是实心多边形、竹的梢伸到半径 25，两者都压得进盘内 19~21 那一圈，
+			# 于是"量环"量到的是图标而不是环——把环退回灰色它照样报"五格分得开"。
+			# 盘外 23~26.5 那一圈**没有一根图标笔画伸得进去**，量到的就只有环自己。
+			draw_circle(ctr, r + RIM_W, col0)
+			draw_circle(ctr, r, Color(0.13, 0.13, 0.13, 1.0))
+			_draw_fragment_icon(ctr, i, col0, 0.75)
+			var badge: Vector2 = ctr + Vector2(r * 0.62, r * 0.62)
+			draw_circle(badge, 9.0, Color(0.10, 0.10, 0.11, 0.95))
+			draw_arc(badge, 9.0, 0.0, TAU, 20, Color(0.72, 0.70, 0.64, 0.9), 1.2)
+			draw_string(ThemeDB.fallback_font, badge + Vector2(-9, 6), "?",
+					HORIZONTAL_ALIGNMENT_CENTER, 18, 16, Color(0.86, 0.84, 0.78))
 
 
 ## 圆外面那排小点：这件碎片到访了几次。
