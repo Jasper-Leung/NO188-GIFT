@@ -20,12 +20,12 @@ var _radius := 200.0
 var _rings := 4
 
 const CELL := 32.0
-const DENSITY := 5.0
+const DENSITY := 2.2
 const RING_DIST := [30.0, 70.0, 130.0]
-const RING_DENSITY := [DENSITY, 2.5, 1.0, 0.35]
+const RING_DENSITY := [DENSITY, 1.8, 1.0, 0.35]
 const RING_SCALE := [1.0, 1.0, 1.8, 3.2]
 const RING_COUNT := 4
-const RING_CAP := [5120, 2560, 1024, 358]
+const RING_CAP := [2304, 2048, 1024, 358]
 const BUILD_LEAD := CELL * 0.70710678
 const POOL_MARGIN := 1.15
 const POOL_SLACK := 6
@@ -43,6 +43,40 @@ func _check(cond: bool, label: String) -> void:
 	else:
 		_failures += 1
 		print("[FAIL] ", label)
+
+
+## 上面那几组常量是**手抄的副本**，而它们量的是产品代码的预算曲线。
+## 副本和产品各改各的时候，这里会拿着旧的数去验新的代码——要么假红，
+## 要么更糟：两边恰好都"自洽"于是全绿。上一轮把 DENSITY 从 5.0 降到 2.2
+## 就撞上了：ring 1 手抄的 2.5 比产品里新的 ring 0（2.2）还密，于是报出来的是
+## 「环号越大产量越少」，而根因根本不在那条判据量的地方。
+## 所以这里当场从产品脚本的**求值后**常量表里读一遍对拍。
+## 放在 _check 之后：GDScript 不允许调用文件里更靠后才声明的函数。
+func _assert_consts_match_product() -> void:
+	var cmap: Dictionary = load("res://scripts/GrassScatter.gd").get_script_constant_map()
+	var pairs := {
+		"CELL": CELL, "DENSITY": DENSITY, "RING_COUNT": RING_COUNT,
+	}
+	for k in pairs:
+		_check(cmap.has(k) and is_equal_approx(float(cmap.get(k)), float(pairs[k])),
+			"副本常量 %s == 产品里的 %s" % [k, str(cmap.get(k))])
+	var arrays := {
+		"RING_DIST": RING_DIST, "RING_DENSITY": RING_DENSITY,
+		"RING_SCALE": RING_SCALE, "RING_CAP": RING_CAP,
+	}
+	for k in arrays:
+		_check(cmap.has(k), "产品里有 %s 这一组（防表名改了的空跑）" % k)
+		if not cmap.has(k):
+			continue
+		var prod: Array = cmap.get(k)
+		var mine: Array = arrays[k]
+		var same: bool = prod.size() == mine.size()
+		if same:
+			for i in prod.size():
+				if not is_equal_approx(float(prod[i]), float(mine[i])):
+					same = false
+					break
+		_check(same, "副本 %s == 产品里的 %s" % [k, str(prod)])
 
 
 func _initialize() -> void:
@@ -84,6 +118,8 @@ func _brute_dist_to_road(p: Vector2, centerlines: Array) -> float:
 
 func _run() -> void:
 	print("=== 草皮放置 / 流式 回归 ===")
+	print("\n---- 0. 这份副本和产品没漂 ----")
+	_assert_consts_match_product()
 	var TB = load("res://scripts/TerrainBuilder.gd")
 	var RB = load("res://scripts/RoadBuilder.gd")
 

@@ -289,3 +289,63 @@ func _section_doc() -> void:
 	_ck(tsum <= 1.5, "标题页过场没有回到三秒（%.2fs ≤ 1.5s）" % tsum, "%.2fs" % tsum)
 	_ck(doc.contains("%.2f" % tsum),
 			"文档里写的过场总长与代码一致", "代码算出来是 %.2fs" % tsum)
+
+	_doc_readme_section()
+
+
+## 5.5 README 也不许说谎 —— 上一节只对拍了设计文档，漏了评委真正先读的那两份
+##
+## 这一节是踩过一次的：`85aa0d6` 把顶栏的「已过 n/16 驿」改成不带分母的
+## 「已过 n 驿」（扩充驿站时不用再改文案），代码和 3D_RIDE_DESIGN.md 都跟着改了，
+## **两个 README 没改**——而 5.1~5.4 全在对拍设计文档，于是"设计对、代码对、
+## README 错、回归全绿"。和 `verify_asphalt_shader.gd` 开头记的
+## `edge_line_color` 是同一族：文档和代码各说各的，两边都绿。
+##
+## 为什么不干脆把 README 也并进 5.1：README 是**对外**的（评委先读它），
+## 它的错比设计文档的错更贵；而它和中英两套文案的关系是另一类问题。
+## 所以单开一节，只钉"玩家真的会去核对的那几件事"。
+func _doc_readme_section() -> void:
+	print("\n---- 5.5 README 也不许说谎 ----")
+	var readmes := {
+		"res://README.md": "README.md",
+		"res://README.en.md": "README.en.md",
+	}
+	for path in readmes:
+		var label: String = readmes[path]
+		if not FileAccess.file_exists(path):
+			_ck(false, "%s 存在" % label)
+			continue
+		var txt := FileAccess.get_file_as_string(path)
+
+		# 5.5.1 顶栏驿数的写法。分母已经拿掉了（驿数会变，抄死分母就得回来改文案），
+		# 而两份 README 到本轮为止都还写着带分母的旧格式。
+		for lie in ["已过 n/16 驿", "n/16 驿", "已过 0/16 驿"]:
+			_ck(not txt.contains(lie),
+				"%s 没有把顶栏驿数说成带分母的「%s」" % [label, lie])
+		# 反向：得**真的**写了驿数这件事，不能因为删掉错的就不写了。
+		_ck(txt.contains("驿") or txt.contains("station"),
+			"%s 说明了顶栏那个数字是驿数" % label)
+
+		# 5.5.2 188 不是一个距离。第一版这里写的是"README 里不许出现 km 字样"，
+		# 跑出来两条红——**是判据错了，不是 README 错了**：两份 README 都故意
+		# 引用了旧的「188 公里环线 / 188 km」说法来当场拆穿它，而那恰恰是这个
+		# 项目最好的两段文字之一。子串匹配分不清"声称"和"引用来反驳"。
+		# 所以改成钉**正面那句话**：README 必须明确否认 188 是里程。
+		if label == "README.md":
+			_ck(txt.contains("它不是里程"),
+				"README.md 明确写了 188 不是里程（正面断言，不靠子串排除）")
+		else:
+			_ck(txt.contains("It is not a distance"),
+				"README.en.md explicitly says 188 is not a distance")
+
+		# 5.5.3 五座碎片站的站名，两份 README 都得和 road_data 逐字相同。
+		# 这一条比顶栏格式更值钱：README 里有那张对照表，评委就是照着它
+		# 认这五件乐事的，它错了等于整个作品介绍的第一屏就错了。
+		var slots: Array = _rd.FRAGMENT_SLOT_STATION_IDX
+		for i in slots.size():
+			var s: Dictionary = _rd.stations[int(slots[i])]
+			var name_zh := str(s.get("name", ""))
+			# README.md 是中文的，只要求中文名；README.en.md 要求英文名。
+			var want: String = name_zh if label == "README.md" else str(s.get("name_en", ""))
+			_ck(want != "" and txt.contains(want),
+				"%s 里有碎片站名「%s」" % [label, want])

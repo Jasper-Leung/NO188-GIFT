@@ -47,6 +47,82 @@ static func area_rect(w: float, h: float) -> Rect2:
 			w * AREA_SIZE_FRAC, h * AREA_SIZE_FRAC)
 
 
+## 进度条的几何。**抽成常量**的原因不是整洁：操作提示行的落位要从**量出来的**
+## 图形下缘和条上沿之间那段空白里取，而那个 y 分数要是只写在画笔里，
+## 提示和条迟早各按各的走。
+const BAR_Y_FRAC := 0.88
+const BAR_W_FRAC := 0.5
+const BAR_H := 16.0
+
+## 操作提示行（"方向键 / WASD 挪光标 · 按住空格落笔 · ESC 取消"）。
+const HINT_FONT := 20
+## 行盒高。比字号高一点，容得下字形的上下伸部——`draw_string` 的 position.y
+## 是**基线**不是行盒顶，量行盒量不出字形有没有探出去。
+const HINT_LINE_H := 26.0
+## 离前后两样东西各留多少空。
+const HINT_GAP := 12.0
+
+
+## 某个视口下要描的那条轨迹（屏幕坐标）。纯函数：`_build_path_world()` 和
+## 回归量的是同一个，抄一份算式的话改画不动测、测会一直绿。
+static func path_for(view: Vector2) -> PackedVector2Array:
+	var outline := cloud_outline(CLOUD_CIRCLES, OUTLINE_SAMPLES, FLAT_Y)
+	var board := area_rect(view.x, view.y)
+	var sc := fit_scale(outline, board.size)
+	# 按外接盒中心对位，不按原点。轮廓本身不对称（底被压平了），
+	# 绕原点缩放再摆到板心，云会整体偏上，板子下沿空出一条。
+	var mn := Vector2(INF, INF)
+	var mx := Vector2(-INF, -INF)
+	for p in outline:
+		mn = mn.min(p)
+		mx = mx.max(p)
+	var ctr := board.get_center() - (mn + mx) * (sc * 0.5)
+	var out := PackedVector2Array()
+	for p in outline:
+		out.append(ctr + p * sc)
+	return out
+
+
+## 轨迹的外接盒（屏幕坐标）。纯函数。
+static func path_bounds(path: PackedVector2Array) -> Rect2:
+	if path.size() < 2:
+		return Rect2()
+	var mn := Vector2(INF, INF)
+	var mx := Vector2(-INF, -INF)
+	for p in path:
+		mn = mn.min(p)
+		mx = mx.max(p)
+	return Rect2(mn, mx - mn)
+
+
+## 操作提示行的行盒（`text_w` 是这串字量出来的宽度，由调用方给）。
+##
+## 原来这行字落在 `h * 0.8`，而 720p 上要描的云下缘在 563px、那行字的基线
+## 在 576px——**玩家的字就横穿在要描的那条轮廓上**，描线时一直压着图形。
+## 所以判据是"两个 y 区间不相交"，不是"落在某个绝对位置"。
+##
+## 落位按顺序试，取第一个**整行都在屏内**的：
+##   ① 图形下缘与条上沿之间那段空白（题面要的那一段）
+##   ② 条与刻痕标签的下面
+##   ③ 板子上沿（title 之下）
+## ① 是常态。②③ 只在板子占满整屏高度的窄高视口上才轮得到——那时图形下缘
+## 离条太近，硬塞进去就压到条上，而压在条上和压在图形上是同一种毛病。
+static func hint_rect(w: float, h: float, path: PackedVector2Array, text_w: float) -> Rect2:
+	var tw: float = maxf(text_w, 1.0) + 4.0
+	var bar := MiniGameBar.rect(Vector2(w, h), BAR_Y_FRAC, BAR_W_FRAC, BAR_H)
+	var lab := MiniGameBar.tick_label_rect(bar, SUCCESS_THRESHOLD)
+	var cands: Array[float] = [
+		path_bounds(path).end.y + HINT_GAP,
+		lab.end.y + HINT_GAP,
+		area_rect(w, h).position.y - HINT_LINE_H - HINT_GAP,
+	]
+	for top in cands:
+		if top >= HINT_GAP and top + HINT_LINE_H <= h - HINT_GAP:
+			return Rect2((w - tw) * 0.5, top, tw, HINT_LINE_H)
+	# 三处都塞不下（视口比这一屏该有的样子还矮）：贴中间，别掉出屏外。
+	return Rect2((w - tw) * 0.5, maxf(HINT_GAP, (h - HINT_LINE_H) * 0.5), tw, HINT_LINE_H)
+
+
 ## 把轮廓铺进 `avail` 的缩放。**从外接盒量，不从某一个圆量**——
 ## 原来写死 `minf(size.x, size.y) / 300.0`，而这个 300 是按 720p 窗口
 ## 手调的：实测轮廓外接盒 130×67，1280×720 上缩放 2.4 得到 312px 宽，
@@ -106,19 +182,12 @@ func _on_resized() -> void:
 	queue_redraw()
 
 func _build_path_world() -> void:
+	# 走 `path_for()`：轨迹的算式只有一份，画笔和回归读同一个函数。
+	# 仍然是 Array 而不是 PackedVector2Array——`verify_mini_game.gd` 第 7 节
+	# 按 `var cpts: Array = cloud._path_world` 读它。
 	_path_world.clear()
-	var outline := cloud_outline(CLOUD_CIRCLES, OUTLINE_SAMPLES, FLAT_Y)
-	var sc := fit_scale(outline, area_rect(size.x, size.y).size)
-	# 按外接盒中心对位，不按原点。轮廓本身不对称（底被压平了），
-	# 绕原点缩放再摆到板心，云会整体偏上，板子下沿空出一条。
-	var mn := Vector2(INF, INF)
-	var mx := Vector2(-INF, -INF)
-	for p in outline:
-		mn = mn.min(p)
-		mx = mx.max(p)
-	var ctr := area_rect(size.x, size.y).get_center() - (mn + mx) * (sc * 0.5)
-	for p in outline:
-		_path_world.append(ctr + p * sc)
+	for p in path_for(size):
+		_path_world.append(p)
 	if _key_cursor == Vector2.ZERO:
 		_key_cursor = _path_world[0] if _path_world.size() > 0 else size * 0.5
 
@@ -205,7 +274,7 @@ func _draw() -> void:
 	# 进度条。**门槛要画在条上**：原来只把 75% 写在字里（"到 75% 算过"），
 	# 而条是一条填到头就赢的槽——玩家看着 40% 不知道那是还有一半的路，
 	# 还是差得远。刻痕跨在条外，门槛之后那一截底色也更亮。
-	var bar := MiniGameBar.rect(Vector2(w, h), 0.88, 0.5, 16.0)
+	var bar := MiniGameBar.rect(Vector2(w, h), BAR_Y_FRAC, BAR_W_FRAC, BAR_H)
 	MiniGameBar.draw_bar(self, bar, _drawn_ratio, SUCCESS_THRESHOLD,
 			Color(0.4, 0.8, 1.0), Color(0.2, 0.2, 0.2), Color(1, 1, 1, 0.55),
 			Color(1.0, 0.85, 0.35))
@@ -229,8 +298,19 @@ func _draw() -> void:
 	# 键盘光标：没有它键盘玩家看不见自己在哪儿，只能盲按方向键
 	draw_line(_key_cursor + Vector2(-9, 0), _key_cursor + Vector2(9, 0), Color(1, 0.85, 0.4), 2.0, true)
 	draw_line(_key_cursor + Vector2(0, -9), _key_cursor + Vector2(0, 9), Color(1, 0.85, 0.4), 2.0, true)
-	draw_string(ThemeDB.fallback_font, Vector2(0.0, h * 0.8),
-		Localization.t("mg_cloud_hint"), HORIZONTAL_ALIGNMENT_CENTER, w, 20, Color(0.75, 0.75, 0.8))
+	# 操作提示行。落位走 `hint_rect()`：原来它写死 `h * 0.8`，而 720p 上要描的
+	# 云下缘在 563px、这行字的基线在 576px——**字横穿在要描的那条轮廓上**。
+	# 宽度用 `get_string_size()` 量（`draw_string` 的宽度参数是**裁切宽度**，
+	# 写死一个 `w` 当居中宽度虽然碰巧不裁，但也量不出"这行字有多宽"）。
+	var hint_text: String = Localization.t("mg_cloud_hint")
+	var hint: Rect2 = hint_rect(w, h, PackedVector2Array(_path_world),
+			ThemeDB.fallback_font.get_string_size(hint_text,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, HINT_FONT).x)
+	# 基线，不是行盒顶：字形要从行盒顶往下长
+	draw_string(ThemeDB.fallback_font,
+			Vector2(hint.position.x, hint.position.y + ThemeDB.fallback_font.get_ascent(HINT_FONT)),
+			hint_text, HORIZONTAL_ALIGNMENT_LEFT, hint.size.x, HINT_FONT,
+			Color(0.75, 0.75, 0.8))
 
 
 func _gui_input(event: InputEvent) -> void:

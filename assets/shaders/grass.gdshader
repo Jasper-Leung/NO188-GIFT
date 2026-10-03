@@ -59,6 +59,20 @@ uniform float hue_jitter    : hint_range(0.0, 0.5) = 0.06;
 uniform float blade_width   : hint_range(0.002, 0.100) = 0.011;  // 卡片 UV 里的半宽
 uniform float width_floor   : hint_range(0.0, 3.0) = 0.70;      // 见 fragment 的注释
 
+// 昼夜染色。由 DayCycle 每帧推下来（GrassScatter.set_light）。
+//
+// 为什么草皮要单独接一次光，而地形/路面/水都不用：那一族的颜色要么走
+// PBR、要么已经有 DayCycle 的一层染色（FarRidge.set_tint / Water.set_tint），
+// 只有草皮是**整片写死的常量色**——blade_base / blade_tip / ground_color 三个
+// uniform 不随天色动。于是黄昏那一档：天空深红、路面近黑、远山暗粉，
+// 唯独草皮还是白天的饱和黄绿，是全屏最亮最艳的一块，读出来像自发光。
+//
+// light_tint 存的是**归一化**的太阳色（最大分量为 1），只带色相不带亮度；
+// 亮度全部交给 light_energy。两个分开是因为混在一个 Color 里的话，
+// "天变红"和"天变暗"会互相抵消掉一部分，红得不够、暗得也不够。
+uniform vec3 light_tint     : source_color = vec3(1.0, 1.0, 1.0);
+uniform float light_energy  : hint_range(0.0, 2.0) = 1.0;
+
 varying vec3 v_world;
 varying vec3 v_ground;
 varying vec3 v_card_n;
@@ -183,7 +197,7 @@ void fragment() {
 	vec3 col = mix(v_ground, blade, smoothstep(0.0, 0.22, v_vh));
 	col *= 1.0 + (v_seed_h - 0.5) * 2.0 * hue_jitter;
 
-	ALBEDO = col;
+	ALBEDO = col * light_tint * light_energy;
 	ROUGHNESS = 0.92;
 
 	// cull_disabled 下没有背面剔除，法线要自己翻向相机。

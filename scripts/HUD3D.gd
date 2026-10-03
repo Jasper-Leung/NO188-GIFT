@@ -441,6 +441,13 @@ func _setup_lvbi_toast() -> void:
 	_lvbi_toast.name = "LvbiToast"
 	_lvbi_toast.add_theme_font_size_override("font_size", 18)
 	_lvbi_toast.add_theme_color_override("font_color", Color(1.0, 1.45, 0.95, 1.0))
+	# 描边，不加底板。这条 toast 落在 SCRIM_H 之下（SCRIM_H=62，它在 86~112），
+	# 也就是**裸天空**上：黄昏那一档天是深红，薄荷色的字压在上面只剩 2:1 上下，
+	# 读出来是"红底上飘着一层白"。给它一块底板会和顶栏那排标签抢位置
+	#（x=14 那一带正是「碎片 5/5」），而描边不改任何布局——`verify_mood_mask`
+	# 钉的是标签的横坐标，描边一个像素都不动。
+	_lvbi_toast.add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.03, 0.92))
+	_lvbi_toast.add_theme_constant_override("outline_size", 5)
 	_lvbi_toast.anchor_left = 0.0
 	_lvbi_toast.anchor_right = 0.0
 	_lvbi_toast.offset_left = 14.0

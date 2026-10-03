@@ -50,7 +50,7 @@ the feeling comes from arriving, not from beating anything.
 | "188" means | In the game |
 | :--- | :--- |
 | **No.188** | the gift's serial number, printed on the postcard |
-| **16 stations** | the "驿" (post-stations) you pass; the HUD counts `n/16 驿` |
+| **16 stations** | the "驿" (post-stations) you pass; the HUD counts `n 驿` (no denominator — the station count can change, and a hard-coded one would have to be edited by hand every time) |
 
 **It is not a distance.** An earlier version of this README called it a "188 km
 loop", and that was simply wrong in a way players would catch in the first ten

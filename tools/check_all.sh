@@ -24,6 +24,21 @@
 # 一条断言都没打印的单独算 TIMEOUT/NO-ASSERT，不许算 PASS。
 set -u
 
+# ---- 先确认自己跑在真 bash 上，而不是 WSL ----
+#
+# Windows 上 `bash` 有两个完全不同的东西：`C:\Program Files\Git\bin\bash.exe`
+# （有 D: 盘、看得见项目）和 `C:\Windows\system32\bash.exe`（WSL，**看不见 D: 盘**）。
+# PATH 里 Git 一般排在前面，所以装了 Git 的机器上没事；没装 Git 的机器上
+# `bash tools/check_all.sh` 会走进 WSL，然后每一个 `tools/verify_*.gd` 都变成
+# "文件不存在"——而那台机器上的开发者看到的是"脚本跑完了，什么都没输出"。
+# 这里当场退出并说清楚，别让它静默地跑成一个空表。
+if [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSLENV:-}" ]; then
+	echo "这个 bash 是 WSL，看不见本机磁盘（项目在 Windows 盘上）。" >&2
+	echo "改用 PowerShell 版：  pwsh -File tools/check_all.ps1" >&2
+	echo "或者装一个 Git Bash 之后重试。" >&2
+	exit 3
+fi
+
 GODOT="${GODOT:-D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe}"
 TIMEOUT_S="${TIMEOUT_S:-240}"
 

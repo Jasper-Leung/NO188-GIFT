@@ -486,7 +486,7 @@ func _setup_day_cycle() -> void:
 		get_node_or_null("DirectionalLight3D") as DirectionalLight3D,
 		get_node_or_null("FillLight3D") as DirectionalLight3D,
 		get_node_or_null("WorldEnvironment") as WorldEnvironment,
-		_ridge, _water)
+		_ridge, _water, _grass_scatter)
 	_day_cycle.dusk_began.connect(_on_dusk_began)
 
 

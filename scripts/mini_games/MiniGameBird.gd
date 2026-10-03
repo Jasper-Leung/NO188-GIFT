@@ -32,17 +32,36 @@ var _choice_buttons: Array[Rect2] = []
 var _correct_choice: int = 0
 var _choice_options: Array[int] = []  # 选项对应的真实 bird_idx
 
+## 四张选项格的底色。它是"这只鸟认不认得出来"那把尺子，所以是常量而不是
+## 画笔里的一个字面量：回归量的必须是**画笔真的填的那一个颜色**。
+const CARD_BG := Color(0.22, 0.22, 0.27)
+
 const BIRD_COLS: Array[Color] = [
 	Color(0.55, 0.4, 0.25),
 	Color(0.3, 0.35, 0.55),
 	Color(0.9, 0.9, 0.85),
-	# 乌鸦是四只里唯一的深色，而选项格底色 0.22 也不再是原来的 0.15。
-	# 原来是 0.20 压在 0.15 上——1.3 倍的亮度差，那只鸦在图上几乎看不见，
-	# 而这一局问的就是"刚才那只是哪一只"，认不出形状就等于没有题面。
-	# 现在鸦压到 0.11：仍然是四只里最黑的一只（读得出"这是只乌鸦"），
-	# 又和底色拉开了两倍。
-	Color(0.11, 0.11, 0.14),
+	# 乌鸦是四只里唯一的深色，**而且必须继续是深色**——把它提亮它就不再是乌鸦，
+	# 玩家读出来的是"一只灰色的鸟"，题面就换了个问题。
+	# 原来它是 (0.11, 0.11, 0.14)，压在 CARD_BG 上 WCAG 只有 1.47:1，
+	# 也就是"黑底上的黑"：四只里认不出哪只是鸦，而这一局问的正是
+	# "刚才那只是哪一只"。现在抬到 0.17 档的**深炭灰**（比卡底暗、比另三只暗得多，
+	# 深色那一头读得出来），真正把它从卡底上分出来的是 `BIRD_RIM_COLS` 那圈浅描边。
+	Color(0.17, 0.17, 0.20),
 ]
+
+## 每只鸟的描边色（外圈那一道亮线）。**四只都有**，不是只给乌鸦：
+## 一屏四个选项、四个底色，描边是唯一一条"对四张卡一视同仁"的分界线，
+## 而"某一只身上有、另外三只身上没有"本身也是一条形状/颜色上的差别，
+## 记忆测试不该考这个。
+const BIRD_RIM_COLS: Array[Color] = [
+	Color(0.80, 0.70, 0.52),   # 麻雀：暖浅褐，和本体同一个色系但提上去一档
+	Color(0.66, 0.76, 0.95),   # 燕子：浅蓝
+	Color(0.99, 0.98, 0.92),   # 白鹭：比本体还亮的米白
+	Color(0.88, 0.89, 0.92),   # 乌鸦：**浅冷灰**——本体不能再亮，这是唯一能把
+								# 深炭灰从深藏青卡底上勾出来的办法
+]
+## 描边宽度（sc=1 的本地像素）。放大画在本体底下，所以画出来的那一圈是它的两倍。
+const RIM_W := 2.2
 
 ## 键盘选第 i 个选项。取消按钮是 _draw() 画的假按钮，键盘够不着，
 ## 所以键盘玩家原本唯一的出路是干等 World3D 的 30s 超时判 CANCELLED——
@@ -146,7 +165,7 @@ func _draw_choice_phase(w: float, h: float) -> void:
 		var by := start_y + (i / 2) * (btn_h * 0.6)
 		var r := Rect2(bx, by, btn_w, btn_h * 0.5)
 		_choice_buttons.append(r)
-		draw_rect(r, Color(0.22, 0.22, 0.27), true)
+		draw_rect(r, CARD_BG, true)
 		draw_rect(r, Color(0.7, 0.7, 0.7), false, 2)
 		var bird_idx: int = _choice_options[i]
 		# 0.38 不是随手挑的：选项格是 btn_h*0.5 高，白鹭那一只是竖着长出来
@@ -223,26 +242,161 @@ func _draw_bird_silhouette(bird_idx: int, c: Vector2, sc: float) -> void:
 	var col: Color = BIRD_COLS[bird_idx]
 	# 辅色往**亮**里去还是往**暗**里去，看这只鸟本身有多深。原先一律乘 0.74，
 	# 于是乌鸦身上的辅色（喙、脚、翅根）比身子还暗 0.11×0.74 = 0.08——
-	# 压在 0.22 的底色上彻底没了，那只鸦就只剩一团看不出形状的墨。
+	# 压在 CARD_BG 上彻底没了，那只鸦就只剩一团看不出形状的墨。
 	# 这不是配色偏好，是"辅色必须比本体更靠近底色以外的那一侧"。
 	var lum := col.r * 0.3 + col.g * 0.59 + col.b * 0.11
 	var shade: Color = col.lightened(0.34) if lum < 0.30 else col.darkened(0.26)
+	# **两遍**：先把每一笔放大 `RIM_W` 用描边色画一遍，再把本体压上去。
+	# 外露的那半圈就是描边。之所以用"放大"而不是"加线宽"：
+	# `draw_colored_polygon` 不收线宽参数，而"这只鸦在深卡上看不见"
+	# 恰恰是这一族里唯一不能靠线宽救的形状（本体比卡底还暗）。
+	# 两遍都必须走 `_poly` / `_oval`：`--headless` 根本不调 `_draw`，
+	# 这一族构造写错时无头回归全绿（见 `_poly` 那条注释里的 Vector2 坑）。
+	_paint_silhouette(bird_idx, c, sc, BIRD_RIM_COLS[bird_idx],
+			BIRD_RIM_COLS[bird_idx], RIM_W * sc)
+	_paint_silhouette(bird_idx, c, sc, col, shade, 0.0)
+
+
+## 按表走一遍剪影。`grow` 是**外扩的屏幕像素**（描边那遍传 `RIM_W * sc`，
+## 本体那遍传 0）；`accent` 是辅色（喙/翅根/脚）那一档颜色。
+## 拆成独立函数是因为两遍要遍历同一张表各画一次——把两遍写在一个循环里
+## 的话，第二遍会被第一遍的顺序问题带着走，而顺序正是辅色压在本体上那一层。
+func _paint_silhouette(bird_idx: int, c: Vector2, sc: float, col: Color,
+		accent: Color, grow: float) -> void:
 	for prim in BIRD_SHAPES[bird_idx]:
 		var a: Array = prim
+		var cc: Color = accent if (a[0] == "q" or a[0] == "l") else col
+		# 线宽本来是本地像素，而 grow 是屏幕像素，换算要除以 sc
+		var wg: float = grow * 2.0 / maxf(sc, 0.001)
 		match a[0]:
-			"o": draw_colored_polygon(_oval(c + Vector2(a[1], a[2]) * sc, sc, a[3], a[4]), col)
-			"c": draw_circle(c + Vector2(a[1], a[2]) * sc, a[3] * sc, col)
-			"p": draw_colored_polygon(_poly(c, sc, a.slice(1)), col)
-			"q": draw_colored_polygon(_poly(c, sc, a.slice(1)), shade)
+			"o": draw_colored_polygon(
+					_oval(c + Vector2(a[1], a[2]) * sc, sc, float(a[3]) + grow, float(a[4]) + grow), cc)
+			"c": draw_circle(c + Vector2(a[1], a[2]) * sc, (float(a[3]) + grow) * sc, cc)
+			"p", "q": draw_colored_polygon(
+					_grow_poly(_poly(c, sc, a.slice(1)), c, grow), cc)
 			"l": draw_line(c + Vector2(a[1], a[2]) * sc, c + Vector2(a[3], a[4]) * sc,
-					shade, a[5] * sc)
-			"L": draw_polyline(_poly(c, sc, a.slice(1, a.size() - 1)), col,
-					a[a.size() - 1] * sc, true)
+					cc, (float(a[5]) + wg) * sc)
+			"L": draw_polyline(_grow_poly(_poly(c, sc, a.slice(1, a.size() - 1)), c, grow),
+					cc, (float(a[a.size() - 1]) + wg) * sc, true)
+
+
+## 沿"离这只鸟中心的方向"把多边形每个顶点往外推 `grow` 像素。
+## 按中心缩放（`v * (1 + k)`）不行：喙在 x=+51、尾在 x=-45，离中心的距离差一倍，
+## 缩放出来的描边一头厚一头薄，而鸦那一头正好是它贴在卡底上认不出的那一头。
+func _grow_poly(pts: PackedVector2Array, c: Vector2, grow: float) -> PackedVector2Array:
+	if grow <= 0.0:
+		return pts
+	var out := PackedVector2Array()
+	for p in pts:
+		var v: Vector2 = p
+		var d: Vector2 = v - c
+		var l: float = d.length()
+		out.append(v if l <= 0.001 else v + d / l * grow)
+	return out
 
 ## 表本身的文字签名。只包含几何、不包含颜色，所以"四份签名两两不同"就等于
 ## "四只鸟真的长得不一样"——而这正是 draw_* 画出来之后无头下量不到的那件事。
 func silhouette_signature(bird_idx: int) -> String:
 	return str(BIRD_SHAPES[bird_idx])
+
+
+## 一只鸟的**外接盒**（sc=1 的本地坐标）。纯函数，不碰画笔。
+##
+## `silhouette_signature()` 只能证明"四串字两两不同"——可四串不同的字
+## 完全可以画出**几乎一样**的两只鸟（把雀的尾尖从 -37 挪到 -40 就是一对
+## 长度不同的签名，而两个色块在 44px 的选项格里读起来一模一样）。
+## 记忆游戏认的是形状，所以判据得落在**剪影自己的几何**上。
+## 线宽的一半也算进去：一条 `l` 画出的是有宽度的笔画，不算就少了一截。
+static func silhouette_bbox(bird_idx: int) -> Rect2:
+	var mn := Vector2(INF, INF)
+	var mx := Vector2(-INF, -INF)
+	for p in _silhouette_points(bird_idx):
+		var v: Vector2 = p
+		mn = mn.min(v)
+		mx = mx.max(v)
+	return Rect2(mn, mx - mn)
+
+
+## 剪影面积（sc=1 的本地平方像素）。纯函数。
+##
+## 面积是"这只鸟有多重"的量：外接盒可以一样大而一只塞满、另一只空一大半
+## （一个胖团 vs 一个细十字），而认鸟靠的正是这个差别。**部件面积相加**
+## 而不是去求并集：并集要用屏幕像素去重，量的是"重叠了几处"这种画法细节，
+## 而各部件的面积和与表是一一对应的，表错一处这里立刻动。
+static func silhouette_area(bird_idx: int) -> float:
+	var total := 0.0
+	for prim in BIRD_SHAPES[bird_idx]:
+		var a: Array = prim
+		match str(a[0]):
+			"o": total += PI * float(a[3]) * float(a[4])
+			"c": total += PI * float(a[3]) * float(a[3])
+			"p", "q": total += absf(_shoelace(a, 1, a.size()))
+			"l": total += float(a[5]) \
+					* Vector2(a[1], a[2]).distance_to(Vector2(a[3], a[4]))
+			"L": total += float(a[a.size() - 1]) * _flat_path_len(a, 1, a.size() - 1)
+	return total
+
+
+## 外接盒的长宽比（宽 ÷ 高）。竖着的白鹭和横着的燕子靠这个分开，
+## 而它们的外接盒面积可以一样大。
+static func silhouette_aspect(bird_idx: int) -> float:
+	var r: Rect2 = silhouette_bbox(bird_idx)
+	return r.size.x / maxf(r.size.y, 0.001)
+
+
+## 一只鸟剪影上的全部角点（含线宽的一半），按部件展开。
+## `L` 的最后一项是线宽不是坐标，所以点只到 `size - 1`。
+static func _silhouette_points(bird_idx: int) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for prim in BIRD_SHAPES[bird_idx]:
+		var a: Array = prim
+		var hw := Vector2.ZERO
+		# 坐标对数**按种类算**，不能拿 `a.size()` 推：椭圆后面跟的是两个半径、
+		# 线后面跟的是一个线宽，它们不是坐标对。第一版一律当成坐标，
+		# 于是 `["c", 15, -12, 12.0]` 会去读 a[4]（越界），而这只鸦的
+		# 外接盒量出来是 nan——判据于是报"nan% 差"，红得莫名其妙。
+		var npairs := 0
+		match str(a[0]):
+			"o":
+				hw = Vector2(a[3], a[4])
+				npairs = 1
+			"c":
+				hw = Vector2(a[3], a[3])
+				npairs = 1
+			"l":
+				hw = Vector2(a[5], a[5]) * 0.5
+				npairs = 2
+			"L":
+				hw = Vector2.ONE * float(a[a.size() - 1]) * 0.5
+				npairs = (a.size() - 2) / 2
+			_:
+				npairs = (a.size() - 1) / 2
+		for i in npairs:
+			var v := Vector2(a[1 + i * 2], a[2 + i * 2])
+			out.append(v - hw)
+			out.append(v + hw)
+	return out
+
+
+## 鞋带公式算多边形面积（绝对值）。表里给的是成对的标量，不是 Vector2 数组。
+static func _shoelace(a: Array, from: int, to: int) -> float:
+	var acc := 0.0
+	var n: int = (to - from) / 2
+	for i in n:
+		var p := Vector2(a[from + i * 2], a[from + i * 2 + 1])
+		var q := Vector2(a[from + ((i + 1) % n) * 2], a[from + ((i + 1) % n) * 2 + 1])
+		acc += p.x * q.y - q.x * p.y
+	return acc * 0.5
+
+
+## 折线各段长度之和（`L` 的面积就是它 × 线宽）。
+static func _flat_path_len(a: Array, from: int, to: int) -> float:
+	var total := 0.0
+	var n: int = (to - from) / 2
+	for i in range(1, n):
+		total += Vector2(a[from + (i - 1) * 2], a[from + (i - 1) * 2 + 1]) \
+				.distance_to(Vector2(a[from + i * 2], a[from + i * 2 + 1]))
+	return total
 
 ## 本地坐标 → 屏幕。表里那些字面量全是"sc=1 时"的像素，统一在这里乘一次，
 ## 免得每处都得记得写 * sc（漏一处就是一只大一倍的鸟）。

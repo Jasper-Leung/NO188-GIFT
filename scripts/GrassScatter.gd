@@ -34,7 +34,17 @@ extends Node3D
 ## 一格 5120 个候选就是 ~330 万次 GDScript 迭代，一个卡顿。
 
 const CELL := 32.0                     # 固定半径下 draw call 数 ∝ 1/CELL²，越大越少
-const DENSITY := 5.0                   # ring 0 的丛/m²；每丛 7 片叶 ≈ 35 叶/m²
+## ring 0 的丛/m²。**这一格是"地面还看不看得见"的开关，不是"草够不够密"的旋钮。**
+##
+## 原来的 5.0 配 10 片叶 ≈ 50 叶/m²，从 1.6m 的眼高看下去：脚边到 30m 环沿**一寸土
+## 都不露**，整片糊成一块均匀的绿，地形的起伏、远处的山脊线、站点的地基全部消失。
+## 一直以为它是"草太高"（着色器里 card_height 只有 0.085m，ring 0/1 最坏也就
+## 0.085×1.35×1.25≈0.14m，够不上"齐腰"）——**是覆盖率，不是高度**：低视角下
+## 一张 0.24m 宽的立牌挡住的是它身后一整条街，丛数一乘就把地盖死了。
+## 判据见 lookdev_grass.gd 的「近景地面还露不露得出来」一节：它量的是**近景
+## 竖直梯度占比**，而 190m 那张是同一指标的**正对照**（远处草皮本就该糊成一片，
+## 占比高）。把 5.0 写回去，那一条会红。
+const DENSITY := 2.2                   # ring 0 的丛/m²；每丛 10 片叶 ≈ 22 叶/m²
 
 ## 草皮的加载半径。200m 桌面上把近景之外的全景交给草皮，100m 是 Web/移动端
 ## 的上限——那边是 Compatibility/WebGL2，实例数直接等于顶点数，翻倍就是翻倍地疼。
@@ -55,12 +65,18 @@ const RADIUS_MOBILE := 100.0
 ## 改成把卡片放大 RING_SCALE 倍、密度按 1/scale² 掉，覆盖度不变而实例数变成
 ## 1/scale²。ring 3 的卡片有 1.1m 宽，在 165m 外约合 6 像素，正好糊成一层草色的绒。
 const RING_DIST := [30.0, 70.0, 130.0]         # 每层盘的外沿，最外一层到 RADIUS
-const RING_DENSITY := [DENSITY, 2.5, 1.0, 0.35]  # 丛/m²
+## 每层每格的丛数必须**随环号单调不增**：越远的环每平方米越疏，靠把卡片放大
+## 来补回覆盖度。ring 0 从 5.0 降到 2.2 之后，ring 1 原来的 2.5 就**比 ring 0
+## 还密**了——那不是"越远越疏"，是预算曲线翘了个头，verify_grass_scatter 的
+## 「环号越大产量越少」立刻报红。一并收成 1.8。
+const RING_DENSITY := [DENSITY, 1.8, 1.0, 0.35]  # 丛/m²
 const RING_SCALE := [1.0, 1.0, 1.8, 3.2]         # 卡片尺寸倍数
 const RING_COUNT := 4
 ## 每层一个格子的实例上限 = CELL²*RING_DENSITY[r]。instance_count 是槽位建好时
 ## 定死的，所以各层必须按自己的密度分开开，不能一层容量通吃。
-const RING_CAP := [5120, 2560, 1024, 358]
+## 跟着 DENSITY 一起收：ring 0 从 5120 降到 2304（实际产量 2252，留 2% 余量），
+## 留着 5120 不会报错，只是白占一倍显存——而"上限远大于产量"这种漂移没人查。
+const RING_CAP := [2304, 2048, 1024, 358]
 
 ## 提前量 = CELL/√2：格子是正方形，它自己最靠里的那丛草距中心只有 CELL/√2。
 ## 驻留判据若按 RADIUS 算，新格子里**最近**的草一出现就已经在淡出带中间，
@@ -398,6 +414,20 @@ func set_fade_range(start_m: float, end_m: float) -> void:
 func apply_ground_fade() -> void:
 	var r := _radius * _vis_factor
 	set_fade_range(minf(RING_DIST[RING_COUNT - 2], r * 0.65), r)
+
+
+## 昼夜染色。由 DayCycle 每帧调（见 grass.gdshader 里 light_tint/light_energy
+## 那组注释——为什么只有草皮要单独接一次光）。
+##
+## tint 传进来的是**归一化**的太阳色（最大分量为 1.0），这里再兜一次底：
+## 万一上游忘了归一化，一个 (1.0, 0.35, 0.18) 的深红会把草直接压成黑的，
+## 而那比"草太亮"更难查——所以宁可在这里钳住，也不要相信调用方。
+func set_light(tint: Color, energy: float) -> void:
+	var m := grass_material()
+	var mx: float = maxf(maxf(tint.r, tint.g), tint.b)
+	var t := tint if mx <= 0.0001 else Color(tint.r / mx, tint.g / mx, tint.b / mx)
+	m.set_shader_parameter("light_tint", t)
+	m.set_shader_parameter("light_energy", clampf(energy, 0.0, 2.0))
 
 
 ## 心神系数。只收**淡出带**，不动 `_radius`：驻留半径一动，环分界、槽位池子、

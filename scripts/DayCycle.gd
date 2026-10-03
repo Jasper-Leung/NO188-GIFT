@@ -123,6 +123,10 @@ var _fill: DirectionalLight3D = null
 var _env: Environment = null
 var _sky_mat: ProceduralSkyMaterial = null
 var _ridge: FarRidge = null
+## 草皮（scripts/GrassScatter.gd）。草皮的颜色是整片写死的常量，不走 PBR，
+## 也不像山线和水面那样已经挂了一层 set_tint —— 昼夜切换必须单独推一次，
+## 否则黄昏那一档它是全屏最亮的一块。setup() 的最后一个参数。
+var _grass: Node = null
 ## 三处水。参数默认 null 是为了让老的调用点（工具脚本）不用跟着改，
 ## 而"忘了传水"的表现是黄昏档的水仍然亮着——`set_tint` 里那个 null 判断
 ## 就是为它留的。
@@ -140,11 +144,12 @@ var _ready_done := false
 ## 不在这里 get_node("../…") —— 万一以后这节点被挪进别的层级，跨层找节点
 ## 会在运行时报一串与本文件无关的 null。
 func setup(sun: DirectionalLight3D, fill: DirectionalLight3D, world_env: WorldEnvironment,
-		ridge: FarRidge, water: Node3D = null) -> void:
+		ridge: FarRidge, water: Node3D = null, grass: Node = null) -> void:
 	_sun = sun
 	_fill = fill
 	_ridge = ridge
 	_water = water
+	_grass = grass
 	if _sun == null or world_env == null or world_env.environment == null:
 		push_warning("DayCycle.setup(): 缺主光或环境，昼夜切换不会发生")
 		return
@@ -278,6 +283,30 @@ func _apply(t: float) -> void:
 		_ridge.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
 	if _water != null:
 		_water.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
+	if _grass != null:
+		_apply_grass_light(t)
+
+
+## 草皮的昼夜染色。草皮是整片写死的常量色，不走上面那几套（有 PBR 的、
+## 有 set_tint 的），所以必须单独推一次——否则黄昏那一档草皮是全屏最亮的一块。
+##
+## 两个量分开算：色相从**太阳色**取（归一化后不带亮度），亮度从太阳能量与
+## 环境光能量一起算。合成一个 Color 再插值是错的——"天变红"和"天变暗"会
+## 互相抵消，红得不够、暗得也不够，最后还是一块亮黄绿。
+##
+## 亮度以白昼那一档为 1.0，所以 t=0 时这个系数必须精确等于 1，
+## 否则"按开始到第一次昼夜切换之间草皮被悄悄调过"这种漂移没人查得到。
+func _apply_grass_light(t: float) -> void:
+	var sun_col: Color = _sun.light_color if _sun != null else Color.WHITE
+	var sun_e: float = _sun.light_energy if _sun != null else 0.0
+	var amb_e: float = _env.ambient_light_energy if _env != null else 0.0
+	var day_e: float = float(_day.get("sun_energy", 1.0)) \
+		+ float(_day.get("amb_energy", 0.0))
+	var e: float = (sun_e + amb_e) / maxf(day_e, 0.0001)
+	# 下限不是 0.35：草皮在大��里是**唯一**还在的东西，压到接近零会让黄昏的
+	# 路两侧读成两道黑边。实测这一档落在 0.55~0.6 之间，配上偏红的 tint
+	# 就已经是"暮色里的草"而不是"荧光棒"。
+	_grass.set_light(sun_col, clampf(e, 0.35, 1.0))
 
 
 ## 白昼那一档的原始值。给回归读（"t=0 时场景没被动过"这条只有它能量）。

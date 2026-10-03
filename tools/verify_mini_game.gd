@@ -186,6 +186,12 @@ func _wcag_lum(c: Color) -> float:
 	var b: float = lin.b
 	return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
+
+## 两个量差得有多开。**相对差而不是绝对差**：包围盒 96px 和 88px 在 44px 的
+## 选项格里是"一样宽"，而 96px 和 30px 不是。
+func _rel_diff(a: float, b: float) -> float:
+	return absf(a - b) / maxf(maxf(absf(a), absf(b)), 0.001)
+
 func _initialize() -> void:
 	var layer := CanvasLayer.new()
 	root.add_child(layer)
@@ -306,6 +312,119 @@ func _initialize() -> void:
 	_check(not tea_hint.contains("失败") and not tea_hint.to_lower().contains("fail"),
 			"茶：提示不许承诺失败，实际「%s」——机制是退回零" % tea_hint)
 	_check(tea._done == false, "茶：松手没有直接判成功")
+	# 6a-1. 壶里的水位量得到吗？
+	#
+	# 这一屏除进度条之外**唯一的**反馈就是壶里那层水，而它原来是画笔里一行
+	# 算式（`pot_c.y + ry*0.86 - 2*ry*0.86*fill`）。`--headless` 根本不调 `_draw`，
+	# 于是"注水时壶里真的有水在涨""水是贴着壶壁涨的"两件事都没人能断言——
+	# 把它抽成 `water_top_frac()` / `water_line_y()` 之后，量的是**壶身全高的
+	# 几成**，和壶画多大无关。
+	var tea_script: Object = load(GAMES[10])
+	var half: float = tea_script.water_top_frac(0.5)
+	_check(half >= 0.45 and half <= 0.55,
+		"茶：注水到一半时水位线落在壶身 %.0f%% 高处（0.45~0.55）" % (half * 100.0))
+	# 单调不减：水位不许自己往下退。而"松手退回零"是 `_hold_time` 清零，
+	# 画笔读的是同一个 fill —— 判据顺手把那件事也钉住了。
+	var wmono := true
+	var wstrict := true
+	var wprev: float = tea_script.water_top_frac(0.0)
+	for s in range(1, 11):
+		var wf: float = tea_script.water_top_frac(float(s) / 10.0)
+		if wf < wprev - 0.0001:
+			wmono = false
+		if wf <= wprev:
+			wstrict = false
+		wprev = wf
+	_check(wmono, "茶：壶内水位单调不减（0%→100% 十个采样点）")
+	_check(wstrict, "茶：注水时水位真的在涨，不是十个采样点同一个数")
+	# 空壶压在壶底、满壶接近壶口，且两头都**在壶身之内**。
+	var w0: float = tea_script.water_top_frac(0.0)
+	var w1: float = tea_script.water_top_frac(1.0)
+	_check(w0 > 0.0 and w0 <= 0.15 and w1 >= 0.85 and w1 < 1.0,
+		"茶：空壶 %.0f%% / 满壶 %.0f%%，两头都还在壶身之内" % [w0 * 100.0, w1 * 100.0])
+	# 画面坐标那一层：水面 y 必须跟着壶一起缩放，壶画大了水面不许跑到壶外。
+	# 壶的几何走 `pot_center()` / `pot_scale()` / `POT_RY`——**和画笔同一个函数**，
+	# 回归里自己再抄一份 `minf(w,h)/400` 就是这个项目吃过的那类亏。
+	var water_geo_ok := true
+	var water_why: String = ""
+	for vp2 in [[1280.0, 720.0], [1920.0, 1080.0], [800.0, 1280.0]]:
+		# 逐项取出来再拼：GDScript 的 Vector2 **没有**单参数构造，
+		# `var tv: Vector2 = vp2`（vp2 是 Array）会抛 "Trying to assign value
+		# of type 'Array'…"——而那一抛把整个 _initialize 协程打断，`quit()`
+		# 再也走不到，于是脚本不报错地挂在那儿（第一版就这么挂了 4 分钟）。
+		var tv := Vector2(vp2[0], vp2[1])
+		var pc: Vector2 = tea_script.pot_center(tv)
+		# pot_scale 折进 POT_RY：壶半高 = POT_RY × min(宽,高)/400
+		var ry2: float = float(tea_script.POT_RY) * tea_script.pot_scale(tv)
+		var y_lo: float = tea_script.water_line_y(pc, ry2, 0.0)
+		var y_mid: float = tea_script.water_line_y(pc, ry2, 0.5)
+		var y_hi: float = tea_script.water_line_y(pc, ry2, 1.0)
+		# 壶身竖直范围：心 ± ry
+		if not (y_hi < y_mid and y_mid < y_lo) \
+				or y_hi < pc.y - ry2 or y_lo > pc.y + ry2:
+			water_geo_ok = false
+			water_why = "%d×%d：水 %.0f/%.0f/%.0f，壶 %.0f..%.0f" % [int(tv.x), int(tv.y),
+				y_lo, y_mid, y_hi, pc.y - ry2, pc.y + ry2]
+	_check(water_geo_ok,
+		"茶：水面在壶身之内并随注水上移（%dx%d / %dx%d / %dx%d 三档）%s"
+		% [1280, 720, 1920, 1080, 800, 1280, water_why])
+	# 水和进度条**读同一个值**。原来两处各写一遍 `clampf(_hold_time / HOLD_DURATION…)`，
+	# 漏改一处就是"条满了壶还空着"，而同一屏上没有任何东西能指出这件事。
+	tea._hold_time = float(tea.HOLD_DURATION) * 0.5
+	var live_fill: float = tea.fill_fraction()
+	_check(absf(live_fill - 0.5) < 0.001,
+		"茶：按住一半时间时 fill_fraction() = %.2f" % live_fill)
+	_check(tea_script.water_top_frac(live_fill) >= 0.45
+			and tea_script.water_top_frac(live_fill) <= 0.55,
+		"茶：壶里的水读的就是那一个值（水位 %.0f%%）"
+		% (tea_script.water_top_frac(live_fill) * 100.0))
+	# 水汽：三颗随时间上浮、越飘越淡、一轮走完从壶口重新冒出来。
+	# 原来那三颗是画在原地不动的灰圆点、alpha 一路不变，读起来像壶上溅了
+	# 三滴脏水。而 headless 下一笔都不落盘，所以位置/半径/透明度都得在
+	# 纯函数里算，回归量纯函数、画笔调纯函数。
+	_check(int(tea_script.STEAM_COUNT) >= 3,
+		"茶：壶口冒着 %d 颗水汽" % int(tea_script.STEAM_COUNT))
+	var p0: Dictionary = tea_script.steam_puff(0, 0.0, 1.0)
+	var p1: Dictionary = tea_script.steam_puff(0, 0.25, 1.0)
+	var a0: float = float(p0["a"])
+	var a1: float = float(p1["a"])
+	_check(a0 > 0.0 and a1 > 0.0 and a1 < a0,
+		"茶：水汽越飘越淡（alpha %.3f → %.3f，0.25s 后）" % [a0, a1])
+	var up0: Vector2 = p0["pos"]
+	var up1: Vector2 = p1["pos"]
+	_check(up1.y < up0.y and (up0.y - up1.y) > 0.001,
+		"茶：水汽真的在上浮（y %.1f → %.1f，0.25s 走了 %.1f）"
+		% [up0.y, up1.y, up0.y - up1.y])
+	# 循环：正好飘完一轮（STEAM_SPAN / STEAM_RISE 秒）之后回到同一处。
+	# 不循环的话它就是一颗从壶口冒出来、飘到顶就不见了的点。
+	var period: float = float(tea_script.STEAM_SPAN) / float(tea_script.STEAM_RISE)
+	var sp0: Dictionary = tea_script.steam_puff(0, 0.0, 1.0)
+	var sp1: Dictionary = tea_script.steam_puff(0, period, 1.0)
+	_check((sp0["pos"] as Vector2).is_equal_approx(sp1["pos"] as Vector2)
+			and absf(float(sp0["r"]) - float(sp1["r"])) < 0.0001
+			and absf(float(sp0["a"]) - float(sp1["a"])) < 0.0001,
+		"茶：水汽飘完一轮（%.2fs）回到同一处，是循环不是一次性" % period)
+	# 三颗得是三颗：同相的话那就是同一个点画了三遍
+	# 位置和**相位**分开量：x 上那 ±16 的横向偏移本来就恒在（三个排开的口子），
+	# 只量 x 的话"三颗同相"照样全绿——而同相的三颗是同一缕烟画了三遍。
+	# 相位看的是同一时刻三颗的 alpha：错开相时它是一串 0.34 / 0.23 / 0.11。
+	var px: Array[float] = []
+	var palpha: Array[float] = []
+	for i in range(int(tea_script.STEAM_COUNT)):
+		var pxi: Dictionary = tea_script.steam_puff(i, 0.0, 1.0)
+		px.append((pxi["pos"] as Vector2).x)
+		palpha.append(float(pxi["a"]))
+	var px_distinct := {}
+	for v in px:
+		px_distinct[snappedf(v, 0.01)] = true
+	_check(px_distinct.size() == px.size(),
+		"茶：%d 颗水汽各在各的位置 x=%s（不是同一个点画三遍）"
+		% [px.size(), str(px)])
+	var pa_distinct := {}
+	for v in palpha:
+		pa_distinct[snappedf(v, 0.001)] = true
+	_check(pa_distinct.size() == palpha.size(),
+		"茶：三颗水汽错开相冒出来（同一时刻的 alpha %s，不是一起冒的）" % str(palpha))
 	if is_instance_valid(tea):
 		tea.queue_free()
 	await process_frame
@@ -394,6 +513,119 @@ func _initialize() -> void:
 		if (bird.BIRD_SHAPES[i] as Array).size() < 3:
 			empty += 1
 	_check(empty == 0, "禽：没有哪只鸟只剩一两笔（%d 只是空壳）" % empty)
+
+	# 6b-1. 四张卡上，每只鸟都读得出来吗？
+	#
+	# 乌鸦原来是 (0.11, 0.11, 0.14) 的纯黑压在 CARD_BG 上，WCAG 只有 1.47:1。
+	# 这是个"从四只里认出刚才那一只"的记忆游戏，而四只里有一只认不出来，
+	# 等于这一局的题面少了一条。
+	#
+	# 比值一律按 WCAG 公式真算（相对亮度 + 谁除以谁取 max/min），不是"看着差不多"。
+	# **量的是描边而不是本体**，理由要写在这里，否则下一个人会以为可以改回去：
+	# 四只的本体在**同一块卡底**上不可能四条一起过 3.0。相对亮度算出来是
+	# 白鹭 0.78 / 麻雀 0.155 / 燕子 0.107 / 乌鸦 0.025，卡底 0.041；
+	# 白鹭逼卡底 ≤ (0.78+0.05)/3 − 0.05 = 0.227，乌鸦逼卡底 ≥ 3(0.025+0.05) − 0.05
+	# = 0.136，而燕子(0.107)离乌鸦(0.025)只有 2.5:1 —— 卡底在 0.136~0.227
+	# 这个区间里，燕子对谁都到不了 3 倍。硬凑只有两条路：把乌鸦提亮
+	# （它就不再是乌鸦）或者把另外三只刷成米白（颜色就不再认人）。所以乌鸦
+	# 那一格过线的是描边，而"描边 vs 卡底"这一条对四张卡一模一样。
+	var card_bg: Color = bird.CARD_BG
+	var bg_lum: float = _wcag_lum(card_bg)
+	var rim_pass := 0
+	var rim_worst := INF
+	for i in range(4):
+		var rl: float = _wcag_lum(bird.BIRD_RIM_COLS[i])
+		var rc: float = (maxf(rl, bg_lum) + 0.05) / (minf(rl, bg_lum) + 0.05)
+		if rc >= 3.0:
+			rim_pass += 1
+		rim_worst = minf(rim_worst, rc)
+		_check(rc >= 3.0,
+			"禽：第%d张卡的描边对底色 %.1f:1（≥3.0，body %.3f）"
+			% [i + 1, rc, _wcag_lum(bird.BIRD_COLS[i])])
+	# 汇总一条：少印一行照样看得见，但"0 张卡过线"这种整体结论不该靠人加总。
+	_check(rim_pass == 4,
+		"禽：四张卡的描边全都过 3.0（%d/4，最差 %.1f:1）" % [rim_pass, rim_worst])
+
+	# 乌鸦**必须仍然是四只里最暗的那只**。把它提亮它就不再是乌鸦，
+	# 而"哪只是哪一只"是这一局的全部题面。
+	var blums: Array[float] = []
+	for i in range(4):
+		blums.append(_wcag_lum(bird.BIRD_COLS[i]))
+	var dark_idx := 0
+	for i in range(1, 4):
+		if blums[i] < blums[dark_idx]:
+			dark_idx = i
+	_check(dark_idx == 3,
+		"禽：最暗的仍然是乌鸦（第 %d 只，本体相对亮度 %.3f）" % [dark_idx + 1, blums[dark_idx]])
+	var next_dark := INF
+	for i in range(4):
+		if i != dark_idx:
+			next_dark = minf(next_dark, blums[i])
+	_check(blums[dark_idx] * 3.0 <= next_dark,
+		"禽：乌鸦压得住（本体 %.3f ≤ 次暗那只 1/3 = %.3f）"
+		% [blums[dark_idx], next_dark / 3.0])
+	# 描边还要和自己的本体分得开：描边和本体撞在一起的话，勾出来的还是那
+	# 一坨深炭灰，只是被描边的颜色又描了一遍。
+	var crow_sep: float = (maxf(blums[3], _wcag_lum(bird.BIRD_RIM_COLS[3])) + 0.05) \
+			/ (minf(blums[3], _wcag_lum(bird.BIRD_RIM_COLS[3])) + 0.05)
+	_check(crow_sep >= 3.0,
+		"禽：乌鸦的浅描边和它自己的深炭灰本体分得开 %.1f:1（≥3.0）" % crow_sep)
+	# 最亮的那一只不靠描边也得自己读得出来——它是四只里唯一本体就够亮的，
+	# 而"白鹭本来就是白的"是这屏的直觉，不该由描边替它撑着。
+	var light_idx := 0
+	for i in range(1, 4):
+		if blums[i] > blums[light_idx]:
+			light_idx = i
+	var light_c: float = (maxf(blums[light_idx], bg_lum) + 0.05) \
+			/ (minf(blums[light_idx], bg_lum) + 0.05)
+	_check(light_c >= 3.0,
+		"禽：最亮的那只（第 %d 只）本体对底色就有 %.1f:1（≥3.0）"
+		% [light_idx + 1, light_c])
+
+	# 四只鸟不只是"四串不同的字"，还得**认得出来**。
+	# `silhouette_signature()` 只证伪"两串字完全一样"：把雀的尾尖从 -37 挪到
+	# -40 就是一对不同的签名，而两个色块在 44px 的选项格里读起来一模一样。
+	# 判据落在剪影自己的几何上：每一对至少在 {包围盒宽, 包围盒高, 面积, 长宽比}
+	# 里的**两项**相对差 ≥ 12%。两项是必须的——只要有一项分得开，四只里就可以
+	# 混进一对"一高一矮同宽"的，而那正是"两只鸟长得像"的症状。
+	const DISTINCT := 0.12
+	var boxes: Array[Rect2] = []
+	var areas: Array[float] = []
+	var aspects: Array[float] = []
+	for i in range(4):
+		boxes.append(bird.silhouette_bbox(i))
+		areas.append(bird.silhouette_area(i))
+		aspects.append(bird.silhouette_aspect(i))
+	var pairs_ok := 0
+	for i in range(4):
+		for j in range(i + 1, 4):
+			var diffs: Array[float] = [
+				_rel_diff(boxes[i].size.x, boxes[j].size.x),
+				_rel_diff(boxes[i].size.y, boxes[j].size.y),
+				_rel_diff(areas[i], areas[j]),
+				_rel_diff(aspects[i], aspects[j]),
+			]
+			var far := 0
+			for d in diffs:
+				if d >= DISTINCT:
+					far += 1
+			if far >= 2:
+				pairs_ok += 1
+			_check(far >= 2,
+				"禽：第%d只和第%d只认得出来（四项里 %d 项差 ≥%.0f%%：宽 %.0f%% / 高 %.0f%% / 面积 %.0f%% / 长宽比 %.0f%%）"
+				% [i + 1, j + 1, far, DISTINCT * 100.0, diffs[0] * 100.0,
+				diffs[1] * 100.0, diffs[2] * 100.0, diffs[3] * 100.0])
+	_check(pairs_ok == 6, "禽：六对全都认得出来（%d/6）" % pairs_ok)
+
+	# 又是读源码文本那几条（和核 `MiniGameBackdrop.<THEME>` 同一个办法）：
+	# 上面量的是两张表和几个纯函数，**量不到画笔有没有真的用它们**——
+	# `--headless` 下一笔都不落盘，描边写进表里而画笔不调，图上还是那只
+	# 1.47:1 的黑鸦，而这一节全绿。
+	var birdsrc: String = FileAccess.get_file_as_string(GAMES[4])
+	_check(birdsrc.contains("_paint_silhouette(bird_idx, c, sc, BIRD_RIM_COLS[bird_idx],"),
+		"禽：画笔真的把描边那一遍画出来了（不是只把颜色写进表里）")
+	_check(birdsrc.contains("draw_rect(r, CARD_BG, true)"),
+		"禽：选项卡填的就是回归当尺子的那个 CARD_BG（不是另一个字面量）")
 
 	# 6f. 表里那一行多边形，展开出来到底是几个点？
 	# headless 下引擎根本不调 _draw，于是 _poly 里写错的东西一次都不会被执行：
@@ -825,6 +1057,88 @@ func _initialize() -> void:
 	_check(absf(bar.pip_gap(narrow, nb) / narrow.size.x - wide_frac) < 0.0001,
 			"竹：格缝占条宽 %.2f%%，换半屏宽还是 %.2f%%" % [wide_frac * 100.0,
 			bar.pip_gap(narrow, nb) / narrow.size.x * 100.0])
+
+	# 6h-2. 云：操作提示行不许压在要描的那朵云上。
+	#
+	# 「方向键 / WASD 挪光标 · 按住空格落笔 · ESC 取消」原来落在 `h * 0.8`，
+	# 而 720p 上要描的云下缘在 563px、那行字的基线在 576px——**玩家的字就横穿
+	# 在要描的那条轮廓的下缘上**，描线全程压着图形。定妆照上看得见，尺寸断言
+	# 全绿（框一直在屏内），所以判据量的是**两个 y 区间相交**，不是绝对位置。
+	#
+	# 轨迹走 `path_for()`：画笔和回归读同一个函数（下面那条读源码文本就是钉它），
+	# 否则这里量的是一条和屏上那条不一样的路径。
+	var cloud3: Object = load(GAMES[7])
+	var hint_txt: String = _loc.t("mg_cloud_hint")
+	var hint_need: Vector2 = ThemeDB.fallback_font.get_string_size(
+			hint_txt, HORIZONTAL_ALIGNMENT_LEFT, -1, cloud3.HINT_FONT)
+	var views: Array = [
+		Vector2(1280.0, 720.0), Vector2(1920.0, 1080.0), Vector2(1280.0, 1280.0),
+		Vector2(900.0, 1600.0), Vector2(1600.0, 900.0),
+	]
+	var hint_clear := 0
+	var hint_below := 0
+	var hint_inside := 0
+	var hint_offbar := 0
+	var last_hint: Rect2 = Rect2()
+	for vp3 in views:
+		var v3: Vector2 = vp3
+		var p3: PackedVector2Array = cloud3.path_for(v3)
+		var pb3: Rect2 = cloud3.path_bounds(p3)
+		var hr3: Rect2 = cloud3.hint_rect(v3.x, v3.y, p3, hint_need.x)
+		last_hint = hr3
+		var vb3: Rect2 = bar.rect(v3, cloud3.BAR_Y_FRAC, cloud3.BAR_W_FRAC, cloud3.BAR_H)
+		var y_lo3: float = maxf(pb3.position.y, hr3.position.y)
+		var y_hi3: float = minf(pb3.end.y, hr3.end.y)
+		var hit: bool = y_hi3 > y_lo3
+		if not hit:
+			hint_clear += 1
+		_check(not hit,
+			"云：%dx%d 提示行不压在要描的云上（云 %.0f..%.0f，提示 %.0f..%.0f）"
+			% [int(v3.x), int(v3.y), pb3.position.y, pb3.end.y,
+			hr3.position.y, hr3.end.y])
+		if hr3.position.y >= pb3.end.y:
+			hint_below += 1
+		if hr3.position.x >= 8.0 and hr3.position.y >= 8.0 \
+				and v3.x - hr3.end.x >= 8.0 and v3.y - hr3.end.y >= 8.0:
+			hint_inside += 1
+		var b_lo3: float = maxf(vb3.position.y, hr3.position.y)
+		var b_hi3: float = minf(vb3.end.y, hr3.end.y)
+		if b_hi3 <= b_lo3:
+			hint_offbar += 1
+	# 上面那五条是逐档视口的；这四条是整体结论，不该靠人加总。
+	_check(hint_below == views.size(),
+		"云：提示行在云的**下方**，不是躲到图形上面去（%d/%d 档）"
+		% [hint_below, views.size()])
+	_check(hint_inside == views.size(),
+		"云：提示行五档视口都在屏内且离边 ≥8px（%d/%d 档）"
+		% [hint_inside, views.size()])
+	_check(hint_offbar == views.size(),
+		"云：提示行也不压在进度条上（%d/%d 档）" % [hint_offbar, views.size()])
+	# `draw_string` 的宽度参数是**裁切宽度**（同族的坑在 6h 门槛标签上犯过一次），
+	# 而这行字改成了左对齐 + 量出来的宽度：框不够宽就把最后一个字切掉。
+	_check(last_hint.size.x >= hint_need.x,
+		"云：提示那行字放得下（框 %.0fpx，字要 %.0fpx）" % [last_hint.size.x, hint_need.x])
+	# 字形盒整个在行盒里。`draw_string` 的 position.y 是**基线**不是行盒顶——
+	# 量行盒量不出字形有没有探出去（同族第 6i 节那条）。
+	var hint_font: Font = ThemeDB.fallback_font
+	var glyph_h: float = hint_font.get_ascent(cloud3.HINT_FONT) \
+			+ hint_font.get_descent(cloud3.HINT_FONT)
+	_check(glyph_h <= cloud3.HINT_LINE_H,
+		"云：提示行的字形盒 %.0fpx 装得进行盒 %.0fpx" % [glyph_h, cloud3.HINT_LINE_H])
+	# 又是读源码文本那两条：上面量的是 `hint_rect()` 这个纯函数，量不到画笔
+	# 有没有去调它——把它调成 `h * 0.8` 的话几何全绿而图上那行字又压回云上。
+	_check(csrc.contains("var hint: Rect2 = hint_rect(w, h, PackedVector2Array(_path_world),"),
+		"云：画笔的落位走 hint_rect()（不是又写死一个 h*0.8）")
+	_check(not csrc.contains("Localization.t(\"mg_cloud_hint\"), HORIZONTAL_ALIGNMENT_CENTER, w, 20,"),
+		"云：提示行没有退回那个压在图形上的居中写死落位")
+	# 落笔位置也要取自那一行盒。上面那条量的是"整行调用在不在"，这一条量的是
+	# **位置从哪来**：把 `Vector2(0.0, h * 0.8)` 写回画笔，提示行就又压在云上了，
+	# 而两条文本断言都必须红——它们守的是同一件毛病的两半。
+	_check(csrc.contains("Vector2(hint.position.x, hint.position.y + ThemeDB.fallback_font.get_ascent(HINT_FONT)),"),
+		"云：提示行的落笔位置取自 hint_rect 给的那行盒（不是又写死一个 h*0.8）")
+	# 轨迹也只有一份：画笔和回归读同一个 path_for()
+	_check(csrc.contains("for p in path_for(size):"),
+		"云：画笔的轨迹走 path_for()（回归量的是同一个函数）")
 
 	# 6i. 取消按钮：它是最不费事的一个动作，却穿了一件警报红的衣服。
 	#
