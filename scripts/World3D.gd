@@ -95,6 +95,9 @@ var _boundary_intensity: float = 0.0
 ## 和 RoadSteles 一样用 preload，理由同上。
 const CrossingMarkRef = preload("res://scripts/CrossingMark.gd")
 var _crossing_mark: Node3D = null
+## 路肩外那道看得见的软边界（scripts/RoadVerge.gd）。preload，理由同上。
+const RoadVergeRef = preload("res://scripts/RoadVerge.gd")
+var _verge: Node3D = null
 ## 三处水（scripts/Water.gd）。preload 而不是 class_name，同 RoadSteles。
 const WaterRef = preload("res://scripts/Water.gd")
 var _water: Node3D = null
@@ -328,6 +331,16 @@ func _ready() -> void:
 	_crossing_mark.name = "CrossingMark"
 	add_child(_crossing_mark)
 	_crossing_mark.setup(_road_builder.get_road_data(), _terrain_builder)
+
+	# 路肩外那道看得见的软边界。**必须排在 _apply_boundary_force 用的是同一个
+	# SOFT_BOUND 上**：推力是按到中心线的距离算的，玩家看得见的提示也是按
+	# 那个距离画的，两边各抄一个 12.0 的话总有一边会先漂。传给 build() 的
+	# 就是下面 `_apply_boundary_force()` 读的那个常量，不存在第二份数字。
+	_verge = RoadVergeRef.new()
+	_verge.name = "RoadVerge"
+	add_child(_verge)
+	_verge.set_terrain_builder(_terrain_builder)
+	_verge.build(_road_builder.get_centerline(), SOFT_BOUND)
 
 	if GameManager.demo_mode:
 		# 演示模式跳过操作说明。评审已经知道怎么操作，而那一屏（连同它的
