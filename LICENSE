@@ -1,0 +1,29 @@
+MIT License
+
+Copyright (c) 2026 <著作权人待填>
+
+> **⚠️ 待填两处**：上面的年份与著作权人。
+> 本文件覆盖**本工程原创部分**（程序、世界几何、全部着色器、界面、音频、文本）。
+> **第三方资产不在此授权范围内**——字体受 SIL OFL 1.1 约束，
+> 自行车模型与 7 个 Tripo 生成模型的条款见 [`CREDITS.md`](CREDITS.md) §3 / §4，
+> 其中三项**尚未核实完毕**（见 [`PROVENANCE.md`](PROVENANCE.md)）。
+>
+> 本文件选用 MIT 是**待你确认的默认值**，不是既成决定——改它只需要换掉上面一行。
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

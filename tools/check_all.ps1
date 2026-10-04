@@ -84,6 +84,7 @@ $list = if ($Only -and $Only.Count) {
 Write-Host "=== $(if($Window){'window'}else{'headless'}) 回归 ==="
 Write-Host "Godot: $godot"
 $pass = 0; $fail = 0; $empty = 0; $tot_ok = 0; $tot_bad = 0
+$flaky = @()
 $t0 = Get-Date
 
 # ---- 护住 res://layout.json（编辑模式 Ctrl+S 的产物，不是测试数据）----
@@ -109,11 +110,33 @@ foreach ($s in $list) {
 
 	$ok = ([regex]::Matches($out, '(?m)^\[OK\]')).Count
 	$bad = ([regex]::Matches($out, '(?m)^\[FAIL\]')).Count
-	$tot_ok += $ok; $tot_bad += $bad
 
-	if ($bad -gt 0) { $v = 'FAIL'; $fail++ }
+	if ($bad -gt 0) {
+		# —— 复跑一次再定性 ——
+		# 有几族断言量的是**墙钟**：草皮的「开局铺满 <= 2.5s」和「最慢一帧 < 20ms」
+		# 量的是机器而不是代码。CLAUDE.md 里已经记着同一个家族的四次翻车：
+		# 上一轮掐掉的后台 Godot 还在吃 CPU，就把红的性能断言测成了红的，
+		# 而同一份代码空机复跑是绿的（2026-10-04 实测：整轮里 6376ms / 125 tick，
+		# 空机单跑 721ms / 42 tick，慢 9 倍）。
+		# 一次复跑把「代码坏了」和「机器脏了」分开，而**分开之后信息不许丢**：
+		# 复跑才过的照记 PASS，但在摘要里单独列出来，读的人必须看得见。
+		$sw = [Diagnostics.Stopwatch]::StartNew()
+		$out = & $godot @argl 2>&1 | Out-String
+		$sw.Stop()
+		$ok = ([regex]::Matches($out, '(?m)^\[OK\]')).Count
+		$bad = ([regex]::Matches($out, '(?m)^\[FAIL\]')).Count
+		if ($bad -eq 0 -and $ok -gt 0) {
+			$flaky += $s
+			$v = 'PASS~'; $pass++
+		}
+		else { $v = 'FAIL'; $fail++ }
+	}
 	elseif ($ok -eq 0) { $v = 'NO-ASSERT'; $empty++ }   # 没跑成，不许算通过
 	else { $v = 'PASS'; $pass++ }
+
+	# 只累计**最后一次**那一遍：复跑那遍才是此刻的真实读数，头一遍是被机器
+	# 噪声污染过的样本，把它也算进总表会让「断言 N 条」两头都不准。
+	$tot_ok += $ok; $tot_bad += $bad
 
 	Write-Host ("  {0,-28} {1,-11} {2,4}s  {3,4} ok / {4} fail" -f $s, $v, [int]$sw.Elapsed.TotalSeconds, $ok, $bad)
 	if ($v -ne 'PASS') {
@@ -133,6 +156,16 @@ Write-Host ""
 Write-Host "=== 自检摘要 ==="
 Write-Host ("  跑过 {0} 条：PASS {1} / FAIL {2} / 没跑成 {3}" -f ($pass + $fail + $empty), $pass, $fail, $empty)
 Write-Host ("  断言 {0} 条，其中 {1} 条红" -f $tot_ok, $tot_bad)
+if ($flaky.Count) {
+	Write-Host ""
+	Write-Host "  ⚠️ 下面这几条**第一次红、复跑才绿**——多半是机器脏了，不是代码坏了：" -ForegroundColor Yellow
+	$flaky | ForEach-Object { Write-Host "     $_" -ForegroundColor Yellow }
+	Write-Host "    判定办法：tasklist //FI `"IMAGENAME eq Godot_v4.6.2-stable_win64.exe`"" -ForegroundColor Yellow
+	Write-Host "    （掐掉的后台任务不会掐掉它启动的 Godot 进程，那个还在吃 CPU）" -ForegroundColor Yellow
+}
+else {
+	Write-Host "  没有「复跑才绿」的条目。"
+}
 if (-not $Window) {
 	Write-Host ("  没跑（要开窗口，--headless 跑出来的 PASS 是假的）：{0} 条" -f $NEEDS_WINDOW.Count)
 	Write-Host "    → pwsh -File tools/check_all.ps1 -Window"

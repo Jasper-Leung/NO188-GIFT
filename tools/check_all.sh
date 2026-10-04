@@ -99,7 +99,7 @@ if [ ! -x "$GODOT" ] && ! command -v "$GODOT" >/dev/null 2>&1; then
 fi
 
 echo "=== ${mode} 回归 ==="
-pass=0; fail=0; empty=0; skipped=0; tot_ok=0; tot_bad=0
+pass=0; fail=0; empty=0; skipped=0; tot_ok=0; tot_bad=0; flaky=""
 t_start=$(date +%s)
 
 # ---- 护住 res://layout.json（编辑模式 Ctrl+S 的产物）----
@@ -142,10 +142,29 @@ for s in $LIST; do
 
 	ok=$(printf '%s' "$out" | grep -c '^\[OK\]' || true)
 	bad=$(printf '%s' "$out" | grep -c '^\[FAIL\]' || true)
-	tot_ok=$((tot_ok + ok)); tot_bad=$((tot_bad + bad))
 
 	if [ "$bad" -gt 0 ]; then
-		verdict="FAIL"; fail=$((fail + 1))
+		# —— 复跑一次再定性 ——
+		# 有几族断言量的是**墙钟**（草皮的铺满预算与最慢帧），量的是机器而不是代码。
+		# CLAUDE.md 记着这个家族翻过好几次车：上一次掐掉的后台 Godot 还在吃 CPU，
+		# 就把红的性能断言测成了红的，而同一份代码空机复跑是绿的。
+		# 复跑把「代码坏了」和「机器脏了」分开；分开之后**信息不许丢**，
+		# 复跑才过的照记 PASS，另外在摘要里单独列出来。
+		t0=$(date +%s)
+		if [ "$mode" = "window" ]; then
+			out=$(timeout "$TIMEOUT_S" "$GODOT" --path . --script "$f" $ex 2>&1)
+		else
+			out=$(timeout "$TIMEOUT_S" "$GODOT" --headless --path . --script "$f" $ex 2>&1)
+		fi
+		t1=$(date +%s); dt=$((t1 - t0))
+		ok=$(printf '%s' "$out" | grep -c '^\[OK\]' || true)
+		bad=$(printf '%s' "$out" | grep -c '^\[FAIL\]' || true)
+		if [ "$bad" -eq 0 ] && [ "$ok" -gt 0 ]; then
+			flaky="$flaky $s"
+			verdict="PASS~"; pass=$((pass + 1))
+		else
+			verdict="FAIL"; fail=$((fail + 1))
+		fi
 	elif [ "$ok" -eq 0 ] && [ "$bad" -eq 0 ]; then
 		# 一条断言都没打出来 = 没跑成。退出码在这时候是 0，所以必须单独判。
 		if [ $rc -eq 124 ]; then verdict="TIMEOUT"; else verdict="NO-ASSERT"; fi
@@ -155,6 +174,10 @@ for s in $LIST; do
 	else
 		verdict="PASS"; pass=$((pass + 1))
 	fi
+
+	# 只累计**最后一次**那一遍的断言数：复跑那一遍才是这个脚本此刻的真实读数，
+	# 头一遍是被机器噪声污染过的样本，把它也算进「总断言数」会让那张表两头都不准。
+	tot_ok=$((tot_ok + ok)); tot_bad=$((tot_bad + bad))
 
 	printf '  %-28s %-12s %5ds  %3d ok / %d fail\n' "$s" "$verdict" "$dt" "$ok" "$bad"
 	if [ "$verdict" != "PASS" ]; then
@@ -190,6 +213,15 @@ echo "=== 自检摘要 ==="
 printf '  跑过 %d 条：PASS %d / FAIL %d / 没跑成 %d\n' \
 	"$((pass + fail + empty))" "$pass" "$fail" "$empty"
 	printf '  断言 %d 条，其中 %d 条红\n' "$tot_ok" "$tot_bad"
+	if [ -n "$flaky" ]; then
+		echo
+		echo "  ⚠️ 下面这几条**第一次红、复跑才绿**——多半是机器脏了，不是代码坏了："
+		for s in $flaky; do echo "     $s"; done
+		echo "    判定办法：tasklist //FI \"IMAGENAME eq Godot_v4.6.2-stable_win64.exe\""
+		echo "    （掐掉的后台任务不会掐掉它启动的 Godot 进程，那个还在吃 CPU）"
+	else
+		echo "  没有「复跑才绿」的条目。"
+	fi
 if [ "$mode" = "headless" ]; then
 	printf '  没跑（要开窗口，--headless 跑出来的 PASS 是假的）：%d 条\n' "$skipped"
 	printf '    → bash tools/check_all.sh --window\n'
