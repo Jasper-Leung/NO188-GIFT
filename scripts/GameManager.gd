@@ -7,6 +7,15 @@ extends Node
 
 const JIA_QIN = "佳禽"
 const SAVE_PATH := "user://gift188.cfg"
+## 存档是**原子写**的：先落到临时文件，再换名盖掉正本，最后把换名之前
+## 上一份好的复制成 `.bak`。三步的顺序不能挪 —— 换名在 Windows 上会直接
+## 擦掉目标，所以备份必须抢在它前面；而临时文件写完之前正本一个字都不动。
+## 原来直接 `cfg.save(SAVE_PATH)`，崩溃/断电/Web 上关标签页会把它截断成
+## 半份，而 ConfigFile 对**截断、纯垃圾、空文件一律返回 OK**（实测，
+## 见 tools/verify_save_robustness.gd 第 1 节）—— 于是读档"成功"、版本号
+## 取到 0、走 `_clear_save()` 把玩家整趟行程删掉。
+const SAVE_TMP := "user://gift188.cfg.tmp"
+const SAVE_BAK := "user://gift188.cfg.bak"
 const SAVE_VERSION := 3
 ## 目标里程（虚构的环形路线长度,用于 HUD 进度显示;纯创意数值,不指涉任何现实道路）
 const TOTAL_ROUTE_KM := 188.0
@@ -550,53 +559,145 @@ func _save_game() -> void:
 		"seen_stations": seen_stations, "mood": mood, "seen_villain": seen_villain,
 		"prologue_done": prologue_done, "ending_id": ending_id,
 	}))
-	if cfg.save(SAVE_PATH) != OK:
-		push_warning("存档写入失败: %s" % SAVE_PATH)
+	# 1) 新的内容先落到临时文件。这一步失败的话正本一个字都不动。
+	if cfg.save(SAVE_TMP) != OK:
+		push_warning("存档写入失败: %s" % SAVE_TMP)
+		return
+	# 2) 换名会擦掉目标，所以先把正本（上一份已知是好的）复制成 .bak。
+	#    没有这一步，"正本被截断"就等于"整趟行程没了"，因为没有第二份可退。
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.copy_absolute(SAVE_PATH, SAVE_BAK)
+	# 3) 换名盖掉正本。同盘换名在 NTFS / ext4 上是原子的，崩在中间也只会
+	#    停在"旧的"或"新的"这一边，不会停在半份上。
+	if DirAccess.rename_absolute(SAVE_TMP, SAVE_PATH) != OK:
+		push_warning("存档换名失败: %s" % SAVE_PATH)
+		if not FileAccess.file_exists(SAVE_PATH):
+			# 正本被搬走又没搬回来 —— 宁可退回临时那份，也别留一个空的正本
+			DirAccess.copy_absolute(SAVE_TMP, SAVE_PATH)
+		DirAccess.remove_absolute(SAVE_TMP)
 
 
-func _load_save() -> void:
-	var cfg = ConfigFile.new()
-	if cfg.load(SAVE_PATH) != OK:
-		return
-	var ver := int(cfg.get_value("game", "version", 0))
-	if ver != SAVE_VERSION:
-		_clear_save()   # v1 旧存档直接清除；新版本从头开始
-		return
-	var data: String = str(cfg.get_value("game", "collected", ""))
-	if data != "":
-		for entry in data.split(","):
-			var kv := entry.split(":")
-			if kv.size() == 2:
-				var st_idx := kv[0].to_int()
-				var cnt := kv[1].to_int()
-				collected[st_idx] = cnt
+## 读一份存档。**返回 false = 这份文件不能信**，调用方据此退回备份或重来。
+##
+## 注意这里**不看 `ConfigFile.load()` 的返回值**：实测它对截断、纯垃圾、
+## 空文件一律返回 OK（tools/verify_save_robustness.gd 第 1 节钉着这三条），
+## 所以"没报错"什么都不能证明。判据只能是"版本号对得上、而且 economy
+## 那一段真的解得出字典" —— 自己写出来的存档必定两样都满足。
+func _try_load_from(path: String) -> bool:
+	if not FileAccess.file_exists(path):
+		return false
+	var cfg := ConfigFile.new()
+	cfg.load(path)
+	if int(cfg.get_value("game", "version", 0)) != SAVE_VERSION:
+		return false   # v1/v2 旧存档：照旧从头开始，但让调用方先试备份
+	var blob = JSON.parse_string(str(cfg.get_value("game", "economy", "")))
+	if not (blob is Dictionary):
+		return false
+	collected = _sanitise_collected(str(cfg.get_value("game", "collected", "")))
 	progress_km = clampf(float(cfg.get_value("game", "progress_km", 0.0)), 0.0, TOTAL_ROUTE_KM)
 	onboarding_shown = int(cfg.get_value("game", "onboarding_shown", 0)) != 0
-	# v3: economy 块缺失（老存档已按版本号清掉）或损坏时保留默认值，绝不抛错
-	var blob = JSON.parse_string(str(cfg.get_value("game", "economy", "")))
-	if blob is Dictionary:
-		lvbi = maxi(0, int(blob.get("lvbi", 0)))
-		if blob.get("inv") is Dictionary:
-			inv = blob["inv"]
-		spent_km = clampf(float(blob.get("spent_km", 0.0)), 0.0, TOTAL_ROUTE_KM)
-		if blob.get("earned_tags") is Dictionary:
-			earned_tags = blob["earned_tags"]
-		if blob.get("seen_stations") is Dictionary:
-			seen_stations = blob["seen_stations"]
-		mood = clampi(int(blob.get("mood", MOOD_INITIAL)), MOOD_FLOOR, MOOD_CEIL)
-		seen_villain = maxi(0, int(blob.get("seen_villain", 0)))
-		prologue_done = blob.get("prologue_done", false) == true
-		ending_id = str(blob.get("ending_id", ""))
+	lvbi = maxi(0, int(blob.get("lvbi", 0)))
+	inv = _sanitise_inv(blob.get("inv", {}))
+	spent_km = clampf(float(blob.get("spent_km", 0.0)), 0.0, TOTAL_ROUTE_KM)
+	# 幂等账本的键是拼出来的（checkin_7_1 / frag_7 / pass_3），没法列白名单，
+	# 但值必须是 true —— earn() 只看键在不在，值坏了不会多发钱。
+	earned_tags = _sanitise_flags(blob.get("earned_tags", {}))
+	seen_stations = _sanitise_seen(blob.get("seen_stations", {}))
+	mood = clampi(int(blob.get("mood", MOOD_INITIAL)), MOOD_FLOOR, MOOD_CEIL)
+	seen_villain = clampi(int(blob.get("seen_villain", 0)), 0, VILLAIN_SCENE_COUNT)
+	prologue_done = blob.get("prologue_done", false) == true
+	ending_id = str(blob.get("ending_id", ""))
 	# 必须在 collected 载入**之后**再对齐：这两个事件是在存档写下的那一刻
 	# 就已经发过了，读档回来它们不该再发一遍 —— 否则一个五站全收的存档，
 	# 第一次回访打卡就会重放合成动画、把玩家弹去结算页。
 	_collected_fired = _all_collected()
 	_maxed_fired = all_fragments_maxed()
+	return true
+
+
+## 读档：正本 → 备份 → 当作没有存档。
+##
+## 原来只有"正本"这一条路，而正本被截断时 `load()` 还返回 OK，于是版本号
+## 取到 0 走 `_clear_save()`，**把玩家这一趟直接删掉**。现在中间那一档是
+## 玩家真正想要的：从上一份好的接着玩，而不是从头开始。
+func _load_save() -> void:
+	if _try_load_from(SAVE_PATH):
+		return
+	if _try_load_from(SAVE_BAK):
+		push_warning("存档损坏，已从上一份备份恢复: %s" % SAVE_BAK)
+		return
+	_clear_save()   # v1 旧存档直接清除；新版本从头开始
+
+
+## 一份坏存档不许把玩家推进「赢不了」或者「白赢」的状态。
+## 每一条都是**从玩家的下一帧真的读出来的那几个量**倒推的：
+## · collected 落到 [0, MAX_VISITS_PER_STATION]：超了的话
+##   `is_station_exhausted()` 恒真，这一座碎片站**永久打不了卡**，
+##   而顶栏"下一处"还指着它 —— 玩家卡死在一个永远减不到 0 的数字上。
+##   不在 FRAGMENT_SLOT_STATION_IDX 里的键整个丢掉，`_all_collected()`
+##   遍历的是那五座，多出来的键只是让存档看着像有进度。
+## · inv 里的 `postcard_tier` 直接被 `get_postcard_tier()` 读出来当档位，
+##   夹到商品表里真正存在的最高档；未知商品 id 丢掉，免得白嫖出没花钱的东西。
+## · seen_stations.size() 就是顶栏那句「已过 n 驿」，也是灯铺与郑铎三场的门槛，
+##   所以只认真站号、且把值统一成 true。
+func _sanitise_collected(data: String) -> Dictionary:
+	var raw := {}
+	for entry in data.split(",", false):
+		var kv := str(entry).split(":")
+		if kv.size() == 2:
+			raw[kv[0].strip_edges().to_int()] = kv[1].strip_edges().to_int()
+	var d := {}
+	for st_idx in RoadData.FRAGMENT_SLOT_STATION_IDX:
+		d[st_idx] = clampi(int(raw.get(st_idx, 0)), 0, MAX_VISITS_PER_STATION)
+	return d
+
+
+func _sanitise_inv(src: Variant) -> Dictionary:
+	if not (src is Dictionary):
+		return {}
+	var out := {}
+	for g in ShopData.GOODS:
+		var gid := str(g["id"])
+		if src.has(gid):
+			out[gid] = clampi(int(src[gid]), 0, maxi(0, int(g.get("max_own", 1))))
+	# 档位不是商品，走单独一支：表里 tier_rank 的最大值就是天花板。
+	var max_tier := 0
+	for g in ShopData.GOODS:
+		if str(g.get("grant", "")) == "postcard_tier":
+			max_tier = maxi(max_tier, int(g.get("tier_rank", 0)))
+	if src.has("postcard_tier"):
+		out["postcard_tier"] = clampi(int(src["postcard_tier"]), 0, max_tier)
+	return out
+
+
+## 幂等账本 / 到过驿站的旗标：键留着，值一律 true。
+func _sanitise_flags(src: Variant) -> Dictionary:
+	var out := {}
+	if src is Dictionary:
+		for k in src.keys():
+			out[str(k)] = true
+	return out
+
+
+func _sanitise_seen(src: Variant) -> Dictionary:
+	# stations 是 RoadData 的实例字段而不是静态表，而 RoadData 唯一的
+	# 静态副本 FRAGMENT_SLOT_STATION_IDX 只有五座 —— 拿它当上界会把
+	# 13 座普通驿站到过的记录全丢掉，顶栏「已过 n 驿」于是永远 ≤5。
+	var rd: RefCounted = load("res://scripts/road_data.gd").new()
+	var n: int = rd.stations.size()
+	var out := {}
+	if src is Dictionary:
+		for k in src.keys():
+			var idx := int(k)
+			if idx >= 0 and idx < n:
+				out[idx] = true
+	return out
 
 
 func _clear_save() -> void:
-	if FileAccess.file_exists(SAVE_PATH):
-		DirAccess.remove_absolute(SAVE_PATH)
+	for p in [SAVE_PATH, SAVE_TMP, SAVE_BAK]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(p)
 
 
 ## 从标题页进演示模式。一律从 `reset()` 起，所以点了演示之后退出重进，

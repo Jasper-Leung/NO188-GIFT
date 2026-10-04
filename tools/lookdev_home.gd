@@ -206,6 +206,8 @@ func _run() -> void:
 func _restore(gm, backup: String) -> void:
 	if backup == "":
 		return
+	# 三份一起收：存档改成原子写之后，跑一遍会多出 .bak / .tmp，只写回正本会把它们留在盘上
+	gm._clear_save()
 	var wf = FileAccess.open(str(gm.SAVE_PATH), FileAccess.WRITE)
 	if wf != null:
 		wf.store_string(backup)

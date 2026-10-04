@@ -379,6 +379,8 @@ func _finish(backup: String) -> void:
 	if _world != null and is_instance_valid(_world):
 		_world.queue_free()
 	if backup != "":
+		# 三份一起收：存档改成原子写之后，跑一遍会多出 .bak / .tmp，只写回正本会把它们留在盘上
+		_gm._clear_save()
 		var wf = FileAccess.open(str(_gm.SAVE_PATH), FileAccess.WRITE)
 		if wf != null:
 			wf.store_string(backup)

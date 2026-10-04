@@ -461,6 +461,8 @@ func _span(src: PackedVector2Array, from: int, to: int, y_axis: bool = false) ->
 
 func _finish() -> void:
 	if _backup != "":
+		# 三份一起收：存档改成原子写之后，跑一遍会多出 .bak / .tmp，只写回正本会把它们留在盘上
+		_gm._clear_save()
 		var wf = FileAccess.open(str(_gm.SAVE_PATH), FileAccess.WRITE)
 		if wf != null:
 			wf.store_string(_backup)
