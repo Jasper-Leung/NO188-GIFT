@@ -129,7 +129,17 @@ const STRINGS := {
 		"blocked_busy": "这里现在进不去",
 		"touch_checkin_button": "完成乐事",
 		"fragment_obtained": "获得碎片：",
-		"revisit_note": "这件已经在你手里了。坐一会儿，看看远处的山。",
+		# 四句而不是一句：原来那句在第 2 次和第 3 次到访上逐字出现两遍，
+		# 而完满评级要的正是三次到访——玩家在最该被说服"再骑一趟"的那两趟里
+		# 读到的是同一段话。跨圈那两句承认里程，"第几次"那两句不承认，
+		# 于是最后一趟（跨圈 + 第 3 次）读起来和第 2 次不一样。
+		"revisit_2nd_here": "第二次来了。坐一会儿，看看远处的山。",
+		"revisit_2nd_round": "绕了一整圈又回到这儿，山还是那几座。",
+		"revisit_3rd_here": "第三回走这条路。这件乐事你还有一趟。",
+		"revisit_3rd_round": "又一整圈。到这里是最后一趟，慢慢来。",
+		# 回访那一趟轮到的乐事报出来——原来 `_popup_fragment` 在回访时被藏掉，
+		# 于是「每次到访玩的那件会换」这件事从头到尾没有任何一个像素告诉过玩家。
+		"mg_played": "这一趟：",
 		# collecting_message 原来写的是"礼物正在合成…"，而它同时也是这一趟的
 		# 结束提示——于是第一次集齐时玩家被锁死 2.5 秒弹去结算页，
 		# 顶栏一路写的「再访 · 还差 N 次」一句也兑现不了。
@@ -387,7 +397,11 @@ const STRINGS := {
 		"blocked_busy": "Not right now",
 		"touch_checkin_button": "Complete Joy",
 		"fragment_obtained": "Shard obtained: ",
-		"revisit_note": "This one's already yours. Sit a while and watch the hills.",
+		"revisit_2nd_here": "Second time here. Sit a while and watch the hills.",
+		"revisit_2nd_round": "A whole loop later, and the hills are the same ones.",
+		"revisit_3rd_here": "Third time down this road. One more run of this joy.",
+		"revisit_3rd_round": "Another full loop. Last call here — take your time.",
+		"mg_played": "This round: ",
 		"collecting_message": "All five joys collected. The gift is formed.",
 		"revisit_available": "The pips in the top bar are still open — two more visits to every post.",
 		"synthesis_take_postcard": "Keep the postcard · End this ride",

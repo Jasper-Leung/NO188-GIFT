@@ -168,6 +168,160 @@ func _section_rotation() -> void:
 		"15 局里每件乐事正好 3 次（%s）" % str(tally))
 
 
+## 回访那一屏说的话。
+##
+## 原来只有一句 `revisit_note`，而它在**第 2 次和第 3 次到访上逐字出现两遍**，
+## 而完满评级要的正是三次到访。`verify_interact_latch.gd` 当时只断"面板写的
+## 是 revisit_note"，那句话对两次到访都成立——**一个恒真的判据看起来像在守
+## 这件事**。所以这里量的是**四句两两不同**，外加"圈数真的参与了选句"。
+##
+## 最后一条是读源码文本的：几何函数再对，画笔不去调它一样全绿
+## （`--headless` 下一行 Label 文本都不落盘）。而按 CLAUDE.md 陷阱清单里
+## 「文本判据量到的可能是注释」那一条，**必须先剔注释再限函数体**——
+## 判据自己的注释里就写着 `RevisitNote.key(`，不剔就永远绿。
+func _section_revisit_note() -> void:
+	print("\n---- 7b. 回访那一屏说的话 ----")
+	var rn = load("res://scripts/RevisitNote.gd")
+	_check(rn != null, "RevisitNote 存在")
+	if rn == null:
+		return
+
+	var keys: Array = []
+	# visit 从 **1** 起：0 是首次到访，那一趟有开场对白和「获得碎片」，
+	# 不归 RevisitNote 管。`key(0, ·)` 会落到"第 2 次"那一档，所以这一格
+	# 只能从 1 开始数——第一版从 0 数，于是"四句两两不同"立刻报重复，
+	# 那不是产品坏了，是尺子的取样框画错了。
+	for visit in [1, 2]:
+		for lap in 2:
+			keys.append(str(rn.key(visit, lap)))
+	_check(keys.size() == 4, "四个格子各给出一句（实际 %d）" % keys.size())
+	var uniq := {}
+	var dup := ""
+	for k in keys:
+		if uniq.has(k):
+			dup += "%s×2 " % k
+		uniq[k] = true
+	_check(dup == "", "四句两两不同（重复：%s）" % dup)
+	# 两次到访的差别，和"绕没绕完一圈"的差别，是**两件不同的事**
+	_check(str(rn.key(1, 0)) != str(rn.key(2, 0)),
+			"第 2 次和第 3 次不是同一句（第一圈）")
+	_check(str(rn.key(1, 0)) != str(rn.key(1, 1)),
+			"第 2 次，绕没绕完一圈不是同一句")
+	_check(str(rn.key(2, 0)) != str(rn.key(2, 1)),
+			"第 3 次，绕没绕完一圈不是同一句")
+	# 越界不许悄悄退化成"第一次那一档"：visit 上界之外仍是"第 3 次"
+	_check(str(rn.key(7, 1)) == str(rn.key(2, 1)),
+			"visit 超界落在第 3 次那一档（实际 %s）" % str(rn.key(7, 1)))
+	_check(str(rn.key(1, -1)) == str(rn.key(1, 0)),
+			"lap 负数仍算作没过圈（实际 %s）" % str(rn.key(1, -1)))
+
+	# 四句都真的在 Localization 里（`t()` 查不到 key 时**返回 key 自己、
+	# 不报错也不返回空串**，所以"漏译一个"在屏幕上就是一行英文下划线）
+	var loc = load("res://scripts/Localization.gd").new()
+	for k in keys:
+		_check(_zh_has(loc, k), "中文表里有 %s" % k)
+		_check(_en_has(loc, k), "英文表里有 %s" % k)
+		var vzh: String = str(loc.STRINGS["zh"][k]) if _zh_has(loc, k) else ""
+		var ven: String = str(loc.STRINGS["en"][k]) if _en_has(loc, k) else ""
+		_check(vzh != "" and _has_letters(vzh), "%s 中文不是空串" % k)
+		_check(vzh != ven, "%s 中英不逐字相同" % k)
+	_check(_zh_has(loc, "mg_played") and _en_has(loc, "mg_played"),
+			"「这一趟：」中英都在")
+
+	# 「这一趟」报的是哪一件：槽位下标 → fragment_%d，五件乐事和五块碎片同名
+	for slot in 5:
+		var jk: String = str(rn.joy_key(slot))
+		_check(jk == "fragment_%d" % slot, "第%d件乐事对应 %s" % [slot, jk])
+		_check(_zh_has(loc, jk) and _en_has(loc, jk), "%s 中英都在" % jk)
+
+	# 读源码文本：面板真的调了那个纯函数（剔注释 + 限函数体，两道都要）
+	var src := _strip_comments(FileAccess.get_file_as_string(
+			"res://scripts/World3D.gd"))
+	_check(_func_body(src, "_popup_body_text").contains("RevisitNote.key("),
+			"面板正文真的调了 RevisitNote.key()")
+	_check(_func_body(src, "_popup_foot_text").contains("RevisitNote.joy_key("),
+			"面板底行真的调了 RevisitNote.joy_key()")
+	_check(_func_body(src, "_popup_foot_text").contains('_last_joy_slot'),
+			"面板底行报的是**这一趟真的玩过的那一件**，不是现算的")
+	# 13 座普通驿站永远写驿站的介绍。分叉判据必须是"有没有碎片 **且** 收过了"，
+	# 拿"到过几次"当判据的话，第一次路过的普通驿站会被写成一句回访——
+	# 而那 13 座本来根本没有碎片可收。**这是一条读源码文本的判据，
+	# 因为量它要真的起一份 World3D**，而 §4 那边已经能量玩家读到的那一半。
+	_check(_func_body(src, "_is_revisit").contains("station_has_fragment(")
+			and _func_body(src, "_is_revisit").contains("is_collected("),
+			"回访的判据是「有碎片且收过了」，不是「到过几次」")
+	# 圈数必须真的从里程来（写死一个圈数的话四句里有两句是死的）
+	_check(_func_body(src, "_lap_index").contains("_odometer_units")
+			and _func_body(src, "_lap_index").contains("_total_arclen"),
+			"_lap_index() 真的是从里程算的，不是写死的圈数")
+	# 切语言那一条路也得跟着换，否则回访途中切语言会把刚写的那句话刷掉
+	_check(_func_body(src, "_apply_language").contains("_popup_body_text("),
+			"切语言走的是同一个 _popup_body_text()")
+	_check(_func_body(src, "_apply_language").contains("_popup_foot_text("),
+			"切语言走的是同一个 _popup_foot_text()")
+
+
+func _zh_has(loc, k: String) -> bool:
+	return loc.STRINGS.has("zh") and loc.STRINGS["zh"].has(k)
+
+
+func _en_has(loc, k: String) -> bool:
+	return loc.STRINGS.has("en") and loc.STRINGS["en"].has(k)
+
+
+## `[A-Za-z]` 而不是 `\w`：`\w` 在 GDScript 里也吃中文，于是
+## `_has_letters("绕了一整圈")` 会是真，`_has_letters("1280 × 720")` 也会是真。
+func _has_letters(s: String) -> bool:
+	var stripped := s.replace("%d", "").replace("%s", "").replace("%f", "")
+	for i in stripped.length():
+		var c := stripped.unicode_at(i)
+		if (c >= 65 and c <= 90) or (c >= 97 and c <= 122):
+			return true
+		if c >= 0x4E00 and c <= 0x9FFF:
+			return true
+	return false
+
+
+## 剔掉行注释（GDScript 只有 `#` 行注释），保留字符串字面量里的 `#`。
+func _strip_comments(src: String) -> String:
+	var out: Array = []
+	for line in src.split("\n"):
+		var res := ""
+		var quote := ""
+		for i in line.length():
+			var ch := line[i]
+			if quote != "":
+				res += ch
+				if ch == quote:
+					quote = ""
+			elif ch == "\"" or ch == "'":
+				quote = ch
+				res += ch
+			elif ch == "#":
+				break
+			else:
+				res += ch
+		out.append(res)
+	return "\n".join(out)
+
+
+## 取某个函数的函数体。**要认 `static func`**：只找 `"\nfunc "` 的话，
+## 一个 static 函数后面若跟的是另一个 static 函数，正文会一路取到文件末尾。
+func _func_body(src: String, fn: String) -> String:
+	var start := src.find("func %s(" % fn)
+	if start < 0:
+		return ""
+	var lines := src.substr(start).split("\n")
+	var body: Array = []
+	for i in lines.size():
+		if i > 0:
+			var t := lines[i].strip_edges()
+			if t.begins_with("func ") or t.begins_with("static func "):
+				break
+		body.append(lines[i])
+	return "\n".join(body)
+
+
 func _check(cond: bool, label: String) -> void:
 	if cond:
 		print("[OK] ", label)
@@ -1474,6 +1628,7 @@ func _initialize() -> void:
 
 	_section_backdrops()
 	_section_rotation()
+	_section_revisit_note()
 	for s in stubs:
 		s.free()
 	print("[verify_mini_game] ", "PASS" if _failures == 0 else "FAIL", " failures=", _failures)

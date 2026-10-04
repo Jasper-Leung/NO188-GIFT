@@ -70,6 +70,7 @@ const STATION_PASS_RADIUS := 15.0
 ## 五件乐事怎么轮着上。preload 而不是 class_name —— `--script` 模式下
 ## class_name 会拉编译期依赖（见 CLAUDE.md 已知陷阱）。
 const MiniGamePicker = preload("res://scripts/mini_games/MiniGamePicker.gd")
+const RevisitNote = preload("res://scripts/RevisitNote.gd")
 var _cam_look_at_target: Vector3 = Vector3.ZERO
 var _cam_look_at_active: bool = false
 var _paused: bool = false
@@ -1319,19 +1320,14 @@ func _do_check_in(idx: int) -> void:
 	_popup_mode = POPUP_STATION
 	_popup_name.text = _station_name(idx)
 	_popup_event.text = _station_event(idx)
-	_popup_text.text = _station_text(idx)
+	_popup_text.text = _popup_body_text(idx)
+	var foot := _popup_foot_text(idx)
+	_popup_fragment.text = foot
+	_popup_fragment.visible = foot != ""
 
-	# 回访不要再报一次「获得碎片：云」——碎片早就在顶栏的槽位里了，
-	# 再报一遍等于骗玩家说刚拿到新东西。改成一句"这件已经收过了"。
 	# check_in() 还是要调的：它才是发回访旅币（LVBI_REPEAT_CHECKIN）和累计次数的地方。
+	# 碎片飞行只在**首次**到访时放：回访再飞一次等于谎报刚拿到新东西。
 	var frag := _station_fragment(idx) if is_first_visit else ""
-	if not is_first_visit and road_data.station_has_fragment(idx):
-		_popup_text.text = Localization.t("revisit_note")
-	if frag and frag != "":
-		_popup_fragment.text = Localization.t("fragment_obtained") + frag
-		_popup_fragment.visible = true
-	else:
-		_popup_fragment.visible = false
 
 	_check_in_popup.visible = true
 	await get_tree().process_frame  # 让 layout 算一次 rect
@@ -1385,8 +1381,64 @@ func _finish_check_in() -> void:
 	_recheck_armed = false   # 重新上锁：这一次打卡结束前必须先骑开
 
 
+## 骑过几圈（从 0 起）。
+##
+## 本工程**压根没有"圈数计数器"**——`DayCycle` 收的是带小数的里程比，
+## 所以"第几圈"只能现算。里程是每帧真的骑出来的（`_odometer_units`），
+## 没有捷径可走，也正因如此它不会因为任何一次打卡而前进。
+func _lap_index() -> int:
+	if _total_arclen <= 1.0:
+		return 0
+	return int(_odometer_units / _total_arclen)
+
+
 func _popup_font_size(zh: int, en: int) -> int:
 	return en if Localization.is_english() else zh
+
+
+func _is_first_visit(idx: int) -> bool:
+	return _road_builder.get_road_data().station_has_fragment(idx) \
+			and not GameManager.is_collected(idx)
+
+
+## 是不是"第二次及以上到访一座碎片驿站"。**面板那两行的唯一分叉判据**。
+##
+## 判的是"有没有碎片 **且** 收过了"，不是"到过几次"——13 座普通驿站
+## 到过 0 次也走不到回访那一支，而拿 `get_station_count() > 0` 当判据的话，
+## 第一次路过的普通驿站会被写成一句"绕了一整圈又回到这儿"。
+func _is_revisit(idx: int) -> bool:
+	return _road_builder.get_road_data().station_has_fragment(idx) \
+			and GameManager.is_collected(idx)
+
+
+## 打卡面板的正文。**两处调用**：写面板的时候，和切语言的时候。
+##
+## 分开写的后果已经发生过一次：`_apply_language()` 无条件写 `_station_text(idx)`，
+## 而那一句只在首次到访时才对——于是回访途中切语言，玩家刚读到的那句
+## 「绕了一整圈又回到这儿」无声无息地变回了驿站的自我介绍。
+func _popup_body_text(idx: int) -> String:
+	if not _is_revisit(idx):
+		return _station_text(idx)
+	return Localization.t(RevisitNote.key(GameManager.get_station_count(idx), _lap_index()))
+
+
+## 打卡面板底下那一行。**两处调用**：写面板的时候，和切语言的时候。
+##
+## 首次到访报「获得碎片：云」；回访**不报**（碎片早就在顶栏的槽位里了，
+## 再报一遍等于骗玩家说刚拿到新东西），改报「这一趟：<轮到的乐事>」——
+## 原来这块 Label 在回访时被整个藏掉，于是 MiniGamePicker 那张轮换表从头到尾
+## 没有任何一个像素告诉过玩家：三次到访玩的是三件不同的乐事，而他每次都以为
+## 重玩的是同一件。
+func _popup_foot_text(idx: int) -> String:
+	if _is_revisit(idx):
+		if _last_joy_slot < 0:
+			return ""
+		return Localization.t("mg_played") \
+				+ Localization.t(RevisitNote.joy_key(_last_joy_slot))
+	var frag := _station_fragment(idx)
+	if frag != "":
+		return Localization.t("fragment_obtained") + frag
+	return ""
 
 
 func _apply_language() -> void:
@@ -1401,10 +1453,10 @@ func _apply_language() -> void:
 			_popup_fragment.visible = false
 		else:
 			_popup_event.text = _station_event(idx)
-			_popup_text.text = _station_text(idx)
-			var frag = _station_fragment(idx)
-			_popup_fragment.text = Localization.t("fragment_obtained") + frag if frag != "" else ""
-			_popup_fragment.visible = frag != ""
+			_popup_text.text = _popup_body_text(idx)
+			var foot := _popup_foot_text(idx)
+			_popup_fragment.text = foot
+			_popup_fragment.visible = foot != ""
 	for i in range(_stations.size()):
 		var label = _stations[i].get_node_or_null("StationNameLabel")
 		if label is Label3D:
@@ -1638,9 +1690,15 @@ const MG_RUNNING := -2
 const MINI_GAME_TIMEOUT_SEC := 30.0
 var _mini_game_state: int = -1
 var _mini_game_node: Node = null
+## 刚才那一趟实际玩的是第几件乐事（碎片槽位下标，-1 = 这一趟没有小游戏）。
+## 打卡面板用它报"这一趟：云"，而**不重新算一遍**——重新算的话，
+## 轮换公式一旦在两处漂移，屏幕上的字和玩家玩到的东西就对不上，
+## 而两个数值断言各自都还是绿的。
+var _last_joy_slot: int = -1
 
 func _run_mini_game(station_idx: int) -> int:
 	_mini_game_state = -1
+	_last_joy_slot = -1
 	var rd = _road_builder.get_road_data()
 	if not rd.station_has_fragment(station_idx):
 		return 2  # SKIP
@@ -1656,6 +1714,7 @@ func _run_mini_game(station_idx: int) -> int:
 		return 2  # SKIP
 	var script_path: String = MiniGamePicker.script_for(
 			slot, GameManager.get_station_count(station_idx))
+	_last_joy_slot = MiniGamePicker.game_for(slot, GameManager.get_station_count(station_idx))
 	_mini_game_node = load(script_path).new()
 	# 注入回调节点引用，让小游戏能通知完成
 	_mini_game_node._world_ref = self

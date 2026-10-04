@@ -32,3 +32,6 @@ tools/__pycache__/
 # 把它们当纹理导一遍，白占导入缓存；.import 是那个扫描的产物，不入库。
 /docs/**/*.import
 /tools/_nfs.png*
+
+# 突变驱动的输出（跑完就没了，报告进 commit message）
+tools/_mutate*.log

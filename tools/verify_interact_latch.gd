@@ -43,6 +43,7 @@ const SHOT_DIR := "user://lookdev_journey"
 ## 轮换表。第 4 节要认"回访该玩哪一件"，判据只能取产品自己的那张表——
 ## 这里重抄一份的话，产品把轮换改坏了这条也会照样绿。
 const MiniGamePicker = preload("res://scripts/mini_games/MiniGamePicker.gd")
+const RevisitNote = preload("res://scripts/RevisitNote.gd")
 
 var _fails := 0
 var _gm: Node = null
@@ -296,6 +297,12 @@ func _run() -> void:
 	# `_run_mini_game()`，于是完满评级要的三次里后两次是空的。所以序列变成
 	# 1.0s 运镜 + 1.5s 定格 + 小游戏 + 面板 1.0s 飞行 + 0.4s 收尾，
 	# 4.0s 之内小游戏根本不会结束，得先把它交掉再等面板。
+	#
+	# 里程先推到**第二圈**：回访那句话按"第几次 × 绕没绕完一圈"选，
+	# 不把里程推上去的话"绕没绕圈"那半边在这一次里恒等于 0，
+	# 于是**把圈数那一路整个删掉，这些断言照样全绿**。里程是真的骑出来的，
+	# 推 `_odometer_units` 就是玩家真骑了一整圈。
+	_world._odometer_units = _world._total_arclen
 	var lvbi_before: int = _gm.lvbi
 	_world._do_check_in(4)
 	var waited := 0.0
@@ -322,11 +329,34 @@ func _run() -> void:
 	_ck("回访跑完没有留下小游戏", _world._mini_game_node == null
 			and _world._mini_game_state != _world.MG_RUNNING,
 			"node=%s state=%d" % [str(_world._mini_game_node), _world._mini_game_state])
-	# _popup_text 在面板收掉之后仍然留着最后写的字，所以断字比断可见性稳
-	_ck("回访面板说的是「已经收过了」",
-			_world._popup_text.text == _root_loc().t("revisit_note"),
+	# _popup_text 在面板收掉之后仍然留着最后写的字，所以断字比断可见性稳。
+	# 断的是"选句函数返回的那一个 key"，不是某句写死的文案——
+	# 原来这里写的是 `_root_loc().t("revisit_note")`，而那句话对第 2 次和
+	# 第 3 次到访都成立，**一个恒真的判据看起来像在守着这件事**。
+	_ck("回访面板写的是「第 2 次 + 已绕完一圈」那一句",
+			_world._popup_text.text == _root_loc().t(
+					RevisitNote.key(1, 1)),
 			"面板上写着：%s" % _world._popup_text.text)
-	_ck("回访不再谎报「获得碎片」", not _world._popup_fragment.visible)
+	# 正对照：这次**真的**推过了一整圈，所以"没绕圈"那一句必须不是它。
+	# 这一条是圈数那一路的**承重**判据——把 `_lap_index()` 换成 `return 1`
+	# 或者干脆不调它，这里才会红。
+	_ck("里程推了一整圈，写出来的不再是「没绕圈」那一句",
+			_world._popup_text.text != _root_loc().t(RevisitNote.key(1, 0)),
+			"两档撞成同一句了：%s" % _world._popup_text.text)
+	# 「这一趟玩的是哪一件」必须**说出口**。原来这块 Label 在回访时整个
+	# 被藏掉，于是 MiniGamePicker 那张轮换表从头到尾没有任何一个像素
+	# 告诉过玩家——他每次都以为重玩的是同一件。
+	var want_joy: int = MiniGamePicker.game_for(4, 1)   # 驿站4=槽位4，第2次
+	_ck("回访面板说出了这一趟轮到的乐事",
+			_world._popup_fragment.visible
+			and _world._popup_fragment.text == _root_loc().t("mg_played")
+					+ _root_loc().t(RevisitNote.joy_key(want_joy)),
+			"面板上写着：%s（该是第 %d 件）"
+			% [_world._popup_fragment.text, want_joy])
+	_ck("回访不再谎报「获得碎片」",
+			not _world._popup_fragment.text.contains(
+					_root_loc().t("fragment_obtained")),
+			"面板上写着：%s" % _world._popup_fragment.text)
 	_ck("回访照样发旅币", _gm.lvbi > lvbi_before,
 			"%d → %d" % [lvbi_before, _gm.lvbi])
 	_ck("回访打卡次数累到 2", _gm.get_station_count(4) == 2,

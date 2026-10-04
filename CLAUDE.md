@@ -92,6 +92,14 @@ scripts/          GDScript 脚本
 						驿站没有的约束：推出点必须仍在 `HOME_PASS_RADIUS` 里，
 						否则玩家被墙挡在圈外、永远到不了家。行道树让位复用
 						`STATION_CLEAR`（10m 已大过房子半对角线 5.0m）
+  RevisitNote.gd         回访那一屏**说什么话**。四句而不是一句：原来只有一句
+						`revisit_note`，而它在第 2 次和第 3 次到访上**逐字出现两遍**，
+						而完满评级要的正是三次到访——玩家在最该被说服"再骑一趟"
+						的那两趟里读到的是同一段话。`key(visit, lap)` 按
+						（第几次 × **绕没绕完一整圈**）选，`lap` 走
+						`World3D._lap_index()`（从 `_odometer_units` 算，本工程
+						压根没有圈数计数器）。照 MiniGamePicker 的老办法：
+						preload，**不要 class_name**
   water_data.gd         三处水的唯一出处：`plan()` 按**真实自然地形**把三只碗
 						定下来（碗心 = 碗底足迹平均高程最低处，不是最低的那一点），
 						`depth_at()` 供 TerrainBuilder 挖碗。全场统一水位 -3.4，
@@ -238,6 +246,14 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						边、换 1080p 仍贴右下；**五个**画笔都调共用函数、热区没抄
 						第二份矩形、**竹的热区判在"当成砍"之前**）。又是五条
 						**读源码文本**的
+						+ **第 7b 节「回访那一屏说的话」**（`RevisitNote` 四句两两不同：
+						「第几次」和「绕没绕圈」是**两件独立的事**，少任一半就塌成
+						两句；四句中英都在且不逐字相同；`joy_key` 落到 `fragment_%d`；
+						外加**六条读源码文本**——面板正文/底行真的调了那两个纯函数、
+						底行报的是 `_last_joy_slot`（这一趟**真玩过**的那一件，不是
+						现算的）、`_is_revisit` 判的是「有碎片**且**收过了」而不是
+						「到过几次」（后者会把 13 座普通驿站第一次路过也写成回访）、
+						`_lap_index` 真的从里程算、**切语言走的是同一对函数**）
   verify_interact_latch.gd 交互闩锁 / 对白抢占回归（郑铎在播时按空格不许开打卡、
 						setup() 顶掉一轮对白必须放出旧等待者、被顶掉的郑铎戏自己清
 						_villain_playing、回访不再重播小游戏/谎报碎片、
@@ -1009,7 +1025,8 @@ echo. > .editor_mode
 - 改 `World3D._tint_station_roofs()` / `STATION_ROOF_TINT` 前跑 `verify_station_roof.gd` + `lookdev_journey.gd` 看 `04_ride`（填色要过 `linear_to_srgb`，写错方向屋顶比墙暗 30 倍，数字还是"暖的"，只有比值看得出来）
 - 改 `GameManager.check_in()` 里那两个闩锁 / `all_fragments_maxed()` / `_load_save()` 末尾的补齐 / `World3D._on_all_collected()` / `_on_all_maxed()` / `_spawn_synthesis_animation()` / `PostcardVariant.compute_variant()` 前跑 `verify_minimap.gd` 第 9/10 节 + `verify_postcard_ending.gd` §3b + `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（"集齐"与"走完"是两个时刻，判据只能有一个）
 - 改 `SynthesisPanel.gd` 的任何一处 / `World3D._synthesis_choice_open` / `_on_all_collected()` 的尾巴 / `_on_synthesis_choice()` / `HUDLayer/SynthesisPanel` 节点前跑 `verify_interact_latch.gd` **第 10 节** + `verify_minimap.gd` 第 9 节 + `verify_demo_path.gd` 第 1 节 + `lookdev_journey.gd` 看 `13b_synthesis_集齐二选一` 与 `13c_after_再骑一圈`。三件事一条都不能省：**第 10 节量面板本身**（两个按钮都在屏内不叠、都有 `focus_mode`、ESC 收得掉、`_all_done` 没被顺带翻过去）；**`verify_minimap` 第 9 节现在必须先选「再骑一圈」再逐站核对脚下的圈**——它原来直接接着扫，扫的时候面板还开着，`_nearby_*` 早被清成 -1，十条断言一起红，而那个红是**新行为的正确结果**，不是产品坏了；**`verify_demo_path` 第 1 节**守着 90 秒演示不被这个面板打断（`fill_finished_run()` 走直写字段不发信号，而刷满的碎片站被 `is_station_exhausted` 挡在 `_nearby_station_idx` 之外，演示里根本打不了卡）
-- 改 `Localization.gd` 里 `revisit_note` / `touch_revisit_button` / `collecting_message` / `revisit_available` / `synthesis_done_message` / `finish_run` 前跑 `verify_economy.gd`（文案扫描）+ `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`。前三句曾经一起写着"再歇一脚"——集齐之后唯一还在对玩家说的话是劝他别再跑了
+- 改 `Localization.gd` 里 `touch_revisit_button` / `collecting_message` / `revisit_available` / `synthesis_done_message` / `finish_run` 前跑 `verify_economy.gd`（文案扫描）+ `verify_interact_latch.gd` 第 4 节 + `lookdev_journey.gd` 看 `05d_revisit_回访提示`。前三句曾经一起写着"再歇一脚"——集齐之后唯一还在对玩家说的话是劝他别再跑了
+- 改 `RevisitNote.gd` / `World3D._popup_body_text()` / `_popup_foot_text()` / `_is_revisit()` / `_lap_index()` / `_run_mini_game()` 里那行 `_last_joy_slot` / `Localization` 的 `revisit_2nd_*` `revisit_3rd_*` `mg_played` 前跑 `verify_mini_game.gd` **第 7b 节** + `verify_interact_latch.gd` **第 4 节** + `lookdev_journey.gd` 看 `05d_revisit_回访提示`。这一族量的是**回访那一屏写什么**，而三件事曾经各错一处：①`revisit_note` 一句话在第 2/3 次到访上**逐字出现两遍**（`verify_interact_latch` 当时断的是"面板写的是 revisit_note"，那句话对两次都成立，**一个恒真的判据看起来像在守着这件事**）；②轮换出来的乐事**从头到尾没有告诉过玩家**——`_popup_fragment` 那块 Label 在回访时被整个藏掉，于是「三次到访玩的是三件不同的乐事」只活在代码里；③`_apply_language()` 无条件写 `_station_text(idx)`，所以**回访途中切语言会把刚写的那句话刷回驿站的自我介绍**。三条现在都由**同一个** `_popup_body_text()` / `_popup_foot_text()` 收口（面板与切语言共用）。**`verify_interact_latch` 第 4 节先推里程再打卡**（`_odometer_units = _total_arclen`）：不推的话「绕没绕圈」那半边在这一次里恒等于 0，于是**把圈数那一路整个删掉，照样全绿**。**写完先证明它会红**（`python tools/mutate_revisit.py`，11 条突变一个一个撤，全部咬住；它自己会先跑一遍基线，基线不干净就直接退出）
 - 改 `PausePanel.gd` / 暂停面板按钮 / `go_to_end_card()` 的触发条件前跑 `verify_minimap.gd` 第 8b 节（出口在不在、零碎片时在不在、收工时评级按走过的算）+ `verify_postcard_ending.gd`（EndCard 得接得住非完满档）
 - 改 `QualitySettings.gd` 的任何一处 / `GrassScatter.radius_override` / `TreeScatter.radius_override` / `World3D._ready()` 里那一句 `QualitySettings.apply_to_world(self)` 的**位置** / 暂停面板 `VBox` 的行数或 `separation` / `Localization` 那五个画质 key 前跑 `verify_quality_settings.gd`（**不能加 --headless 之外还要注意 `--quit-after` 给小了**：它要真的起两份 World3D）。这一族守的是"接线"，而接线断掉时**两侧各自都绿**——见下面陷阱清单里那条「写进字段不等于读进世界」。另外两条只有它能量：**面板装不装得下**（多两行之后 VBox 的最小高度超过面板内容区时**不报错**，只把最下面那两行顶出下沿，而"最下面那两行"正好是新加的画质按钮和提示），以及**落盘闸**（`persist` 没有默认值这条靠反射量不到，是读源码文本的）
 - 改 `EndCard._show_ending_choice()` / `_seed_back_text()` 前跑 `verify_postcard_ending.gd`（`keep`/`break` 的后果必须落在**正面**：留门=背面写上那句、放手=背面留白且封口的蜡掰开，两张卡片的正文必须**就是**真正会发生的那件事本身，不能另写一段描述——否则又变回"承诺一个差别、实际只改一句话"）
@@ -2652,3 +2669,49 @@ SDFGI 关掉之后 `b−r` 是 +21，而评审的门槛是 **±12**——还差�
 得真的是被测物产出的**。CLAUDE.md 里已经写着"掩体是另一个突变提供的"
 （四个突变一起做的时候互相垫掉失败路径），这一条是它的另一半——
 **量具的输入不是这一遍的输出时，整轮结论都是上一轮的**。
+
+## 这一轮新记的两条（2026-10-04，第八轮 #19 回访那一屏）
+
+### ① 一个判据恒真的原因是**它量的是那个值恰好没变过**
+
+`revisit_note` 是一个 key，而 `Localization.t()` 返回的是**那一句字符串**。
+旧版 `verify_interact_latch.gd` 第 4 节断的是"面板说的是 `revisit_note`"——
+它对第 2 次到访和对第 3 次到访**逐字成立**，因为产品本来就只有那一句。
+于是"三次到访有三句不同的话"这件事**从来没有一条断言守着**，
+而完满评级要的恰恰是三次：全游戏最强的重玩钩子，
+玩家在最该被说服"再骑一趟"的那两趟里，读到的是同一段话。
+
+**可推广的一条**：判据写成"输出 == 某个常量"时，要先问一句
+**"这个值在所有要区分的情形下真的不同吗"**——两趟读同一句话，
+和"两趟说的话不一样"这两件事在断言里长得一模一样。
+凡是把**一个值**当期望值钉死的判据，都得配一条
+**"另一个该不同的情形下它确实不同"**的对照（本轮是四句两两不同 +
+`第 2 次 ≠ 第 3 次` + `没过圈 ≠ 过了圈`，而这三样是两个**独立**的轴）。
+
+连带一条是本轮当场抓到的产品 bug：`_popup_body_text()` 第一版只按
+"是不是首次"分叉，忘了保留 `station_has_fragment` 那一半，
+于是 13 座普通驿站第一次路过也会读到"绕了一整圈又回到这儿"。
+**回访的判据必须是"有碎片 **且** 收过了"**，不是"到过几次"——
+而这两条在 13 座普通驿站上给出的答案正好相反。
+现在有两条**读源码文本**的判据钉着 `_is_revisit` 的函数体里
+`station_has_fragment(` 与 `is_collected(` **两个都在**：
+纯函数测不到"判据写成什么了"，把整个函数换成
+`return get_station_count(idx) > 0` 十几条几何断言照样全绿。
+
+### ② 第三次：**量具**自己出错，而它报出来的样子和"判据写错了"一样
+
+`tools/mutate_revisit.py` 第一版把**正对照**和"该红"塞进同一张表、
+用同一个 AND 去判，于是第 10 条突变（让 `revisit_3rd_round` 的中英逐字相同）
+明明报出了 `RED ... 中英不逐字相同`，驱动却判它 NOT-RED——
+**"量具把'判据对了'读成'判据坏了'"**。改正之后第二轮又栽在下一格：
+正对照是去 `[FAIL]` 列表里找的，而**一条绿着的断言压根不往失败列表里写**，
+于是 11 条里 9 条全报 `CTRL-GONE`，尽管每一遍都只有该红的那一条红。
+
+这是本项目里第三次犯同一类的错（前两次：突变驱动读的是**上一轮**留下的
+绿日志；`fails()` 里 `"[FAIL] "` 按 8 字符切而实际是 7，把每条断言的
+名字啃掉第一个字）。三次的共同形状是：**读数是绿的或"没咬住"，
+而真相在完全另一层**。可推广的一条：**任何一层"从产物里读判据"的地方，
+都要能说出"我这一遍读的是这一遍的输出吗"**——
+突变驱动读文件、断言名切片长度、正对照去哪个列表找，三处都是同一个位置。
+正对照**只从 `[OK]` 那几行里找**，它不参与"有没有咬住"的判定，
+它只用来确认这一次红得**只该红那一条**。
