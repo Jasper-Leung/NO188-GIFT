@@ -280,6 +280,7 @@ func _audit_variant_independent() -> void:
 	await _audit_panel_quietness()
 	await _audit_bird_shape()
 	await _audit_tea_and_guqin_shape()
+	await _audit_bamboo_shape()
 	await _audit_route_map()
 
 
@@ -950,6 +951,205 @@ func _audit_tea_and_guqin_shape() -> void:
 			yue = part["a"]
 	_ck("岳山在琴额那一端（x=%.1f，要偏在头这一侧且不在正中）" % yue.x,
 			yue.x < body_r.get_center().x - 4.0)
+
+
+## 3b-4. 竹：在 `FragmentBar` 那个 22px 的盘上认得出是竹。
+##
+## 评审第五轮 P0-3 的原话是「底栏那个 22px 的盘上，竹读成**一张窗格**」，
+## 给的落点是「补 `verify_mini_game.gd` 6k 节的缺口：现在那节量的是云/茶/琴，
+## **没有一条量竹在小尺寸下的可辨识性**」。判据**没有**放在 6k，而是放在这里——
+## 因为这一节要复用的那把尺子（`bamboo_parts()` 与另外三件共用的规范空间）
+## 就在 3b，而 6k 量的全屏小游戏那一档、量的是**另一个尺寸**上的同一件东西。
+## 记一笔免得下一个人按评审的落点去 6k 里翻：**两条同源的判据钉在同一个尺寸上
+## 才算量过**，22px 的盘和 720p 的全屏各量各的，两边各自绿而中间那档没人管。
+##
+## 而这一族的病比禽、云/茶/琴都更难缠一层：**三份画法里有两份是逐字相同的
+## 同一套算法**（`FragmentBar` 与 `FragmentIcon`），第三份（`Postcard`）多两片叶。
+## 那套算法是**三根等宽竖线，每根再横划四道节**——3 根竖 × 12 道横节在 22px 上
+## 就是一张窗格。第四轮判它「✓」看的是**明信片上的大尺寸**，那一版有叶子；
+## 而玩家一路盯着的是底栏。**同一件东西在两个尺寸上读成两样东西。**
+##
+## 更要命的是**两份坏的那份还一模一样**——对拍那两份永远绿，它们本来就一样，
+## 而「一样」的那一份是坏的。可推广的一条：**收口之后要量的不是"三处一样"
+## （那是读源码文本钉得住的），是"这个形状认得出它是什么"。**
+##
+## 认得出竹要三样同时在，缺一样就退回一根绿色的棍（这一节逐条对应）：
+##   · **收分**——竹身自下而上收窄。评审点名要量的是**收分**，
+##     不是"有几道节"：等宽竖条是柱子，不是竹子。
+##   · **节少而粗**——每根**两道**。节是竹子身上最认得出的一处，可三根一排
+##     各划四道，它就成了窗棂（这正是旧画法的签名）。
+##   · **叶**——长而窄，挂在梢那一段往外斜。这个尺寸上唯一认得出「竹」而不是
+##     「栅栏」的东西，缺了它三条竖线就是栅栏。
+##
+## `bamboo_parts()` 是不碰画笔的纯函数，`paint_bamboo` 只是把它重放一遍，
+## 所以这一节量的是剪影本身。`_draw` 在 headless 下一笔都不落盘，
+## 「三处调的是同一个出处」那条只能读源码文本——和 3b-2 禽那一节同一个路子。
+## 一株竹的**量出来的**那几项，不碰画笔。上面那几条判据和下面那个正对照
+## 走的是**同一个函数**——否则正对照就退化成"断言 1.0 < 1.5"这种恒真的废话，
+## 而回归里凡是自己抄一份常数的地方都要小心：副本会安静地变成第二个事实来源。
+##
+## 返回 `stalks / nodes / leaves / taper / per_stalk / leaf_ratio / lowest_leaf /
+## far_r / heads_ok`。`taper` 取**最不收**的那一根（min 而不是平均），`leaf_ratio`
+## 取**最不窄**的那一片。
+func _bamboo_metrics(parts: Array) -> Dictionary:
+	var stalks: Array = _parts_of(parts, "poly", "stalk")
+	var leaves: Array = _parts_of(parts, "poly", "leaf")
+	var nodes: Array = _parts_of(parts, "line", "node")
+	var taper := 99.0
+	var heads_ok := true
+	for s in stalks:
+		var pts: PackedVector2Array = s["p"]
+		var lo := 999.0
+		var hi := -999.0
+		for p in pts:
+			lo = minf(lo, p.y)
+			hi = maxf(hi, p.y)
+		var b_lo := 999.0
+		var b_hi := -999.0
+		var t_lo := 999.0
+		var t_hi := -999.0
+		var bot := 0
+		var top := 0
+		for p in pts:
+			if absf(p.y - hi) < 0.01:
+				b_lo = minf(b_lo, p.x)
+				b_hi = maxf(b_hi, p.x)
+				bot += 1
+			if absf(p.y - lo) < 0.01:
+				t_lo = minf(t_lo, p.x)
+				t_hi = maxf(t_hi, p.x)
+				top += 1
+		if bot < 2 or top < 2:
+			heads_ok = false
+		# 梢那头收成 0 会除出 inf，夹一下。**等宽竖条在这里正好是 1.00。**
+		taper = minf(taper, (b_hi - b_lo) / maxf(t_hi - t_lo, 0.001))
+	var leaf_ratio := 99.0
+	var lowest_leaf := -999.0
+	for lf in leaves:
+		var pts: PackedVector2Array = lf["p"]
+		var longest := 0.0
+		for i in pts.size():
+			var j := (i + 1) % pts.size()
+			longest = maxf(longest, pts[i].distance_to(pts[j]))
+		# 最大垂直宽度 = 2×面积 ÷ 最长边，和 `MiniGameBamboo` 量叶宽同一个办法
+		var width: float = 2.0 * _poly_area(pts) / maxf(longest, 0.001)
+		leaf_ratio = minf(leaf_ratio, longest / maxf(width, 0.001))
+		for p in pts:
+			lowest_leaf = maxf(lowest_leaf, p.y)
+	var far_r := 0.0
+	for part in parts:
+		for pt in _part_points(part):
+			far_r = maxf(far_r, Vector2(pt).length())
+	return {
+		"stalks": stalks.size(), "nodes": nodes.size(), "leaves": leaves.size(),
+		"taper": taper,
+		"per_stalk": float(nodes.size()) / maxf(float(stalks.size()), 1.0),
+		"leaf_ratio": leaf_ratio, "lowest_leaf": lowest_leaf,
+		"far_r": far_r, "heads_ok": heads_ok,
+	}
+
+
+func _audit_bamboo_shape() -> void:
+	print("\n---------- 3b-4. 竹：22px 的盘上认得出是竹（旧画法是一张窗格）----------")
+	for f in ["res://scripts/FragmentBar.gd", "res://scripts/Postcard.gd",
+			"res://scripts/FragmentIcon.gd"]:
+		var src: String = FileAccess.get_file_as_string(f)
+		_ck("%s 的画笔里调的是 FragmentIcon.paint_bamboo" % f.get_file(),
+				src.contains("paint_bamboo(self,"),
+				"没调它 = 这一处自己画了一份；旧版那两份还逐字相同，对拍永远绿")
+
+	var parts: Array = FragmentIconScript.bamboo_parts()
+	var m: Dictionary = _bamboo_metrics(parts)
+	_ck("bamboo_parts() 有料（%d 笔 = %d 根竹身 / %d 道节 / %d 片叶）"
+			% [parts.size(), int(m["stalks"]), int(m["nodes"]), int(m["leaves"])],
+			int(m["stalks"]) >= 2 and int(m["nodes"]) > 0 and int(m["leaves"]) > 0)
+	_ck("每根竹身两头都量得到宽（各是底下两个点、上面两个点的梯形）",
+			bool(m["heads_ok"]))
+
+	# ① **收分**。这是评审点名要量的那一条，而它**只能量多边形自己**——
+	#    等宽竖条（= 柱子 = 旧画法）在这里量出来正好 1.00。
+	_ck(("竹身是**收分**的（最不收的那根 底/梢 = %.2f，要求 ≥ 1.5；"
+			+ "等宽竖条量出来是 1.00，那是柱子不是竹子）") % float(m["taper"]),
+			float(m["taper"]) >= 1.5)
+
+	# ② **节少**。旧画法的签名是 3 根 × 4 道 = 12 道横节，读出来是窗棂。
+	#    判据按**每根**算而不是按总数：三根一排各划四道和一根划十二道
+	#    总数一样，读出来的东西不一样。
+	_ck(("节是**少**的（%d 道 / %d 根 = 每根 %.1f，要求 ≤ 2.5；"
+			+ "旧画法是每根 4 道，那 12 道横节就是窗格）")
+			% [int(m["nodes"]), int(m["stalks"]), float(m["per_stalk"])],
+			float(m["per_stalk"]) <= 2.5)
+	_ck("节确实存在（%d 道；一道都没有就只是一根绿色的棍）" % int(m["nodes"]),
+			int(m["nodes"]) >= int(m["stalks"]))
+
+	# ③ 节要**探出竹身**才看得见。窄了就缩进竹身里，而缩进去的节等于没画。
+	#
+	#    这一条的头一版写错了方向，值得留着：它量的是「节宽 / 竹身宽」这个
+	#    **整宽之比**（产品给的 1.7），门槛却照着**半宽之比**写了 2.0 ——
+	#    两个数差一个 2 倍，于是它对着自己的产品报红。**比值的分子分母必须
+	#    同时是半宽或同时是整宽**，混着写出来的门槛量的是别的东西。
+	#    现在改量它当初想量的那件事本身：**节两侧各探出竹身多少个设计单位**。
+	#    22px 的盘上 1 个单位就是 1px，所以「探出 ≥ 1.0」才是"看得见"那句话
+	#    的数值形式——而"宽 1.7 倍"这个比值在盘上是量不出看得见看不见的。
+	var proud := 999.0
+	for nd in _parts_of(parts, "line", "node"):
+		var a: Vector2 = nd["a"]
+		var b: Vector2 = nd["b"]
+		var stalk_hw: float = FragmentIconScript.bamboo_half_width(a.y)
+		proud = minf(proud, absf(b.x - a.x) * 0.5 - stalk_hw)
+	_ck(("节两侧各探出竹身 %.2f 个单位（要求 ≥ 1.0，即 22px 的盘上各 1px；"
+			+ "缩进竹身里的节等于没画）") % proud, proud >= 1.0)
+
+	# ④ **叶**：这个尺寸上唯一认得出「竹」而不是「栅栏」的东西。
+	#    长而窄——宽 3 倍以上的叶在这个尺寸上是一块补丁。
+	_ck("叶是**长而窄**的（最不窄那片 长/宽 = %.2f，要求 ≥ 2.5）"
+			% float(m["leaf_ratio"]), float(m["leaf_ratio"]) >= 2.5)
+	_ck("叶有 %d 片（要求 ≥ 4；旧画法在底栏那两格是 0 片）" % int(m["leaves"]),
+			int(m["leaves"]) >= 4)
+
+	# ⑤ 叶挂在**梢**那一段。挂在中段以下读成灌木，挂在梢上才读成竹。
+	var stalk_mid: float = (FragmentIconScript.BAMBOO_Y1
+			+ FragmentIconScript.BAMBOO_Y0) * 0.5
+	_ck("叶挂在梢那一段（最下一片叶 y = %.1f，须在竹身中点 %.1f 之上）"
+			% [float(m["lowest_leaf"]), stalk_mid], float(m["lowest_leaf"]) <= stalk_mid)
+
+	# ⑥ 整株要装得进 `FragmentBar` 那个 22px 的盘。**盘外 23~26.5m 那一圈是
+	#    "这一格是哪一件"的扫视信号**，而 `lookdev_journey` 的取样窗口正是
+	#    按「圆盘 22 + RIM_W 5」推的：图标伸进去，那条判据量到的就是图标。
+	#
+	#    这一条**当场抓到过产品的一个错**：第一版 `BAMBOO_Y0=21`/`HW0=2.4`，
+	#    而我当时只算了叶梢（21.1）就宣布"装得进 22 的盘"——**竹身底部的
+	#    外角在半径 23.2，已经伸进那一圈里去了**。最远点往往是某根杆子的角，
+	#    不是你以为的那个叶尖。
+	_ck(("整株落在 22px 的盘里（最远 %.1f ≤ 22；盘外 23~26.5m 那一圈是"
+			+ "「这一格是哪一件」的扫视信号，图标伸进去就量废了）") % float(m["far_r"]),
+			float(m["far_r"]) <= 22.0)
+
+	# ---- 正对照：把旧画法那份「三根等宽竖条 + 每根四道横节」原样搭出来，
+	#      用**上面同一个** `_bamboo_metrics()` 量一遍。三条全红 = 上面那三条
+	#      真的在承重，而不是对着新画法自说自话。
+	#
+	#      顺带记一条量法上的坑：旧画法**没有叶**，而"最窄叶的长宽比"在 0 片时
+	#      是 99（vacuous），**照样过**——所以拦它的只能是「叶 ≥ 4 片」那条，
+	#      光量长宽比在一个没有叶的世界里恒绿。这就是这两条必须成对写的原因。
+	var old_parts: Array = []
+	for sx in [-7.5, 0.0, 7.5]:
+		var x: float = sx
+		old_parts.append({"k": "poly", "c": "stalk", "p": PackedVector2Array([
+			Vector2(x - 2.0, 21.0), Vector2(x + 2.0, 21.0),
+			Vector2(x + 2.0, -16.0), Vector2(x - 2.0, -16.0)])})
+		for ny in [15.0, 7.0, -1.0, -9.0]:
+			old_parts.append({"k": "line", "c": "node",
+					"a": Vector2(x - 3.0, ny), "b": Vector2(x + 3.0, ny), "w": 1.6})
+	var om: Dictionary = _bamboo_metrics(old_parts)
+	_ck("正对照：旧画法搭出来了（%d 笔 = 3 根竹身 + 12 道横节，正是那张窗格）"
+			% old_parts.size(), old_parts.size() == 15)
+	_ck("正对照：旧画法过不了收分那条（同一把尺子量出 %.2f < 1.5）"
+			% float(om["taper"]), float(om["taper"]) < 1.5)
+	_ck("正对照：旧画法过不了节少那条（同一把尺子量出每根 %.1f > 2.5）"
+			% float(om["per_stalk"]), float(om["per_stalk"]) > 2.5)
+	_ck(("正对照：旧画法过不了叶那条（%d 片 < 4；长宽比那条在 0 片时恒绿，"
+			+ "拦不住它）") % int(om["leaves"]), int(om["leaves"]) < 4)
 
 
 ## WCAG 相对亮度。sRGB 口径——Godot 的 `Color` 就是 sRGB，先转线性再加权。

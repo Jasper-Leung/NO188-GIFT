@@ -182,24 +182,24 @@ func _draw_fragment_icon(ctr: Vector2, idx: int, col: Color, alpha: float) -> vo
 		0: FragmentIconScript.paint_cloud(self, ctr, col, alpha, 0.44)
 		1: FragmentIconScript.paint_gaiwan(self, ctr, col, alpha, 0.95)
 		2: FragmentIconScript.paint_guqin(self, ctr, col, alpha, 0.95)
-		3: _draw_bamboo(ctr, col, alpha)
+		3: FragmentIconScript.paint_bamboo(self, ctr, col, alpha, 1.0)
 		4: _draw_bird(ctr, col, alpha)
 
 
-## 云/茶/琴三件走 `FragmentIcon` 那一份（`paint_cloud` / `paint_gaiwan` /
-## `paint_guqin`），和单碎片放大图、明信片五格同一个形状。
-## 原来这三个文件里各有四份手抄的 `_draw_*`，而三份**不是抄的同一个算法**：
-## 逐张放大看下来三件都读不出自己是什么（第四轮 P0-2）。
-## 上面那三个 `sc` 是"这一格要多大"：盘半径 22、云规范半宽 43
-## （0.44 → 半宽 19），茶琴规范最大半径 ~20（0.95 → 19）。**改这三个数要连
-## 规范空间一起改**，而 `verify_mini_game.gd` 6k 节量的是"缩到 22px 还认得出吗"。
-func _draw_bamboo(c: Vector2, col: Color, a: float) -> void:
-	for s in range(-1, 2):
-		var bx = c.x + s * 9
-		for n in range(4):
-			var by = c.y - 14 + n * 10
-			draw_line(Vector2(bx, by - 10), Vector2(bx, by + 4), Color(col.r, col.g, col.b, a), 2.5)
-			draw_line(Vector2(bx - 4, by), Vector2(bx + 4, by), Color(col.r, col.g, col.b, a), 1.5)
+## 云/茶/琴/竹/禽五件全部走 `FragmentIcon` 那一份，和单碎片放大图、明信片五格
+## 同一个形状。这三个文件里原来各有四份手抄的 `_draw_*`，而**不是抄的同一个
+## 算法**：逐张放大看下来三件都读不出自己是什么（第四轮 P0-2），竹在 22px 的
+## 盘上读成一张窗格（第五轮 P0-3）。
+##
+## 竹那一份原来和 `FragmentIcon._draw_bamboo` **逐字相同**——两份同时坏，
+## 所以对拍那两份永远绿，而"一模一样"这件事看着像最健康的状态。
+## 现在连它也收进来：`sc = 1.0` 是"这一格要多大"，而竹规范最远那一点半径
+## **21.3**——落在**竹身底部的外角**上，不是叶梢，被 `FragmentBar` 那个半径
+## 22 的盘卡着（盘外 23~26.5m 那一圈是"这一格是哪一件"的扫视信号，
+## 图标伸进去那条判据就量废了）。**第一版按叶梢算出 21.1 就宣布装得下，
+## 而外角当时在 23.2，已经伸进那一圈里**：判"剪影装不装得进盘"，
+## 最远点往往是某根杆子的角。
+## **判据在 `verify_postcard_ending.gd` 3b-4 节**，量的就是这个剪影本身。
 
 
 ## 禽：走 `FragmentIcon.paint_bird` 那一份，和单碎片放大图、明信片五格

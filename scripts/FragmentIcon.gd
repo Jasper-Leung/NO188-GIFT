@@ -19,7 +19,7 @@ func _draw() -> void:
 		0: paint_cloud(self, Vector2.ZERO, col, alpha, 0.40)
 		1: paint_gaiwan(self, Vector2.ZERO, col, alpha, 0.83)
 		2: paint_guqin(self, Vector2.ZERO, col, alpha, 0.85)
-		3: _draw_bamboo(col)
+		3: paint_bamboo(self, Vector2.ZERO, col, alpha, 0.82)
 		4: _draw_bird(col)
 
 
@@ -322,17 +322,119 @@ static func _xform(pts: PackedVector2Array, c: Vector2, sc: float) -> PackedVect
 	return out
 
 
-func _draw_bamboo(col: Color) -> void:
-	for sx in range(-1, 2):
-		var bx = sx * 9.0
-		for n in range(4):
-			var by = -14.0 + n * 10.0
-			draw_line(Vector2(bx, by - 10.0), Vector2(bx, by + 4.0), col, 2.5)
-			draw_line(Vector2(bx - 4.0, by), Vector2(bx + 4.0, by), col, 1.5)
-
-
 func _draw_bird(col: Color) -> void:
 	paint_bird(self, Vector2.ZERO, col, alpha, 0.9)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 竹：收成**一个出处**，并且按「22px 的盘上认不认得出」重画
+# ══════════════════════════════════════════════════════════════════════
+#
+# 第五轮 P0-3：底栏那个 22px 的盘上，竹读成**一张窗格**。
+#
+# 原来三份画法里有**两份是逐字相同的同一套算法**（`FragmentBar` 与
+# `FragmentIcon`），第三份（`Postcard`）多两片叶。而那套算法是
+# **三根等宽竖线，每根再横划四道节**——3 根竖 × 12 道横节在 22px 上
+# 就是一张窗格。第四轮判它「✓」看的是**明信片上的大尺寸**，那一版有叶子；
+# 而玩家一路盯着的是底栏。同一件东西在两个尺寸上读成两样东西，
+# 这一族问题的第四份（前三份是禽、云/茶/琴）。
+#
+# 更麻烦的是**两份坏的那份还一模一样**——对拍那两份永远绿，
+# 它们本来就一样，而「一样」的那一份是坏的。收口之后三处调同一个出处。
+#
+# 认得出竹要三样同时在，缺一样就退回一根绿色的棍：
+#   · **收分**——竹身自下而上收窄（底 2.4 → 梢 1.0）。等宽竖条是柱子不是竹子。
+#     这一条是评审点名要量的：「量三根竖条的**收分**，而不是量有几道节」。
+#   · **节少而粗**——每根**两道**，不是四道。节是竹子身上最认得出的一处，
+#     可三根一排各划四道，它就成了窗棂；两道只够读成"这根是一节一节长的"。
+#   · **叶**——长而窄（长约 3.3 倍宽），挂在梢那一段往外斜。
+#     这个尺寸上唯一认得出「竹」而不是「栅栏」的东西，缺了它三条竖线就是栅栏。
+#
+# 规范空间与云/茶/琴/禽共用：全部落在半径 22 之内（`FragmentBar` 那个盘的
+# 盘外 23~26.5m 是"这一格是哪一件"的扫视信号，图标伸进去就把那条判据量废了）。
+## 三根竹身落在哪。间距 7.5 是被**两道节不许并成一条横线**卡的：
+## 节最宽那处（下面那道）的半宽是 `BAMBOO_NODE_W * hw(y)`，两倍之后要
+## 小于间距，否则中间那道和右边那道会连成一根横贯的杠——那正是窗棂。
+const BAMBOO_X := [-7.5, 0.0, 7.5]
+## 竹身：底 y=19 / 半宽 2.2，梢 y=−16 / 半宽 1.0。**收分比 2.2。**
+##
+## `Y0`/`HW0` 是被**盘沿**卡的，而卡住它的是**竹身底部的外角**而不是叶梢：
+## 外角在 `(7.5+2.2, 19)` → 半径 21.4。第一版写的是 `Y0=21` / `HW0=2.4`，
+## 而当时只算了叶梢（21.1）就宣布"装得进 22px 的盘"——**外角在 23.2，
+## 已经伸进 `FragmentBar` 盘外 23~26.5m 那一圈扫视信号里了**。
+## 可推广的一条：**判"这个剪影装不装得进盘"，最远点往往是某根杆子的角，
+## 不是你以为的那个叶尖。**
+const BAMBOO_Y0 := 19.0
+const BAMBOO_Y1 := -16.0
+const BAMBOO_HW0 := 2.2
+const BAMBOO_HW1 := 1.0
+## 竹节两道。只列 y，横向半宽由那一处的竹身宽推出来（`bamboo_half_width`），
+## 所以「节比竹身宽多少倍」是一条**算出来的关系**而不是抄出来的数——
+## 改竹身的收分，节跟着变，而两处不会各自漂。
+const BAMBOO_NODES := [9.0, 1.0]
+## 节比那一处竹身宽几倍（半宽的倍数）。1.7 是被上面那道"不许并成一条横线"
+## 卡出来的：1.8 就并了。判"节看得见"量的不是这个数，是**节两侧各探出
+## 竹身多少**（`(W-1)*hw`），因为缩进竹身里的节等于没画。
+const BAMBOO_NODE_W := 1.7
+## 竹叶：每根两片。**方向是逐根定的不是算出来的**——外侧那两根朝外，
+## 中间那根一左一右；全按 `sign(x)` 的话中间那根的两片都朝右，
+## 正好压在右边那根身上，三根就读成两根。
+const BAMBOO_LEAVES := [
+	# [竹身 x, 叶根 y, 朝向]
+	[-7.5, -9.0, -1.0], [-7.5, -4.0, -1.0],
+	[0.0, -9.0, -1.0], [0.0, -4.0, 1.0],
+	[7.5, -9.0, 1.0], [7.5, -4.0, 1.0],
+]
+## 一片叶：从叶根往外伸的方向向量（未归一）与半宽。伸 7、垂 5 → 长 8.6，
+## 半宽 1.3 → 宽 2.6，**长宽比 3.3**。比再小就读成三根分叉的棍子，
+## 比再大在这个尺寸上就是一块补丁。
+const BAMBOO_LEAF_REACH := Vector2(7.0, -5.0)
+const BAMBOO_LEAF_HW := 1.3
+
+
+## 竹的设计坐标。**这一份同时是画法和不碰画笔的纯函数**，回归直接调它：
+## `paint_bamboo` 只是把它重放一遍，而几何断言量的正是这个剪影本身。
+static func bamboo_parts() -> Array:
+	var out: Array = []
+	for sx in BAMBOO_X:
+		var x: float = sx
+		out.append({"k": "poly", "c": "stalk", "p": PackedVector2Array([
+			Vector2(x - BAMBOO_HW0, BAMBOO_Y0), Vector2(x + BAMBOO_HW0, BAMBOO_Y0),
+			Vector2(x + BAMBOO_HW1, BAMBOO_Y1), Vector2(x - BAMBOO_HW1, BAMBOO_Y1)])})
+		for ny in BAMBOO_NODES:
+			var hw: float = bamboo_half_width(float(ny))
+			out.append({"k": "line", "c": "node",
+					"a": Vector2(x - hw * BAMBOO_NODE_W, float(ny)),
+					"b": Vector2(x + hw * BAMBOO_NODE_W, float(ny)), "w": 1.6})
+	for lf in BAMBOO_LEAVES:
+		var lx: float = lf[0]
+		var ly: float = lf[1]
+		var side: float = lf[2]
+		var root := Vector2(lx + side * bamboo_half_width(ly), ly)
+		var dir: Vector2 = Vector2(BAMBOO_LEAF_REACH.x * side, BAMBOO_LEAF_REACH.y)
+		var perp: Vector2 = dir.orthogonal().normalized() * BAMBOO_LEAF_HW
+		out.append({"k": "poly", "c": "leaf",
+				"p": PackedVector2Array([root + perp, root + dir, root - perp])})
+	return out
+
+
+## 竹身在高度 y 处的半宽。节点那道横杠按它取，所以「节比竹身宽 1.5 倍」
+## 是一条真算出来的关系而不是抄出来的数——改竹身的收分，两道节跟着变。
+static func bamboo_half_width(y: float) -> float:
+	var t: float = clampf((y - BAMBOO_Y1) / (BAMBOO_Y0 - BAMBOO_Y1), 0.0, 1.0)
+	return lerpf(BAMBOO_HW1, BAMBOO_HW0, t)
+
+
+static func paint_bamboo(ci: CanvasItem, c: Vector2, col: Color, a: float,
+		sc: float) -> void:
+	var out := Color(col.r, col.g, col.b, a)
+	for part in bamboo_parts():
+		match String(part["k"]):
+			"poly":
+				ci.draw_colored_polygon(_xform(part["p"], c, sc), out)
+			"line":
+				ci.draw_line(c + Vector2(part["a"]) * sc, c + Vector2(part["b"]) * sc,
+						out, float(part["w"]) * sc)
 
 
 ## 禽那只鸟画过三遍：顶栏底栏（`FragmentBar._draw_bird`）、单碎片放大图

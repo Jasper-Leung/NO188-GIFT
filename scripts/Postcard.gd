@@ -587,39 +587,20 @@ func _draw_floating_leaves(w: float, h: float) -> void:
 ## 标签是对的，所以每处单看都成立、合起来全错。把 dispatch 收成一个函数
 ## 就是为了让「slot 0 是云」这件事只写一次。
 func _draw_fragment_icon(slot_idx: int, c: Vector2, col: Color, a: float, sc: float) -> void:
-	# 云/茶/琴走 `FragmentIcon` 那一份，和顶栏底栏、单碎片放大图同一个形状。
+	# 云/茶/琴/竹走 `FragmentIcon` 那一份，和顶栏底栏、单碎片放大图同一个形状。
 	# 原来这里是三份**各自自洽**的手抄：逐张放大看，三件都读不出自己是什么
-	# （第四轮 P0-2）。三个 `sc` 系数把三处规范空间换算回这一格要的显示大小：
-	# 云规范半宽 43，琴最大半径 19.8、茶 20.5，而明信片的格子是底栏那个
-	# 22px 盘的两倍多，所以琴要 ×1.9 才和原来一样大。
+	# （第四轮 P0-2）。四个 `sc` 系数把规范空间换算回这一格要的显示大小：
+	# 云规范半宽 43，琴最大半径 19.8、茶 20.5、竹 21.3，而明信片的格子是底栏
+	# 那个 22px 盘的两倍多，所以琴要 ×1.9 才和原来一样大。
+	# 竹原来这里是**第四份手抄**——和 `FragmentBar` / `FragmentIcon` 那两份
+	# 逐字相同的三竖四节（一张窗格），只有它自己多了两片叶，于是只有这一档
+	# 看得见叶子。第五轮 P0-3 收口之后它是 `paint_bamboo` 的第四个调用点。
 	match slot_idx:
 		0: FragmentIconScript.paint_cloud(self, c, col, a, sc * 0.88)
 		1: FragmentIconScript.paint_gaiwan(self, c, col, a, sc)
 		2: FragmentIconScript.paint_guqin(self, c, col, a, sc * 1.9)
-		3: _draw_bamboo(c, col, a, sc)
+		3: FragmentIconScript.paint_bamboo(self, c, col, a, sc * 1.8)
 		4: _draw_bird(c, col, a, sc)
-
-
-func _draw_bamboo(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var ink := Color(col.r, col.g, col.b, a)
-	for s in range(-1, 2):
-		var bx = c.x + s * 18 * sc
-		for n in range(4):
-			var by = c.y - 28 * sc + n * 20 * sc
-			draw_line(Vector2(bx, by - 20 * sc), Vector2(bx, by + 8 * sc), ink, 4.0 * sc)
-			# 竹节：节间要略窄一点，才看得出是一节一节长的
-			draw_line(Vector2(bx - 8 * sc, by), Vector2(bx + 8 * sc, by), ink, 2.5 * sc)
-		# 竹叶两片，认得出是竹而不只是一排竖条
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(bx + 2 * sc, c.y - 48 * sc),
-			Vector2(bx + 22 * sc, c.y - 58 * sc),
-			Vector2(bx + 5 * sc, c.y - 36 * sc),
-		]), ink)
-		draw_colored_polygon(PackedVector2Array([
-			Vector2(bx - 2 * sc, c.y - 34 * sc),
-			Vector2(bx - 22 * sc, c.y - 44 * sc),
-			Vector2(bx - 5 * sc, c.y - 22 * sc),
-		]), ink)
 
 
 ## 禽：走 `FragmentIcon.paint_bird` 那一份，和顶栏底栏、单碎片放大图同一个
