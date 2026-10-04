@@ -425,6 +425,23 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						云茶琴竹禽同序、相邻名字不叠、整排在卡片之下；外加两张卡的
 						标题齐平 ≤1px 与行盒等高——齐平那两条**必须摆在点击之前**，
 						`_choose_ending()` 把那几个成员全置成 Nil）
+  verify_endcard_back_editor.gd 背面写字编辑器体检（三处会各自中断执行的老伤：
+						不存在的 `Control.PRESET_CENTER_WIDE` / `Control.bg_color` /
+						`TextEdit.max_length`；断**构成**不断总数——遮罩一层、
+						动作两个、输入框一个、预览一块；子控件不叠、
+						输入真读进 `_back_text`、超长截断到 200 字；
+						1280×1280 与 **1280×720 项目真实分辨率**各量一遍）。
+						**第四轮 P1-3 补的那一节量的是那两个按钮**（原来两个都是
+						裸 `Button.new()`，底 0.1 灰 alpha 0.6、`border_width = 0`，
+						合成到 0.05 的遮罩上**1.07:1、一条边都没有**）——
+						**病在边界不在字**：默认按钮字色本来就亮（12.9:1），
+						所以判据断的是边。四条 + 一条正对照（拿引擎默认那档自己
+						算，它 1.07:1）。**「有一条边」与「边线的对比度」必须成对写**：
+						把 `_style_back_button()` 两个调用点删掉，那两条对比度
+						**照样全绿**——默认 `border_color` 是浅灰而
+						`border_width` 是 **0**，边根本没画出来；
+						对比度量的是"画出来会有多清楚"，`border_width ≥ 1` 量的
+						才是"它在不在屏上"
   lookdev_postcard.gd      明信片 19 张定妆照（四档纸面/满配/背面三态（含**写满 200 字
 						那一档字号**）/蜡封三态/未竟缺格/二选一/揭示/**回执中英各一张**）
 						（**不能加 --headless**、**不能加 --quit-after**）。
@@ -597,7 +614,10 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 "$GODOT" --path . --script tools/lookdev_postcard.gd
 
 # ---------------------------------------------------------------- 一条命令全跑完
-# 34 条无头回归 + 7 条要开窗口的（不列进默认轮次，因为没跑的必须明写"没跑"）。
+# 31 条无头回归 + 7 条要开窗口的（不列进默认轮次，因为没跑的必须明写"没跑"）。
+# 这两个数是 `tools/` 下 `verify_*.gd` 的总数减去 `check_all.ps1` 里那份
+# `$NEEDS_WINDOW`——**别手抄**，`pwsh -File tools/check_all.ps1` 每次都会把
+# 真实的条数打进汇总那一行。
 # 不确定该跑哪几条时跑这个；它打印一张给评审看的表。
 bash tools/check_all.sh
 bash tools/check_all.sh verify_water verify_story   # 只跑指定的几条
