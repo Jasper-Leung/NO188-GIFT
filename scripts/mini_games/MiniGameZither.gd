@@ -154,14 +154,126 @@ static func hui_positions(from_frac: float, to_frac: float, count: int) -> Packe
 	return out
 
 
+## 琴身的收分多边形。**抽成静态纯函数**的原因不是整洁：`head_h` / `tail_h`
+## / 收分的起点是琴身、弦、雁足三样共用的尺寸，原先只写在 `_draw()` 里，
+## 于是"弦有没有超出木头""雁足有没有被琴身盖住"这两条在 `--headless` 下
+## 根本无从量起（headless 根本不调 `_draw`，见 CLAUDE.md 已知陷阱）。
+static func body_poly(board: Rect2) -> PackedVector2Array:
+	var cy := board.position.y + board.size.y * 0.5
+	var head_h := board.size.y * 0.5
+	var tail_h := board.size.y * 0.34
+	return PackedVector2Array([
+		Vector2(board.position.x, cy - head_h),
+		Vector2(board.end.x - board.size.x * 0.10, cy - tail_h),
+		Vector2(board.end.x, cy - tail_h * 0.72),
+		Vector2(board.end.x, cy + tail_h * 0.72),
+		Vector2(board.end.x - board.size.x * 0.10, cy + tail_h),
+		Vector2(board.position.x, cy + head_h),
+	])
+
+
+## 琴身在某一行的左右沿。**纯函数，不碰画笔**。
+##
+## 四根弦原来是按 `board` 的**全宽**画的（`_draw_string_h` 里那个 `x1 =
+## board.end.x - 18`），而琴身是内收的多边形——于是在靠外的那两根弦上，
+## 弦从 `x ≈ 0.70·W` 之后就在木头外面了，那一段连同它两端的琴码和雁柱一起
+## 悬在半空，屏上读出来是"四条线加四个悬空的小方块"。
+##
+## 判据钉的是这个函数量出来的**那一行的实际左右沿**，不是弦画在哪儿：
+## 弦的左右端必须落在这一行的沿**内侧**，而两端点到沿的距离得由弦自己的
+## 内缩量决定（`STRING_INSET`），写死一个 `board.end.x` 就是把 bug 抄回来。
+static func body_span_at(body: PackedVector2Array, y: float) -> Vector2:
+	var lo := INF
+	var hi := -INF
+	var n := body.size()
+	for i in n:
+		var a := body[i]
+		var b := body[(i + 1) % n]
+		if is_equal_approx(a.y, b.y):
+			# 水平边：这一行若正落在它上面，两端都算进沿
+			if absf(y - a.y) <= 0.5:
+				lo = minf(lo, minf(a.x, b.x))
+				hi = maxf(hi, maxf(a.x, b.x))
+			continue
+		if y >= minf(a.y, b.y) and y <= maxf(a.y, b.y):
+			var t := (y - a.y) / (b.y - a.y)
+			var x := lerpf(a.x, b.x, t)
+			lo = minf(lo, x)
+			hi = maxf(hi, x)
+	if hi < lo:
+		return Vector2.ZERO
+	return Vector2(lo, hi)
+
+
+## 弦的两端（木面里侧收进来的那一点）。**纯函数**：`y` 是弦所在的那一行，
+## 返回的是这根弦真正画的左右端——回归量的是它和 `body_span_at()` 的关系。
+static func string_span(board: Rect2, body: PackedVector2Array, y: float) -> Vector2:
+	var span := body_span_at(body, y)
+	return Vector2(span.x + STRING_INSET, span.y - STRING_INSET)
+
+
+## 弦两端往木头里收多少。琴码和雁柱是钉在木面上的，弦得压在木头里一点。
+const STRING_INSET := 14.0
+
+
 ## 岳山与雁足的落点。**和 `_draw` 同源**——判据量的是画笔真的摆的那一处。
 ## 在测试里把这几个算式抄一遍的话，改画不动测、测会一直绿。
 static func head_anchor(board: Rect2) -> Vector2:
 	return Vector2(board.position.x + board.size.y * 0.12, board.get_center().y)
 
 
-static func foot_anchor(board: Rect2) -> Vector2:
-	return Vector2(board.end.x - 44.0, board.get_center().y)
+## 琴身在某一列的上下沿。`body_span_at` 的横向版本——
+## 雁足要挂在"某个 x 处的肚子底下"，而那个下沿只能横着求。
+##
+## 缺了它就会写出拿横向跨度当竖直落差的那种代码：第一版
+## `foot_anchor` 返回 `Vector2(span.y - 44.0, center.y)`，拿**右沿的 x**
+## 减 44 当锚点、再用同一行的右沿减锚点 y 当"脚该垂多低"，
+## 于是 drop 算出来 590px——琴腹底下挂了两只各半米长的脚。
+static func body_vspan_at(body: PackedVector2Array, x: float) -> Vector2:
+	var lo := INF
+	var hi := -INF
+	var n := body.size()
+	for i in n:
+		var a := body[i]
+		var b := body[(i + 1) % n]
+		if is_equal_approx(a.x, b.x):
+			if absf(x - a.x) <= 0.5:
+				lo = minf(lo, minf(a.y, b.y))
+				hi = maxf(hi, maxf(a.y, b.y))
+			continue
+		if x >= minf(a.x, b.x) and x <= maxf(a.x, b.x):
+			var t := (x - a.x) / (b.x - a.x)
+			var y := lerpf(a.y, b.y, t)
+			lo = minf(lo, y)
+			hi = maxf(hi, y)
+	if hi < lo:
+		return Vector2.ZERO
+	return Vector2(lo, hi)
+
+
+## 雁足挂在**琴腹下沿之下**，而那个下沿是琴身在该 x 处的真实边界。
+## 原来写的是 `tail_h * 0.55`，而琴尾那处的琴腹下沿在 `tail_h * 0.82`
+## 上下——两只脚于是整只都埋在木头里，画是画了，一根墨都没露出来，
+## 而"没有雁足的琴"和"有雁足的琴"在无头下是同一张图。
+static func foot_anchor(board: Rect2, body: PackedVector2Array) -> Vector2:
+	var x := board.position.x + board.size.x * FOOT_X_FRAC
+	return Vector2(x, body_vspan_at(body, x).y)
+
+
+## 琴长上几成处挂雁足。古琴的雁足在琴尾那一段，挂在琴腹底下。
+const FOOT_X_FRAC := 0.86
+
+
+## 雁足从琴腹下沿**开始**，往下、朝外分叉成两支。`drop` 是脚的高度。
+static func foot_polys(anchor: Vector2, drop: float) -> Array:
+	var out: Array = []
+	for s in [-1.0, 1.0]:
+		out.append(PackedVector2Array([
+			anchor + Vector2(0.0, 2.0),
+			anchor + Vector2(s * drop * 0.55, drop),
+			anchor + Vector2(s * drop * 1.05, drop * 0.82),
+		]))
+	return out
 
 
 ## 琴额那头的岳山与琴轸。岳山是弦在琴头那端压住的那一道，琴轸是穿过它调弦的两枚栓。
@@ -176,21 +288,6 @@ static func headgear_poly(anchor: Vector2, head_h: float) -> PackedVector2Array:
 		anchor + Vector2(0.0, head_h * 0.44),
 		anchor + Vector2(-head_h * 0.22, head_h * 0.58),
 	])
-
-
-## 琴尾那头的雁足：两只小脚，古琴是趴着放的，没有它们这张琴悬空。
-##
-## 两只都挂在**琴腹以下**。原来一支朝上一支朝下，朝上的那支从琴面里钻出来、
-## 顶出琴身，读成两片鱼鳍；脚是撑在琴底下把琴托起来的，不是长在琴面上的。
-static func foot_polys(anchor: Vector2, tail_h: float) -> Array:
-	var out: Array = []
-	for s in [-1.0, 1.0]:
-		out.append(PackedVector2Array([
-			anchor + Vector2(0.0, tail_h * 0.55),
-			anchor + Vector2(20.0, tail_h * 0.55 + s * 20.0),
-			anchor + Vector2(44.0, tail_h * 0.55 + s * 15.0),
-		]))
-	return out
 
 
 
@@ -213,15 +310,7 @@ func _draw() -> void:
 	var board := _board_rect()
 	var cy := board.position.y + board.size.y * 0.5
 	var head_h := board.size.y * 0.5
-	var tail_h := board.size.y * 0.34
-	var body := PackedVector2Array([
-		Vector2(board.position.x, cy - head_h),
-		Vector2(board.end.x - board.size.x * 0.10, cy - tail_h),
-		Vector2(board.end.x, cy - tail_h * 0.72),
-		Vector2(board.end.x, cy + tail_h * 0.72),
-		Vector2(board.end.x - board.size.x * 0.10, cy + tail_h),
-		Vector2(board.position.x, cy + head_h),
-	])
+	var body := body_poly(board)
 	draw_colored_polygon(body, Color("4A3524"))
 	draw_polyline(body, Color("2A1C12"), 3.0)
 
@@ -236,7 +325,10 @@ func _draw() -> void:
 	# 琴轸：岳山两侧各一枚
 	draw_rect(Rect2(hx0 + 0.06 * head_h, cy - head_h * 0.40, 22.0, 5.0), Color("9A7A52"), true)
 	draw_rect(Rect2(hx0 + 0.06 * head_h, cy + head_h * 0.40 - 5.0, 22.0, 5.0), Color("9A7A52"), true)
-	for fp in foot_polys(foot_anchor(board), tail_h):
+	# 雁足挂在**量出来的**琴腹下沿之下。原来写死 `tail_h * 0.55`，那是木头里面，
+	# 两只脚整只被琴身盖住——画了，等于没画。
+	var fa := foot_anchor(board, body)
+	for fp in foot_polys(fa, board.size.y * 0.16):
 		draw_colored_polygon(fp, Color("3A2818"))
 	# 徽：排在正中线上——四根弦的两根中间正好空出一条，而徽本就该在这条线上
 	for f in hui_positions(HUI_FROM, HUI_TO, HUI_COUNT):
@@ -251,7 +343,7 @@ func _draw() -> void:
 	_note_rects = _string_rects()
 	for i in range(NOTE_COUNT):
 		var sy := _note_rects[i].get_center().y
-		_draw_string_h(i, sy, board, amp)
+		_draw_string_h(i, sy, body, amp)
 		# 键位提示压在琴尾之外，数字不再抢在弦前面
 		draw_string(ThemeDB.fallback_font,
 			Vector2(board.end.x + 12.0, sy + 9.0), "%d" % (i + 1),
@@ -276,12 +368,16 @@ func _draw() -> void:
 ## 振幅 = _ring[i] 随时间衰减，位移是两端固定的驻波：
 ## sin(pi·t) 保证两端钉死不动（琴码和雁柱），sin(_ring_t·f) 给出振动。
 ## 不振时退化成一条直线，但仍然画——四根弦必须在静止时也看得出来是四根。
-func _draw_string_h(i: int, sy: float, board: Rect2, amp: float) -> void:
+func _draw_string_h(i: int, sy: float, body: PackedVector2Array, amp: float) -> void:
 	var col: Color = _note_cols[i]
 	var e: float = _ring[i]
 	var lit := _active_note == i
-	var x0 := board.position.x + 14.0
-	var x1 := board.end.x - 18.0
+	# 两端按**琴身在这一行的实际左右沿**裁，不要按 `board` 全宽。
+	# 靠外那两根弦原本一直画到 `board.end.x`，而那一段木头已经收走了——
+	# 弦连同两端的琴码、雁柱一起悬在半空。
+	var span := string_span(_board_rect(), body, sy)
+	var x0 := span.x
+	var x1 := span.y
 	var pts := PackedVector2Array()
 	for s in range(RING_SEGMENTS + 1):
 		var t := float(s) / float(RING_SEGMENTS)

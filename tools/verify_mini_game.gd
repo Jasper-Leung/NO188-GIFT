@@ -695,15 +695,30 @@ func _initialize() -> void:
 		turns.append(absf(rad_to_deg(angle_difference((q2 - q1).angle(), (q1 - q0).angle()))))
 		min_r = minf(min_r, q1.length())
 	var corners := 0
-	for t in turns:
-		if t > 30.0:
-			corners += 1
-	# 判据是**尖角占顶点的比例**，不是"有没有尖角"：多边形每一个顶点都是尖角，
+	var max_turn := 0.0
+	var concave := 0
+	for i in outline.size():
+		var q0: Vector2 = outline[(i - 1 + outline.size()) % outline.size()]
+		var q1: Vector2 = outline[i]
+		var q2: Vector2 = outline[(i + 1) % outline.size()]
+		if turns[i] <= 30.0:
+			continue
+		# **只数凸角**。多边形的招牌是凸角——八边形 8/8 全是外凸的。
+		# 凹角是相邻两团在谷底交接出来的那道棱，而**那正是评审要的东西**：
+		# 「在相邻鼓包之间留出真正的凹口」。两条判据原本互相拆台——
+		# 顶边凹口要求谷底有折角，而"不是多边形"那条把折角也记成尖角。
+		# 现在这组量到 10 凸 / 5 凹；退回八边形时 8 个仍然全是凸的，那条照样红。
+		if (q1 - q0).cross(q2 - q1) < 0.0:
+			concave += 1
+			continue
+		corners += 1
+		max_turn = maxf(max_turn, turns[i])
+	# 判据是**凸角占顶点的比例**，不是"有没有尖角"：多边形每一个顶点都是尖角，
 	# 而一朵云本来就有几处圆与圆交接的棱。旧的八边形是 8/8 = 100%，
-	# 判据是"尖角不到三分之一"，于是退回八边形必红。
+	# 判据是"凸角不到三分之一"，于是退回八边形必红。
 	_check(corners * 3 < outline.size(),
-			"云：描的轮廓不是多边形——%d/%d 个尖角（最大 %.0f°），八边形是 8/8"
-			% [corners, outline.size(), turns[turns.size() - 1]])
+			"云：描的轮廓不是多边形——%d/%d 个凸角（最大 %.0f°，另有 %d 个谷底凹棱），八边形是 8/8"
+			% [corners, outline.size(), max_turn, concave])
 	# 云底是一条平边：连着的几个点落在同一条最低线上
 	var ymax := -INF
 	for q in outline:
@@ -774,8 +789,124 @@ func _initialize() -> void:
 	# 6h 要用这两个常量，而 6h 排在各段 queue_free() 之后——先存成局部量，
 	# 别在后面那一节再去戳一个已经释放的实例
 	var cloud_thresh: float = cloud2.SUCCESS_THRESHOLD
+	# 云要读得出是**一朵**云，不是一座土包。原来的判据只管"不是多边形"和
+	# "底边是平的"，而那两条对一座外凸的土包同样成立——评审读到的就是那座土包。
+	# 尺子取评审自己给的那把：剪影面积 / 凸包面积 = 1.0 就是完全凸。
+	# 凹口深度用"每个边界点到凸包边界的最大距离"，**不能**在 r(θ) 上数谷：
+	# 平底那一段是直线，它的半径在 x=0 处最小，会被当成一个假凹口
+	# （第一版就栽在这儿，量出来 2 峰 1 谷、深 4.74，而那 4.74 是平底自己）。
+	var c_om := Vector2(INF, INF)
+	var c_ox := Vector2(-INF, -INF)
+	for q in outline:
+		var vq: Vector2 = q
+		c_om = c_om.min(vq)
+		c_ox = c_ox.max(vq)
+	var c_hull: Array[Vector2] = cloud2.convex_hull(outline)
+	var c_area := 0.0
+	var c_hn := outline.size()
+	for i in c_hn:
+		c_area += outline[i].x * outline[(i + 1) % c_hn].y \
+				- outline[(i + 1) % c_hn].x * outline[i].y
+	c_area = absf(c_area) * 0.5
+	var c_harea := 0.0
+	for i in c_hull.size():
+		c_harea += c_hull[i].x * c_hull[(i + 1) % c_hull.size()].y \
+				- c_hull[(i + 1) % c_hull.size()].x * c_hull[i].y
+	c_harea = absf(c_harea) * 0.5
+	var c_iou: float = c_area / c_harea if c_harea > 1e-6 else 0.0
+	var c_depth: float = cloud2.max_notch_depth(outline, c_hull)
+	# 门槛是量出来的：旧的 CLOUD_CIRCLES 是 iou=0.925、深 4.74（一座土包），
+	# 改过之后 iou≈0.92 而深 ≈ 12。凸度比深度卡得更死——一座土包哪怕
+	# 有一个浅谷，iou 也几乎不动。
+	_check(c_iou <= 0.93,
+			"云：轮廓不是一个外凸的土包（剪影/凸包 = %.4f ≤ 0.93；完全凸是 1.0）" % c_iou)
+	_check(c_depth >= 9.0,
+			"云：相邻鼓包之间留出了真正的凹口（最深 %.1f ≥ 9.0，旧的只有 4.74）" % c_depth)
+	# 正对照：上面那两条量的是"鼓包之间凹不凹"，得有一条直接数凹口，
+	# 否则"整团一起缩小、深度也跟着缩到门槛下"这类退法照样绿。
+	_check(cloud2.top_notches(outline) >= 2,
+			"云：顶边上有 %d 个凹口（要求 ≥2，旧的 CLOUD_CIRCLES 是 0）"
+			% cloud2.top_notches(outline))
 	if is_instance_valid(cloud2):
 		cloud2.queue_free()
+	await process_frame
+
+	# --- 琴：弦必须按**琴身在该 y 处的实际半宽**裁，雁足必须挂在木头之下 ---
+	#
+	# 评审读到的是"四条线加四个悬在半空的金色小方块"。两个成因都量得出来：
+	# ① 弦原来画到 `board.end.x - 18`，而琴身是内收的多边形——靠外那两根弦
+	#    在 x ≈ 0.70·W 之后就已经出了木头，那一段连同两端的琴码/雁柱一起悬空。
+	#    靠内那两根（cy ± 0.125H）本来就通宽，所以只是四根里有两根坏掉，
+	#    看起来像"四个方块悬在半空"而不是全崩。
+	# ② 雁足的落点写死 `tail_h * 0.55`，而琴腹下沿在那个 x 处是
+	#    `tail_h * 0.82` 上下——**两只脚整只埋在木头里，一根墨都没露出来**。
+	#    这一条评审没看见，是顺着①的坐标往下算时撞上的。
+	# 两处都是同一族：**拿尺寸常量的倍数去代替那条真实边界**。修法是抽
+	# `body_span_at()` 这个不碰画笔的纯函数，量出来再落笔。
+	var zit3: Control = load("res://scripts/mini_games/MiniGameZither.gd").new()
+	var z3stub := StubWorld.new()
+	stubs.append(z3stub)
+	zit3._world_ref = z3stub
+	zit3.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(zit3)
+	await process_frame
+	var zb: Rect2 = zit3._board_rect()
+	var zbody: PackedVector2Array = zit3.body_poly(zb)
+	var zrow: float = zb.size.y / float(zit3.NOTE_COUNT)
+	var z_bad := 0
+	var z_worst := INF
+	for i in range(zit3.NOTE_COUNT):
+		var zy: float = zb.position.y + zrow * (float(i) + 0.5)
+		var sp: Vector2 = zit3.string_span(zb, zbody, zy)
+		var raw: Vector2 = zit3.body_span_at(zbody, zy)
+		# 每根弦两端都必须在木头里，且至少内缩 STRING_INSET。
+		# 内缩是**往里**移：左端往右、右端往左，所以是 sp.x - raw.x 和
+		# raw.y - sp.y。第一版两个都写反了，四根弦于是全被判成"越界"——
+		# 极性写反的断言会红得很有说服力，而那不是产品坏了
+		var inset_l: float = sp.x - raw.x
+		var inset_r: float = raw.y - sp.y
+		if inset_l < float(zit3.STRING_INSET) - 0.5 or inset_r < float(zit3.STRING_INSET) - 0.5:
+			z_bad += 1
+		z_worst = minf(z_worst, minf(inset_l, inset_r))
+		if sp.y - sp.x < 10.0:
+			z_bad += 1
+	_check(z_bad == 0, "琴：四根弦都按琴身在该 y 处的实际宽度裁了（%d 根越界或短于 10px，最靠边的那根两端各内缩 %.1fpx / 要求 ≥ %.0fpx）" % [z_bad, z_worst, float(zit3.STRING_INSET)])
+	# 弦不许短到读成"四个点"。旧的 x1 画到 board.end.x - 18，而现在按琴身收分
+	# 之后靠外那两根会短一截——短可以，但得还是一根**贯通的线**。
+	var z_short := INF
+	for i in range(zit3.NOTE_COUNT):
+		var zy2: float = zb.position.y + zrow * (float(i) + 0.5)
+		var sp2: Vector2 = zit3.string_span(zb, zbody, zy2)
+		z_short = minf(z_short, sp2.y - sp2.x)
+	_check(z_short >= zb.size.x * 0.55,
+			"琴：最短的那根弦还是贯通的（%.0fpx ≥ 板宽的 55%%，即 %.0fpx）"
+			% [z_short, zb.size.x * 0.55])
+	# 雁足：每一个顶点都必须落在琴腹下沿之外。木头是按 x 收的，
+	# 所以要在**每个顶点自己的 x** 上竖着求下沿——第一版拿
+	# `body_span_at`（横向的）去比 y，算出来 drop = 590px，
+	# 两只半米长的脚挂在琴底下，而断言照样绿
+	var zfa: Vector2 = zit3.foot_anchor(zb, zbody)
+	var zfd: float = zb.size.y * 0.16
+	var zfps: Array = zit3.foot_polys(zfa, zfd)
+	var z_foot_out := 0
+	var z_foot_pt := 0
+	var z_deep := 0.0
+	for fp in zfps:
+		for v in fp:
+			var v3: Vector2 = v
+			z_foot_pt += 1
+			var vs: Vector2 = zit3.body_vspan_at(zbody, v3.x)
+			if v3.y >= vs.y - 1.0:
+				z_foot_out += 1
+			z_deep = maxf(z_deep, v3.y - vs.y)
+	_check(z_foot_out == z_foot_pt, "琴：雁足整只挂在琴腹之下（%d/%d 个顶点露在木头外面；旧的落点是 tail_h*0.55，两只脚整只埋着，一根墨都没露）" % [z_foot_out, z_foot_pt])
+	# 正对照 + 量级：脚画了、露在木头外面、且是**一对脚**的量级而不是半米。
+	# 只测"没埋进去"的话，一个 `_draw` 里把画脚那行删掉的版本也照样绿；
+	# 而上面那条横向跨度当竖直落差用时 drop 报到 590px，屏上是两根悬空的棍。
+	_check(zfps.size() == 2 and z_foot_pt >= 6 and z_deep > 4.0 and z_deep < zfd * 1.6,
+			"琴：两只雁足都画出来了、露出木头 %.0fpx（脚高 %.0fpx，要求 4~%.0fpx；横向跨度当竖直落差用时量到 590px）" % [z_deep, zfd, zfd * 1.6])
+	if is_instance_valid(zit3):
+		zit3.queue_free()
 	await process_frame
 
 	# --- 竹：收分的竹身 + 竹节 + 砍倒的斜靠，都得在列里 ---
@@ -929,8 +1060,9 @@ func _initialize() -> void:
 	# 雁足两只都撑在**琴腹以下**。原来一支朝上一支朝下，朝上的那支从琴面里钻出来、
 	# 顶出琴身，两片脚读成两片鱼鳍。
 	var zcy: float = zboard.get_center().y
+	var zbody2: PackedVector2Array = zit2.body_poly(zboard)
 	var feet_below := true
-	for fp2 in zit2.foot_polys(zit2.foot_anchor(zboard), zboard.size.y * 0.34):
+	for fp2 in zit2.foot_polys(zit2.foot_anchor(zboard, zbody2), zboard.size.y * 0.16):
 		for q in (fp2 as PackedVector2Array):
 			if (q as Vector2).y <= zcy:
 				feet_below = false

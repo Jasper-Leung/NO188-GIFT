@@ -179,68 +179,20 @@ func _draw_visit_pips(ctr: Vector2, r: float, slot_idx: int) -> void:
 
 func _draw_fragment_icon(ctr: Vector2, idx: int, col: Color, alpha: float) -> void:
 	match idx:
-		0: _draw_cloud(ctr, col, alpha)
-		1: _draw_teacup(ctr, col, alpha)
-		2: _draw_guqin(ctr, col, alpha)
+		0: FragmentIconScript.paint_cloud(self, ctr, col, alpha, 0.44)
+		1: FragmentIconScript.paint_gaiwan(self, ctr, col, alpha, 0.95)
+		2: FragmentIconScript.paint_guqin(self, ctr, col, alpha, 0.95)
 		3: _draw_bamboo(ctr, col, alpha)
 		4: _draw_bird(ctr, col, alpha)
 
 
-## 云：和 `Postcard._draw_cloud` / `FragmentIcon._draw_cloud` 同一套鼓包、同一段
-## 轮廓算法。原来这里是三个同半径的圆叠出来的，攒齐之后明信片上却是另一朵云 ——
-## 玩家一路看着它在顶栏长大，最后带走的那张纸上认不出是同一件东西。
-## 逐列取最上面的鼓包，别改成「每团各画半圆」（会自交，三角化出 0 面积）。
-func _draw_cloud(c: Vector2, col: Color, a: float) -> void:
-	var bumps := [
-		[Vector2(-26.0, 5.0), 13.0],
-		[Vector2(-9.0, -6.0), 19.0],
-		[Vector2(10.0, -2.0), 15.0],
-		[Vector2(24.0, 6.0), 9.0],
-	]
-	var sc := 0.44
-	var base_y := 13.0 * sc
-	var x0 := c.x - 38.0 * sc
-	var x1 := c.x + 32.0 * sc
-	var poly := PackedVector2Array()
-	const STEPS := 48
-	for i in range(STEPS + 1):
-		var x := lerpf(x0, x1, float(i) / float(STEPS))
-		var top := base_y
-		for b in bumps:
-			var r := float(b[1]) * sc
-			var dx := x - (c.x + float(b[0].x) * sc)
-			if absf(dx) < r:
-				top = minf(top, c.y + float(b[0].y) * sc - sqrt(r * r - dx * dx))
-		poly.append(Vector2(x, top))
-	poly.append(Vector2(x1, c.y + base_y))
-	poly.append(Vector2(x0, c.y + base_y))
-	draw_colored_polygon(poly, Color(col.r, col.g, col.b, a))
-	draw_arc(c + Vector2(-9.0 * sc, -6.0 * sc), 12.0 * sc, PI * 1.12, PI * 1.62, 10,
-			Color(1, 1, 1, a * 0.7), 1.5)
-
-
-func _draw_teacup(c: Vector2, col: Color, a: float) -> void:
-	draw_arc(c + Vector2(0, 2), 10.0, 0, PI, 16, Color(col.r, col.g, col.b, a), 2)
-	draw_line(c + Vector2(-10, 2), c + Vector2(-10, -4), Color(col.r, col.g, col.b, a), 2)
-	draw_line(c + Vector2(10, 2), c + Vector2(10, -4), Color(col.r, col.g, col.b, a), 2)
-	draw_arc(c + Vector2(0, -4), 10.0, PI, TAU, 16, Color(col.r, col.g, col.b, a), 2)
-	draw_arc(c + Vector2(-14, -2), 4.0, -PI * 0.3, PI * 0.3, 8, Color(col.r, col.g, col.b, a), 1.5)
-	draw_arc(c + Vector2(-3, -10), 3.0, PI, TAU, 8, Color(1, 1, 1, a * 0.5), 1.0)
-
-
-func _draw_guqin(c: Vector2, col: Color, a: float) -> void:
-	var pts = [
-		c + Vector2(-18, 3), c + Vector2(-10, -5), c + Vector2(0, -7),
-		c + Vector2(10, -5), c + Vector2(18, 3)
-	]
-	for i in range(pts.size() - 1):
-		draw_line(pts[i], pts[i + 1], Color(col.r, col.g, col.b, a), 2)
-	draw_line(pts[0], pts[4], Color(col.r, col.g, col.b, a), 2)
-	for j in range(4):
-		var y = -4.0 + j * 2.5
-		draw_line(c + Vector2(-14, y), c + Vector2(14, y), Color(1, 1, 1, a * 0.4), 1)
-
-
+## 云/茶/琴三件走 `FragmentIcon` 那一份（`paint_cloud` / `paint_gaiwan` /
+## `paint_guqin`），和单碎片放大图、明信片五格同一个形状。
+## 原来这三个文件里各有四份手抄的 `_draw_*`，而三份**不是抄的同一个算法**：
+## 逐张放大看下来三件都读不出自己是什么（第四轮 P0-2）。
+## 上面那三个 `sc` 是"这一格要多大"：盘半径 22、云规范半宽 43
+## （0.44 → 半宽 19），茶琴规范最大半径 ~20（0.95 → 19）。**改这三个数要连
+## 规范空间一起改**，而 `verify_mini_game.gd` 6k 节量的是"缩到 22px 还认得出吗"。
 func _draw_bamboo(c: Vector2, col: Color, a: float) -> void:
 	for s in range(-1, 2):
 		var bx = c.x + s * 9

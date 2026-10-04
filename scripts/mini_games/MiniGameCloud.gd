@@ -19,19 +19,43 @@ const CANCELLED := 1
 ## 原来这里是一串手抄的八边形顶点——玩家描的是"一个多边形"，而同一屏上背景
 ## 里的云是三个圆叠出来的圆鼓鼓的一团。**同一件事两套画法**，于是"云"这个字
 ## 在这一屏上没有任何东西指认。轮廓由这五团圆算出来，所以两处必然一致。
+## 这五团**不是画出来的，是量出来的**。
+##
+## 旧的一组是「主峰 + 左右肩 + 左右尾」这种按部位命名、随手摆的坐标，
+## 圆心距只有半径和的一半上下（主峰到左肩 28.6、半径和 54），于是五团
+## 叠成一坨：量出来**上半圈只有 2 座峰、最深的凹口相对深度 0.9%**、
+## 剪影面积 / 凸包面积 = 0.9340。评审读到的「几乎处处外凸的土包」
+## 就是它——`lookdev` 出的图和这三个数说的是同一件事。
+##
+## 凹口要留得下来，靠的是相邻圆心距压到**半径和的 0.75~0.9**。这一组是在
+## 一把量对了的尺子（`top_notches()`，见下）底下搜出来的：顶边上有
+## **2 个凹口**（最深的两个分别深 26.1 / 32.5）、离凸包最深 **16.4**、
+## 剪影 / 凸包 = **0.8942**、平底占全宽 **0.74**、长宽比 **1.79**。
+##
+## 长宽比是有理由的：板子是 2:1 的宽板，底下一行还要摆提示。云压得太方
+## （搜出来的那一档是 1.49）在 2:1 板上只能按高卡到 88%，横向剩 66%
+## 两侧空一大片，而提示行是按云的**下沿**摆的——云一高就压上那行字。
+##
+## 顺带记两条**尺子的坑**，两次都量错了方向：
+## ① 凹口**不能**在 r(θ) 上去数谷。云底被压成一条直线，而直线的半径在
+##    x=0 处最小，整条平边会被数成一个假凹口——第一版就是这么量出
+##    「2 峰 1 谷、深 4.74」的，那个 4.74 就是平底自己。
+## ② 也不能在轮廓的 y 序列上数局部极大：θ=0 和 θ=180 附近 x 会掉头，
+##    顺序一折凹口就数错。正解是**按 x 分列的顶边剖面**——见 `top_notches()`。
 const CLOUD_CIRCLES := [
-	[Vector2(0.0, -10.0), 30.0],     # 主峰
-	[Vector2(-26.0, 2.0), 24.0],     # 左肩
-	[Vector2(27.0, 3.0), 22.0],      # 右肩
-	[Vector2(-48.0, 15.0), 17.0],    # 左尾
-	[Vector2(49.0, 16.0), 16.0],     # 右尾
+	[Vector2(-25.3, -20.8), 16.5],   # 左上小峰
+	[Vector2(-7.4, 15.0), 21.4],     # 左身
+	[Vector2(18.6, -2.5), 32.0],     # 中峰（最高，压出中间那道谷）
+	[Vector2(30.2, -13.8), 18.9],    # 谷后的小峰
+	[Vector2(40.4, -15.5), 17.5],    # 右肩
+	[Vector2(58.8, 15.0), 21.2],     # 右尾
 ]
 ## 轮廓采样数。相邻两点之间的间距必须显著大于 `KEY_STEP`(12px)，否则键盘
 ## 光标整步走会在目标两侧横跳、`_next_seg` 卡死在没描到的那一段上。
 const OUTLINE_SAMPLES := 40
 ## 云底压平的那条线。团状轮廓的底是圆的，而画上的云一律坐在一条平边上——
 ## 没有平底的那团东西读成"一团棉花"而不是"一片云"。
-const FLAT_Y := 27.0
+const FLAT_Y := 30.7
 const PATH_TOLERANCE := 45.0
 const SUCCESS_THRESHOLD := 0.75
 
@@ -218,6 +242,148 @@ static func cloud_outline(circles: Array, samples: int, flat_y: float) -> Packed
 		# 底沿压平：落在平边以下的点抬上来，相邻两点之间自然连成一条直线
 		out.append(Vector2(dir.x * far, minf(dir.y * far, flat_y)))
 	return out
+
+
+## 凸包（Andrew monotone chain）。**纯函数，不碰画笔**。
+##
+## 存在的理由只有一个：判"这朵云是不是一座外凸的土包"，得有一把尺子，
+## 而"看起来像个土包"量不到。评审给的那把就是剪影面积 ÷ 凸包面积——
+## 1.0 表示完全凸。这个函数和下面两个是一套，回归拿同一份轮廓量。
+static func convex_hull(pts: PackedVector2Array) -> Array[Vector2]:
+	var uniq: Dictionary = {}
+	for p in pts:
+		uniq["%.4f,%.4f" % [p.x, p.y]] = p
+	var q: Array[Vector2] = []
+	for k in uniq.keys():
+		q.append(uniq[k])
+	if q.size() < 3:
+		return q
+	q.sort_custom(func(a: Vector2, b: Vector2) -> bool:
+		return a.x < b.x if not is_equal_approx(a.x, b.x) else a.y < b.y)
+
+	var half := func(seq: Array[Vector2]) -> Array[Vector2]:
+		var o: Array[Vector2] = []
+		for c in seq:
+			while o.size() >= 2:
+				var a: Vector2 = o[o.size() - 2]
+				var b: Vector2 = o[o.size() - 1]
+				# 逆时针为正；非正就说明 b 凹进去了，弹掉
+				if (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) > 0.0:
+					break
+				o.remove_at(o.size() - 1)
+			o.append(c)
+		return o
+	var lo: Array[Vector2] = half.call(q)
+	var rev: Array[Vector2] = q.duplicate()
+	rev.reverse()
+	var hi: Array[Vector2] = half.call(rev)
+	var out: Array[Vector2] = []
+	for v in lo:
+		out.append(v)
+	for v in hi:
+		out.append(v)
+	if out.size() >= 2:
+		out.remove_at(out.size() - 1)
+		out.remove_at(out.size() - 1)
+	return out
+
+
+## 轮廓离凸包最远有多远 = 最深的那个凹口。凸形恒为 0。
+##
+## **不能**改成"在 r(θ) 上数谷"：底沿是压平的一条直线，而直线在 x=0 处
+## 半径最小，整整一条平边会被数成一个假凹口——第一版就是这么量出
+## "2 峰 1 谷、深 4.74"的，而那个 4.74 就是平底自己。
+static func max_notch_depth(pts: PackedVector2Array, hull: Array[Vector2]) -> float:
+	if hull.size() < 3:
+		return 0.0
+	var worst := 0.0
+	for p in pts:
+		var d := INF
+		for i in hull.size():
+			d = minf(d, _seg_dist(p, hull[i], hull[(i + 1) % hull.size()]))
+		worst = maxf(worst, d)
+	return worst
+
+
+## 顶边上有几个凹口。**尺子的正对照**：`max_notch_depth` 量的那个数
+## 在"整团一起缩小"时会跟着缩，而深度门槛是绝对值——所以另配一条
+## 直接数凹口的判据，旧的 CLOUD_CIRCLES 在这把尺子下量出来是 **0 个**
+## （就是那座土包），现在这组是 **2 个**。
+##
+## 量的是**按 x 分列的顶边剖面**，不是半径剖面，也不是原轮廓的 y 序列。
+## 三个走过的弯路，每一个都量出了一个很像样、但和眼睛看到的不一样的数：
+## ① 数 r(θ) 的极大值——量出来 0 座峰，因为那朵"云"最宽的两点在
+##    **左右两侧**，而从顶上看下去半径一路收。
+## ② 在原轮廓的 y 序列上数局部极大——那串点在 θ=0 和 θ=180 处**x 会掉头**
+##    （右尖那一段 x 先增后减），顺序一折，凹口就数错了。
+## ③ 按 x 分列、每列取最小 y，空列拿"最近的有值列"顶上——**那个填充本身
+##    就是噪声源**：它把每段台阶都变成一个"凹口"，80 列上量出 15 个。
+##    两个真的凹口 vs 十五个假的台阶，这把尺子绿得毫无信息。
+##
+## 现在的做法：先把 40 个采样点的多边形**沿边稠密重采样到 2px**（轮廓的
+## 采样数是给键盘光标留的 `KEY_STEP` 余量，不该顺带把尺子也限制住），
+## 再按 64 列取每列最小 y；**离平底不到整体高度 1/4 的列不算顶**——
+## 谷底离底沿很近时那片薄薄的"网"会被当成一道深达半高的凹口（量出
+## 63 / 66 两个，而图上只是两座峰之间的一道 V）。最后**只在一段连续的
+## 有效列里数**，不跨空洞，免得左右两侧的陡壁被当成一次起伏。
+static func top_notches(pts: PackedVector2Array) -> int:
+	const NB := 64
+	const BASE_MARGIN := 0.25
+	const TOL_FRAC := 0.06
+	var x0 := INF
+	var x1 := -INF
+	var y0 := INF
+	var y1 := -INF
+	for p in pts:
+		x0 = minf(x0, p.x)
+		x1 = maxf(x1, p.x)
+		y0 = minf(y0, p.y)
+		y1 = maxf(y1, p.y)
+	if x1 - x0 < 1e-6:
+		return 0
+	var h: float = y1 - y0
+	if h < 1e-6:
+		return 0
+	# 沿边稠密重采样到 ~2px
+	var dense := PackedVector2Array()
+	var n: int = pts.size()
+	for i in n:
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[(i + 1) % n]
+		var steps: int = maxi(1, int(a.distance_to(b) / 2.0))
+		for s in steps:
+			dense.append(a.lerp(b, float(s) / float(steps)))
+	# 每列取最小 y；离平底太近的列判为无效
+	var cut: float = y1 - h * BASE_MARGIN
+	var top := PackedFloat32Array()
+	top.resize(NB)
+	top.fill(INF)
+	for p in dense:
+		var b: int = int((p.x - x0) / (x1 - x0) * float(NB - 1))
+		top[b] = minf(top[b], p.y)
+	var tol: float = h * TOL_FRAC
+	var n_notch := 0
+	var i := 0
+	while i < NB:
+		if top[i] >= cut:
+			i += 1
+			continue
+		var j: int = i
+		while j < NB - 1 and top[j + 1] < cut:
+			j += 1
+		for k in range(i + 1, j):
+			if top[k] > top[k - 1] and top[k] >= top[k + 1] \
+					and top[k] - minf(top[k - 1], top[k + 1]) > tol:
+				n_notch += 1
+		i = j + 1
+	return n_notch
+
+
+static func _seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
+	var ab := b - a
+	var l2 := ab.dot(ab)
+	var t := 0.0 if l2 < 1e-12 else clampf((p - a).dot(ab) / l2, 0.0, 1.0)
+	return p.distance_to(a + ab * t)
 
 func _calc_path_length() -> float:
 	var l := 0.0
