@@ -686,6 +686,7 @@ func _show_back_editor() -> void:
 	_back_confirm_btn = Button.new()
 	_back_confirm_btn.text = Localization.t("back_confirm")
 	_place_fixed(_back_confirm_btn, bx, by, bw, THUMB_BTN_H)
+	_style_back_button(_back_confirm_btn)
 	_back_confirm_btn.pressed.connect(_on_back_confirmed)
 	_back_editor.add_child(_back_confirm_btn)
 
@@ -693,10 +694,59 @@ func _show_back_editor() -> void:
 	_back_skip_btn = Button.new()
 	_back_skip_btn.text = Localization.t("back_skip")
 	_place_fixed(_back_skip_btn, bx + bw + bgap, by, bw, THUMB_BTN_H)
+	_style_back_button(_back_skip_btn)
 	_back_skip_btn.pressed.connect(_on_back_confirmed)
 	_back_editor.add_child(_back_skip_btn)
 
 	_add_back_thumb(vw, h)
+
+
+## 背面编辑器那两个按钮的画法（第四轮 P1-3）。
+##
+## 原来两个都是裸的 `Button.new()`，走引擎默认主题的 StyleBoxFlat：
+## 底色 `Color(0.1, 0.1, 0.1, 0.6)`、`border_width = 0`。而这一屏的底是
+## `Color(0.05, 0.04, 0.04)` 的不透明遮罩——合成出来是 `(0.08, 0.076, 0.076)`，
+## 对遮罩本体 **1.07:1**，**一条边都没有**。于是它在图上读成"屏幕上有一块颜色
+## 稍微不太一样的地方"，而不是一个可以按的东西。
+##
+## **别去修"字对底"**：引擎默认按钮字色本来就亮（实测 12.9:1），旧画法在
+## 这一条上完全达标。病不在字，在**边界**。回归钉的也是边界。
+##
+## 三处一起补，缺一不可：
+##  · **底板不透明**——这一屏底色只有一档，半透明底板的对比度会随背景漂，
+##    而"这一屏上读得出来"只有底板自己说了算才立得住（同 `MiniGameChrome`）。
+##  · **边线**（对底板 3.85:1、对遮罩 6.06:1）——**分开"按钮"和"输入框"的
+##    是这条边，不是填色**：试过把底板提亮到撑得起 1.6:1 的差别，0.25 那档也
+##    只有 1.32:1，要再亮就得整屏提亮，而这一屏本来就是深色收尾的。
+##    底板和输入框同色是**刻意的**（同一族的墨），回归里专门记了为什么
+##    没有「底板不许和输入框同色」那一条。
+##  · **font_color 显式写**：跟着主题走，主题一换就没了。
+##
+## 三个色都取自这一屏已经在用的那几样（输入框的底、卡纸的米白），
+## 别另调一套——另调一套就成了"新加的第五个颜色"。
+const BACK_BTN_BG := Color(0.16, 0.15, 0.14)
+const BACK_BTN_BORDER := Color(0.62, 0.55, 0.44)
+const BACK_BTN_FONT := Color(0.95, 0.93, 0.88)
+const BACK_BTN_BORDER_W := 2.0
+
+
+func _style_back_button(b: Button) -> void:
+	b.add_theme_color_override("font_color", BACK_BTN_FONT)
+	b.add_theme_color_override("font_hover_color", BACK_BTN_FONT)
+	b.add_theme_color_override("font_pressed_color", BACK_BTN_FONT)
+	b.add_theme_color_override("font_focus_color", BACK_BTN_FONT)
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = BACK_BTN_BG
+		sb.border_color = BACK_BTN_BORDER
+		sb.set_border_width_all(int(BACK_BTN_BORDER_W))
+		# 状态差别只走亮度，不换色相——和 MiniGameChrome 那条「取消」同一条：
+		# 这一屏没有"出事了"的红，所以也不该在 hover 上造一个。
+		if state == "hover" or state == "focus":
+			sb.bg_color = BACK_BTN_BG.lightened(0.10)
+		elif state == "pressed":
+			sb.bg_color = BACK_BTN_BG.darkened(0.10)
+		b.add_theme_stylebox_override(state, sb)
 
 
 ## 写字时的卡片缩略图。

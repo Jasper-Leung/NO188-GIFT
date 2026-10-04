@@ -277,7 +277,9 @@ func _audit_variant_independent() -> void:
 					entry[1] == (entry[0] < 0), "entry=%s" % str(entry))
 
 	await _audit_panel_identity()
+	await _audit_panel_quietness()
 	await _audit_bird_shape()
+	await _audit_tea_and_guqin_shape()
 	await _audit_route_map()
 
 
@@ -634,6 +636,66 @@ func _audit_panel_identity() -> void:
 	_ck("五格颜色恰好覆盖五件碎片", seen.size() == 5, "seen=%s" % str(seen.keys()))
 
 
+## 3b-1b. 画区那一格不许比整张卡还响。
+##
+## 评审：「中段五个色块…是整张卡上**最响的东西**，而它们不带任何信息」。
+## 响这件事量的不是"这个颜色好不好看"，是**它在一张纸的明度阶梯上占多宽**：
+## 画区一格原来直接铺 FRAGMENT_COLS[s] 本色（再压 18%），
+## 于是禽那格 E8A04F 的通道跨度 153/255=0.60，亮度只有纸的 0.21 倍——
+## 五格全在"又深又抢戏"那一档，明信片抬头那几行小字反而读不出来。
+##
+## 修法是让格子的底板**大部分是纸**、只透一点本色（`Postcard.panel_fill()`）。
+## 面板的权威仍然是不动 `FRAGMENT_COLS` 本身：底栏 / 终局抉择屏那五个图标控件
+## 的像素断言是拿 `FRAGMENT_COLS[i]` 逐通道找的（`lookdev_postcard` 10_ 段），
+## 改了它，那边要跟着改，而"玩家在缩略图上认得这是哪一件"是更要紧的一件。
+##
+## 判据两条必须**一起**写：
+##   ① 亮度 ≥ 纸的 **60%** —— 写的是"纸的百分之几"而不是一个绝对数，
+##      因为"读起来是纸"本来就是**相对**纸说的；而纸（F4F2EA）的 WCAG 相对
+##      亮度是 0.887，五格实测 0.590~0.722 = 纸的 **66%~81%**。
+##      （第一版这里写的是绝对值 `≥ 0.76`，而那个数是拿"三个通道的平均"当
+##      亮度估的 —— 0.93 —— 压根不是本文件 `_lum()` 那个 WCAG 口径。同一段里
+##      两套亮度算法混用，跑出来五条红而产品是对的。可推广的一条：
+##      **凡是自己也实现了 WCAG 亮度的文件，阈值就只能用同一个函数量出来。**）
+##   ② 通道跨度 ≤ 原色的一半（实测最差的是禽 42%，不是茶 24%；门槛 50% 只留
+##      19% 余量，而 `FRAGMENT_COLS` 一改这条就会红——那正是它该红的时候）。
+## 只写 ① 的话"换成纯白"全过，而纯白面板会把五件彻底抹平成一样东西；
+## 只写 ② 的话"整体压暗成深灰"也全过（跨度 0），而深灰比纸更抢眼。
+func _audit_panel_quietness() -> void:
+	print("\n---------- 3b-1b. 画区底板不许比整张卡还响 ----------")
+	var cols: Array = _pc("FRAGMENT_COLS")
+	var paper: Color = _pc_script.LAND_COL
+	var paper_lum: float = _lum(paper)
+	print("  （纸 %s 的相对亮度 %.3f，下面的门槛是它的 60%% = %.3f）"
+			% [paper.to_html(false), paper_lum, paper_lum * 0.60])
+	for i in cols.size():
+		var base: Color = cols[i]
+		var fill: Color = _pc_script.panel_fill(base, paper, 0.0, false)
+		var base_span: float = _span(base)
+		var span: float = _span(fill)
+		_ck("第 %d 格底板还是纸的调子（亮度 ≥ 纸的 60%%）" % i,
+				_lum(fill) >= paper_lum * 0.60,
+				"lum=%.3f = 纸的 %d%%  fill=%s" % [_lum(fill),
+				int(round(100.0 * _lum(fill) / paper_lum)), fill.to_html(false)])
+		_ck("第 %d 格底板不响（通道跨度 ≤ 原色的一半）" % i, span <= base_span * 0.5,
+				"span %.3f vs 原色 %.3f = %d%%" % [span, base_span,
+				int(round(100.0 * span / maxf(base_span, 0.0001)))])
+
+	# 占位那一格是纸 + 一点灰，比真格更安静是对的——它压根不报任何一件
+	var ph: Color = _pc_script.panel_fill(cols[0], paper, 0.0, true)
+	_ck("占位格比任何一格真格都安静", _lum(ph) >= _lum(_pc_script.panel_fill(cols[0], paper, 0.0, false)),
+			"placeholder lum=%.3f" % _lum(ph))
+	_ck("占位格还是纸（亮度 ≥ 纸的 60%）", _lum(ph) >= paper_lum * 0.60,
+			"lum=%.3f" % _lum(ph))
+
+	# 反向对照：画笔真的调了这个纯函数。几何纯函数对不对、和画笔有没有去调它是
+	# 两件事（把 `panel_fill(...)` 那一行换回字面量，底下这些照样全绿）。
+	var src: String = FileAccess.get_file_as_string("res://scripts/Postcard.gd")
+	_ck("画笔真的调了 panel_fill（不是把算式抄了一份在 _draw 里）",
+			src.count("panel_fill(") >= 2,
+			"出现 %d 次（1 次是定义）" % src.count("panel_fill("))
+
+
 ## 3b-2. 禽那一只剪影。
 ##
 ## 这一族坏过两回，两回都**不是**"画错了"，是**三处各画一遍**：
@@ -735,6 +797,189 @@ func _audit_bird_shape() -> void:
 		for pt in _part_points(part):
 			far_r = maxf(far_r, pt.length())
 	_ck("整只鸟落在 22px 的盘里（最远 %.1f ≤ 22）" % far_r, far_r <= 22.0)
+
+
+## 茶（盖碗）与琴（古琴）这两件图标「认不认得出是自己」。
+##
+## 评审原话是这两件"画成了通用色块"。翻回最初的提交看，那两处**真的一直
+## 是几根描边线**：茶是「一个圆弧 + 两根竖线 + 一个把手弧」——那是**马克杯**，
+## 不是盖碗；琴是 `(-18,3)(-10,-5)(0,-7)(10,-5)(18,3)` 这个**上下左右全对称
+## 的透镜**再加一条底边，读出来是**一座山**。两处都是 `draw_line` / `draw_arc`
+## 的空心笔画，所以在 22px 的盘上占不到几个像素——"通用色块"说的就是这个。
+##
+## 判据拆成"这东西有什么特征"，跟禽那一节一个路子：每一条都能指着
+## `gaiwan_parts()` / `guqin_parts()` 里的某一个具体部件，而**旧画法
+## 逐条都不满足**（五处突变都做过，见 CLAUDE.md 提交规范）。
+func _audit_tea_and_guqin_shape() -> void:
+	print("\n---------- 3b-3. 茶（盖碗）与琴（古琴）认得出是自己 ----------")
+	var disc: float = PI * 22.0 * 22.0
+
+	# ---------------------------------------------------------------- 茶
+	var tea: Array = FragmentIconScript.gaiwan_parts()
+	var g: Dictionary = FragmentIconScript.GAIWAN
+	_ck("gaiwan_parts() 有料（%d 笔）" % tea.size(), tea.size() >= 3)
+
+	# ① **填实的**，不是几根描边线。旧画法全是 draw_arc/draw_line，
+	#    在 22px 的盘上填不出几个像素——"通用色块"就是它。
+	var tea_area := 0.0
+	var tea_r := 0.0
+	for part in tea:
+		for pt in _part_points(part):
+			tea_r = maxf(tea_r, Vector2(pt).length())
+		if String(part["k"]) == "poly":
+			tea_area += _poly_area(part["p"])
+		elif String(part["k"]) == "circle":
+			tea_area += PI * float(part["r"]) * float(part["r"])
+	_ck("茶是**填实**的（剪影 %.0f 单位² = 盘子的 %.0f%%，旧画法是空心笔画）"
+			% [tea_area, tea_area / disc * 100.0], tea_area >= disc * 0.25)
+	_ck("茶落在 22px 的盘里（最远 %.1f ≤ 22）" % tea_r, tea_r <= 22.0)
+
+	# ② 盖比碗宽。**这是盖碗区别于碗的第一眼**，也是它区别于旧画法那只
+	#    马克杯的地方（马克杯的杯口和杯身是一根半径）。
+	var lid_rx: float = float(g["lid_rx"])
+	var bowl_rx: float = float(g["bowl_rx"])
+	_ck("盖比碗宽（盖 %.1f > 碗 %.1f；一样宽就读成一只碗）" % [lid_rx, bowl_rx],
+			lid_rx > bowl_rx)
+
+	# ③ 盖与碗之间**有缝**。连成一体就分不出哪是盖，而分得出盖才叫盖碗。
+	var gap: float = float(g["gap"])
+	var lid_bot: float = float(g["lid_cy"])
+	var bowl_top: float = float(g["bowl_cy"])
+	_ck("盖与碗之间有一道缝（%.1f > 0）" % (bowl_top - lid_bot),
+			gap > 0.0 and bowl_top - lid_bot > 0.0)
+
+	# ④ 碗底压平 + 底下长出**圈足**。没有圈足的碗读成半颗球，
+	#    而盖碗的圈足是它和马克杯最像又最不像的一处。
+	var flat: float = float(g["bowl_flat"])
+	var foot_y: float = float(g["foot_y"])
+	var bowl_poly := PackedVector2Array()
+	for part in tea:
+		if String(part["k"]) == "poly" and _poly_area(part["p"]) > 200.0:
+			bowl_poly = part["p"]
+	var flat_pts := 0
+	for p in bowl_poly:
+		if absf(p.y - flat) < 0.01:
+			flat_pts += 1
+	_ck("碗底压平（%d 个点压在那条线上，至少 2 个）" % flat_pts, flat_pts >= 2)
+	_ck("碗底下有圈足（圈足底 %.1f > 碗底 %.1f，且在碗的宽度之内 %.1f < %.1f）"
+			% [foot_y, flat, float(g["foot_half"]), bowl_rx],
+			foot_y > flat and float(g["foot_half"]) < bowl_rx)
+
+	# ⑤ 碗身是**收**的（上半圈比最宽处还宽，读成半球就不是茶碗了）
+	var bowl_top_half := 0.0
+	for p in bowl_poly:
+		if p.y <= float(g["bowl_cy"]) + 0.01:
+			bowl_top_half = maxf(bowl_top_half, absf(p.x))
+	_ck("碗口是敞的（上沿半宽 %.1f ≥ 碗身半径的 %.0f%%，全等就是半球）"
+			% [bowl_top_half, bowl_rx * 0.9], bowl_top_half >= bowl_rx * 0.9)
+
+	# ---------------------------------------------------------------- 琴
+	var qin: Array = FragmentIconScript.guqin_parts()
+	var body: PackedVector2Array = FragmentIconScript.GUQIN_BODY
+	_ck("guqin_parts() 有料（%d 笔）" % qin.size(), qin.size() >= 5)
+
+	var qin_area := 0.0
+	var qin_r := 0.0
+	for part in qin:
+		for pt in _part_points(part):
+			qin_r = maxf(qin_r, Vector2(pt).length())
+		if String(part["k"]) == "poly":
+			qin_area += _poly_area(part["p"])
+		elif String(part["k"]) == "circle":
+			qin_area += PI * float(part["r"]) * float(part["r"])
+	_ck("琴是**填实**的（剪影 %.0f 单位² = 盘子的 %.0f%%，旧画法是空心折线）"
+			% [qin_area, qin_area / disc * 100.0], qin_area >= disc * 0.25)
+	_ck("琴落在 22px 的盘里（最远 %.1f ≤ 22）" % qin_r, qin_r <= 22.0)
+
+	# ① **不对称**：琴额（头）那端方而宽，琴尾那端收细。旧画法是
+	#    (-18,3)(-10,-5)(0,-7)(10,-5)(18,3) 这个上下左右全对称的透镜，
+	#    加一条底边之后读出来是一座山——三样特征一个都没有。
+	var body_r: Rect2 = _poly_rect(body)
+	var head_top: float = FragmentIconScript.guqin_top_at(body_r.position.x + 1.0)
+	var tail_top: float = FragmentIconScript.guqin_top_at(body_r.end.x - 1.0)
+	var head_h: float = FragmentIconScript.guqin_bottom_at(body_r.position.x + 1.0) - head_top
+	var tail_h: float = FragmentIconScript.guqin_bottom_at(body_r.end.x - 1.0) - tail_top
+	_ck("琴是**不对称**的：头端上缘 %.1f 比尾端 %.1f 高 %.1f（对称的透镜读成山）"
+			% [head_top, tail_top, tail_top - head_top], tail_top - head_top >= 2.0)
+	_ck("头端比尾端**高厚**（%.1f : %.1f，琴额方而宽、琴尾收细）" % [head_h, tail_h],
+			head_h >= tail_h * 1.5)
+	_ck("头比尾**宽**（头伸到 x=%.1f，尾伸到 x=%.1f）"
+			% [body_r.position.x, body_r.end.x],
+			-body_r.position.x > body_r.end.x * 1.05)
+
+	# ② 底下**两只**雁足，整只落在木头下面。判"在下面"必须用下缘反解——
+	#    下缘是斜的，拿一个 y 去比整条边量的是"在不在某一个高度以下"。
+	var feet: Array = []
+	for i in FragmentIconScript.GUQIN_FEET.size():
+		feet.append(FragmentIconScript.GUQIN_FEET[i])
+	_ck("底下有**两只**雁足（%d 只）" % feet.size(), feet.size() == 2)
+	var feet_ok := true
+	var feet_out := 0
+	var feet_pt := 0
+	for f in feet:
+		for p in f:
+			feet_pt += 1
+			if p.y < FragmentIconScript.guqin_bottom_at(p.x) - 0.5:
+				feet_out += 1
+	_ck("两只脚整只挂在琴腹之下（%d/%d 个顶点跑到木头上面去了）"
+			% [feet_out, feet_pt], feet_out == 0)
+	# 脚还要真的露在木头外面（整只埋着等于没画）
+	var deepest := 0.0
+	for f in feet:
+		for p in f:
+			deepest = maxf(deepest, p.y - FragmentIconScript.guqin_bottom_at(p.x))
+	_ck("脚露出木头 %.1f（要求 ≥ 3；整只埋着等于没画）" % deepest, deepest >= 3.0)
+
+	# ③ 四根弦，且每根都**收在木头里面**。按整块板子的全宽画的话，
+	#    弦两头都戳在木头外面，四个金色键位提示正好落在弦的末端上，
+	#    看起来像琴上镶了四枚金属钉。
+	_ck("有四根弦（%d 根）" % FragmentIconScript.GUQIN_STRINGS,
+			FragmentIconScript.GUQIN_STRINGS == 4)
+	var str_out := 0
+	for j in FragmentIconScript.GUQIN_STRINGS:
+		var sy: float = FragmentIconScript.GUQIN_Y0 + float(j) * FragmentIconScript.GUQIN_DY
+		var half: float = FragmentIconScript.guqin_string_half(sy)
+		if half <= 0.0 or half >= body_r.size.x * 0.5:
+			str_out += 1
+	_ck("四根弦都收在木头之内（%d 根越界或长度为 0）" % str_out, str_out == 0)
+
+	# ④ 岳山在**头**那一端（琴额的标志），不在尾巴上
+	var yue := Vector2.ZERO
+	for part in qin:
+		if String(part["k"]) == "line":
+			yue = part["a"]
+	_ck("岳山在琴额那一端（x=%.1f，要偏在头这一侧且不在正中）" % yue.x,
+			yue.x < body_r.get_center().x - 4.0)
+
+
+## WCAG 相对亮度。sRGB 口径——Godot 的 `Color` 就是 sRGB，先转线性再加权。
+func _lum(c: Color) -> float:
+	return 0.2126 * c.srgb_to_linear().r + 0.7152 * c.srgb_to_linear().g \
+			+ 0.0722 * c.srgb_to_linear().b
+
+
+## 通道跨度 = 最亮通道 − 最暗通道。这是"这个色块响不响"真正量的那个量：
+## 亮度只管它明不明，跨度才管它彩不彩——E8A04F 和 8FB35A 的亮度差不了多少，
+## 而"一眼扫过去先看到哪一格"量的正是跨度。
+func _span(c: Color) -> float:
+	return maxf(c.r, maxf(c.g, c.b)) - minf(c.r, minf(c.g, c.b))
+
+
+## 对比度，单边读（调用处一律写 "≥ 某个数"）。
+func _contrast(a: Color, b: Color) -> float:
+	var la: float = _lum(a)
+	var lb: float = _lum(b)
+	var hi: float = maxf(la, lb)
+	var lo: float = minf(la, lb)
+	return (hi + 0.05) / (lo + 0.05)
+
+
+## 上面一层带 alpha 的颜色压到下面一层上。
+func _over(top: Color, under: Color) -> Color:
+	var a: float = top.a
+	return Color(top.r * a + under.r * (1.0 - a),
+			top.g * a + under.g * (1.0 - a),
+			top.b * a + under.b * (1.0 - a), 1.0)
 
 
 func _parts_of(parts: Array, kind: String, col: String) -> Array:
@@ -948,6 +1193,63 @@ func _audit_ending_choice() -> void:
 			and card._back_skip_btn.offset_right <= card.get_viewport_rect().size.x,
 			"确认右沿 %.0f，跳过右沿 %.0f" % [card._back_confirm_btn.offset_right,
 			card._back_skip_btn.offset_right])
+	# 第四轮 P1-3：这两个按钮原来走引擎默认主题的 StyleBoxFlat
+	# （底色 alpha 0.6、`border_width = 0`），而这一屏的底是不透明遮罩，
+	# 合成出来是亮度 0.03 的一团污迹、且没有任何一条边 —— 图上读成"一块颜色
+	# 不太一样的地方"，实测字对底 ~2.5:1。判据要问**玩家读得见的那三样**：
+	# 底板不透明、有一条看得见的边、字在**自己那块底板**上够亮。
+	# 比值一律单边写（见 verify_mood_mask 第 9 节：归一化对称的量会报出
+	# 「红得没有道理」的失败，因为写反了方向）。
+	for pair in [["确认", card._back_confirm_btn], ["跳过", card._back_skip_btn]]:
+		var nm: String = pair[0]
+		var b: Button = pair[1]
+		var sb: StyleBox = b.get_theme_stylebox("normal")
+		var sb_flat: StyleBoxFlat = sb as StyleBoxFlat
+		_ck("%s 按钮的底板是**实心**的（半透明底的对比度随背景漂）" % nm,
+				sb_flat != null and sb_flat.bg_color.a >= 0.99,
+				"normal=%s" % [str(sb.get("bg_color")) if sb != null else "null"])
+		_ck("%s 按钮**有边线**（没边线的话它和输入框是同一块颜色）" % nm,
+				sb_flat != null and sb_flat.border_width_top >= 1
+					and sb_flat.border_width_bottom >= 1
+					and sb_flat.border_width_left >= 1
+					and sb_flat.border_width_right >= 1,
+				"四边 %s/%s/%s/%s" % [sb_flat.border_width_top if sb_flat else -1,
+					sb_flat.border_width_bottom if sb_flat else -1,
+					sb_flat.border_width_left if sb_flat else -1,
+					sb_flat.border_width_right if sb_flat else -1])
+		if sb_flat == null:
+			continue
+		var plate: Color = sb_flat.bg_color
+		var font_c: Color = b.get_theme_color("font_color")
+		var border_c: Color = sb_flat.border_color
+		# 这一屏的底是 END 遮罩那层，量的是**合成之后**的颜色。
+		# 底板不透明时它就是底板自己，而合成照算不误——不透明是靠上面那条
+		# 断言钉的，这一步只是别在改回半透明时静悄悄换了个底。
+		var under := Color(0.05, 0.04, 0.04, 1.0)
+		var plate_on_shade := _over(plate, under)
+		var f_onto: float = _contrast(font_c, plate_on_shade)
+		_ck("「%s」在自己那块底板上够亮（≥4.5:1，实测 %.2f:1）"
+				% [b.text, f_onto], f_onto >= 4.5,
+				"字 %s / 底 %s" % [str(font_c), str(plate_on_shade)])
+		var e_onto: float = _contrast(border_c, plate_on_shade)
+		_ck("「%s」的边线对底板够亮（≥3.0:1，实测 %.2f:1）" % [b.text, e_onto],
+				e_onto >= 3.0, "边 %s" % str(border_c))
+		# 上面那两条量的是**按钮内部**。玩家真正读不出的是**它和这一屏的底
+		# 分不分得开**——默认主题那块底板压到遮罩上只有 1.07:1。字是读得清的
+		# （引擎默认按钮字色本来就亮，12.9:1），所以"字对底 ≥4.5"那条对
+		# **旧画法照样绿**：它量的是按钮里面，而病在按钮**有没有边界**。
+		# 这两条才是钉住 P1-3 的。
+		var e_out: float = _contrast(border_c, under)
+		_ck("「%s」的边线在这一屏的底上看得见（≥3.0:1，实测 %.2f:1）" % [b.text, e_out],
+				e_out >= 3.0, "边 %s / 底 %s" % [str(border_c), str(under)])
+		var p_out: float = _contrast(plate_on_shade, under)
+		_ck("「%s」的底板和这一屏的底分得开（≥1.25:1，实测 %.2f:1）" % [b.text, p_out],
+				p_out >= 1.25, "底板 %s / 底 %s" % [str(plate_on_shade), str(under)])
+		# 故意**没有**的一条：「底板不许和旁边的输入框同色」。试过把底板提亮到
+		# 撑得起 1.6:1（0.25 那档实测 1.32:1，要再亮就得整屏提亮），代价是
+		# 底板和遮罩的关系反而更近，而且这一屏本来是深色收尾的。**分开它们
+		# 的是边线不是填色**——底板和输入框同色是刻意的（同族的墨），
+		# 所以判据钉在 border 上，别再补一条逼着底板去抢活儿。
 	_ck("缩略图不出屏", card._back_thumb.offset_bottom <= vh,
 			"底沿 %.0f，屏高 %.0f" % [card._back_thumb.offset_bottom, vh])
 	_ck("说明行也没出屏", card._back_thumb_caption.offset_top >= 0.0

@@ -143,7 +143,7 @@ const STRINGS := {
 		"dialogue_next": "下一句 ▶",
 		"dialogue_skip": "跳过 >>",
 		"dialogue_start": "开始游戏 ✚",
-		"postcard_signature": "No.188 · 五件小乐事 · 记五",
+		"postcard_signature": "五件小乐事 · 记五",
 		"postcard_variant_hint": "同一处驿站再访两次，第五格才落成真禽。",
 		# ---- 明信片正面顶部那一块：这一趟的路线图 ----
 		# 正面原先顶部是一段云天、五块碎片排成五格色卡，谁看都是同一张。
@@ -374,7 +374,7 @@ const STRINGS := {
 		"dialogue_next": "Next ▶",
 		"dialogue_skip": "Skip >>",
 		"dialogue_start": "Start ✚",
-		"postcard_signature": "No.188 · Five Small Joys · Ride Complete",
+		"postcard_signature": "Five Small Joys · Ride Complete",
 		"postcard_variant_hint": "Visit one station twice more and the last panel fills in.",
 		"postcard_map_title": "The route you rode",
 		"postcard_map_legend": "Filled = passed　Hollow = not yet",

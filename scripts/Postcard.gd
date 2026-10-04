@@ -224,12 +224,12 @@ func _draw() -> void:
 		var base_col: Color = Color.GRAY if is_placeholder else FRAGMENT_COLS[slot_idx]
 		var rx: float = i * sect_w
 		var shimmer: float = sin(_t * 1.5 + i * 1.2) * 0.04
-		var fill_col: Color = base_col.darkened(0.18 + shimmer) if not is_placeholder else Color.GRAY.darkened(0.3)
+		var fill_col: Color = panel_fill(base_col, _paper, shimmer, is_placeholder)
 		var panel := Rect2(rx, sect_y, sect_w, sect_h)
 		draw_rect(panel, fill_col)
 		if not is_placeholder:
 			_draw_panel_wash(panel, i)
-		draw_rect(panel, Color(1, 1, 1, 0.08), false, 1)
+		draw_rect(panel, Color(_ink.r, _ink.g, _ink.b, 0.20), false, 1)
 		var ctr = Vector2(rx + sect_w * 0.5, sect_y + sect_h * 0.5)
 		# 图标要撑满画区才读得出来。旧值 /180 在 150px 宽的格子里只画出 40px，
 		# 五个图标全缩在格子中央一小团 —— 导出成 1920 宽的 PNG 之后更看不清。
@@ -444,6 +444,45 @@ func _draw_joys_column(w: float, band_h: float, k: float, x0: float) -> void:
 ## 画区里的纸感。五个画区原来是五块**平涂**的色卡，远看就是一份色板，
 ## 而玩家带走的是一张纪念。补三层：顶部受光的竖向渐变、底部一道水色
 ## 积聚的暗边、几根纸纤维。色块有了厚度，才不像 UI 的取色器。
+## 五格画区的底色（纯函数，回归直接调）。
+##
+## 第四轮 P1-4：原来这里是 `base_col.darkened(0.18)`，五块**满饱和**的色块
+## 占了整张卡最大的面积——在成图上它们是全卡最响的东西，而它们不带任何
+## 信息：玩家在抬头那列已经读过「云 3 次 / 茶 3 次 / …」，而抬头（路线图 +
+## 「已过 16 驿」+ 右半那列）才是真的有话说的那一块，却更安静。
+##
+## **响度是「饱和度 × 面积」，而面积改不动（五个格子是版式）**，所以动的是
+## 饱和度：把每件自己的颜色朝纸色 `lerp` 过去，色块变成**染过色的纸页**——
+## 仍然一件一个色（茶偏绿、禽偏橙，认得出来），但读成"这一格属于哪件"
+## 而不是"这里有一块颜色"。
+##
+## 拉过去的比例 `PANEL_PAPER_MIX` 是量出来的，不是看着挑的。sRGB 通道跨度
+## （`max - min`）逐件：未混色时 云46 / 茶89 / 琴122 / 竹62 / **禽153**，
+## 0.62 之后 11 / 39 / 42 / 24 / **64** —— 禽那一格最响（E8A04F 的橙本来就是
+## 五件里跨度最大的），降到原色 42%。回归钉的是**两条一起**：
+## 面板亮度 ≥ 0.76（读成纸：实测 0.79~0.88）且通道跨度 ≤ 原色的一半
+## （实测最差的禽 42%）。只钉绝对跨度的话，五件里最"好压"的云会给闸门
+## 留出一堆没人用的余量，而真正吵的那一件反而从缝里过去了。
+##
+## `is_placeholder` 走同一条路：**未收的那几格原来是 `Color.GRAY.darkened(0.3)`，
+## 比收过的那几块还响**，而"还没拿到"应该比"拿到了"更安静。
+##
+## 抖动也跟着收窄：原来在满饱和底色上 `darkened(0.18 + ±0.04)` 是一道
+## 看得见的明暗脉冲，现在底色本来就浅，再压同样比例等于把它按灭，所以幅度
+## 一并降到原来的四分之一。
+const PANEL_PAPER_MIX := 0.62
+const PANEL_SHIMMER := 0.012
+
+
+static func panel_fill(base: Color, paper: Color, shimmer: float,
+		is_placeholder: bool) -> Color:
+	var tint: Color = base.lerp(paper, PANEL_PAPER_MIX)
+	if is_placeholder:
+		# 灰也朝纸色走，且走得更远——空格子该是最安静的那一档
+		tint = Color.GRAY.lerp(paper, PANEL_PAPER_MIX + 0.18)
+	return tint.darkened(PANEL_SHIMMER + shimmer * 0.3)
+
+
 func _draw_panel_wash(r: Rect2, seed_i: int) -> void:
 	const BANDS := 5
 	for i in BANDS:
@@ -548,95 +587,17 @@ func _draw_floating_leaves(w: float, h: float) -> void:
 ## 标签是对的，所以每处单看都成立、合起来全错。把 dispatch 收成一个函数
 ## 就是为了让「slot 0 是云」这件事只写一次。
 func _draw_fragment_icon(slot_idx: int, c: Vector2, col: Color, a: float, sc: float) -> void:
+	# 云/茶/琴走 `FragmentIcon` 那一份，和顶栏底栏、单碎片放大图同一个形状。
+	# 原来这里是三份**各自自洽**的手抄：逐张放大看，三件都读不出自己是什么
+	# （第四轮 P0-2）。三个 `sc` 系数把三处规范空间换算回这一格要的显示大小：
+	# 云规范半宽 43，琴最大半径 19.8、茶 20.5，而明信片的格子是底栏那个
+	# 22px 盘的两倍多，所以琴要 ×1.9 才和原来一样大。
 	match slot_idx:
-		0: _draw_cloud(c, col, a, sc)
-		1: _draw_teacup(c, col, a, sc)
-		2: _draw_guqin(c, col, a, sc)
+		0: FragmentIconScript.paint_cloud(self, c, col, a, sc * 0.88)
+		1: FragmentIconScript.paint_gaiwan(self, c, col, a, sc)
+		2: FragmentIconScript.paint_guqin(self, c, col, a, sc * 1.9)
 		3: _draw_bamboo(c, col, a, sc)
 		4: _draw_bird(c, col, a, sc)
-
-
-## 云：一朵**有平底**的积云 —— 四团大小不一的鼓包沿一条平底线闭合成轮廓。
-## 旧版是三个同半径的圆叠出来的 B0C4DE 色团子，在画区里读成"三个点"，
-## 而叠圆按定义接不出平底 —— 平底正是云和烟唯一的区别。
-func _draw_cloud(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var bumps := [
-		[Vector2(-26.0, 5.0), 13.0],   # 左肩，最矮
-		[Vector2(-9.0, -6.0), 19.0],   # 主体，最高
-		[Vector2(10.0, -2.0), 15.0],   # 右肩
-		[Vector2(24.0, 6.0), 9.0],     # 尾巴，最矮
-	]
-	# base_y 必须是**绝对**坐标。这几个鼓包的表面算出来是 c.y + …（三百多），
-	# 而 base_y 原来只是 13*sc（二十几），minf 一次都选不中鼓包，
-	# 九十九个点全部塌在同一条水平线上 —— 三角化照样出 97 个三角形，
-	# 面积是 0，图上就只剩那根线。
-	var base_y := c.y + 13.0 * sc
-	var x0 := c.x - 38.0 * sc
-	var x1 := c.x + 32.0 * sc
-	# 逐列取**最上面**那个鼓包的表面，拼出一条不自交的轮廓。
-	# 千万别改成「每团各画一段上半圆、再首尾相连」：相邻两团的半径和大于圆心距
-	# （19+13 > 17），后一团的起点会落在前一团终点的左边，连出来的是一条自己
-	# 压自己的线，三角化直接失败——第一版就是这么画成一根线的，而且不报任何错。
-	const STEPS := 96
-	var poly := PackedVector2Array()
-	for i in range(STEPS + 1):
-		var x := lerpf(x0, x1, float(i) / float(STEPS))
-		var top := base_y
-		for b in bumps:
-			var o := c.x + float(b[0].x) * sc
-			var r := float(b[1]) * sc
-			var dx := x - o
-			if absf(dx) < r:
-				top = minf(top, c.y + float(b[0].y) * sc - sqrt(r * r - dx * dx))
-		poly.append(Vector2(x, top))
-	poly.append(Vector2(x1, base_y))
-	poly.append(Vector2(x0, base_y))
-	draw_colored_polygon(poly, Color(col.r, col.g, col.b, a))
-	# 平底上压一道更重的墨，底边才立得住（云的影子就在脚下）
-	draw_line(Vector2(x0, base_y), Vector2(x1, base_y), Color(col.r, col.g, col.b, a), 2.0 * sc)
-	# 主体左上一道留白，跟另外几个线描图标的高光笔触一致
-	draw_arc(c + Vector2(-9.0 * sc, -6.0 * sc), 12.0 * sc, PI * 1.12, PI * 1.62, 12,
-			Color(1, 1, 1, a * 0.55), 2.0 * sc)
-
-
-func _draw_teacup(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var r = 22.0 * sc
-	var ink := Color(col.r, col.g, col.b, a)
-	# 线宽跟着 sc 走：这五个图标原来在 180 的分母下画，线宽是写死的 3px；
-	# 画区放大两倍多之后 3px 的杯壁只剩一根发丝，缩略图上整个杯子就没了。
-	var lw := 3.0 * sc
-	draw_arc(c + Vector2(0, 4 * sc), r, 0, PI, 24, ink, lw)
-	draw_line(c + Vector2(-r, 4 * sc), c + Vector2(-r, -8 * sc), ink, lw)
-	draw_line(c + Vector2(r, 4 * sc), c + Vector2(r, -8 * sc), ink, lw)
-	draw_arc(c + Vector2(0, -8 * sc), r, PI, TAU, 24, ink, lw)
-	# 杯底一条，免得下半圆看着像悬空的碗
-	draw_line(c + Vector2(-r * 0.86, 4 * sc), c + Vector2(r * 0.86, 4 * sc), ink, lw * 0.7)
-	draw_arc(c + Vector2(-30 * sc, -4 * sc), 8 * sc, -PI * 0.3, PI * 0.3, 12, ink, lw * 0.7)
-	draw_arc(c + Vector2(-6 * sc, -22 * sc), 6 * sc, PI, TAU, 12, Color(1, 1, 1, a * 0.5), lw * 0.5)
-
-
-func _draw_guqin(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
-	var pts = PackedVector2Array([
-		c + Vector2(-38 * sc, 6 * sc), c + Vector2(-22 * sc, -10 * sc),
-		c + Vector2(0, -14 * sc), c + Vector2(22 * sc, -10 * sc),
-		c + Vector2(38 * sc, 6 * sc)
-	])
-	# 先把琴身填实，再压七根弦。旧版只画一圈描边、弦是白的：图标换成墨色之后
-	# 白弦落在浅色格子上等于没画。填实 + 亮弦才像一件漆黑的琴。
-	draw_colored_polygon(PackedVector2Array([
-		pts[0], pts[1], pts[2], pts[3], pts[4],
-		c + Vector2(30 * sc, 12 * sc), c + Vector2(-30 * sc, 12 * sc),
-	]), Color(col.r, col.g, col.b, a))
-	for j in range(7):
-		var y := -9.0 * sc + j * 3.6 * sc
-		var half := 30.0 * sc * (1.0 - 0.04 * float(j))
-		draw_line(c + Vector2(-half, y), c + Vector2(half, y),
-				Color(1, 1, 1, a * 0.55), 1.2 * sc)
-	# 两枚岳山和一枚雁足，认得出是琴而不只是一块梯形
-	draw_line(c + Vector2(-30 * sc, 10 * sc), c + Vector2(-24 * sc, 14 * sc),
-			Color(col.r, col.g, col.b, a), 3 * sc)
-	draw_line(c + Vector2(30 * sc, 10 * sc), c + Vector2(24 * sc, 14 * sc),
-			Color(col.r, col.g, col.b, a), 3 * sc)
 
 
 func _draw_bamboo(c: Vector2, col: Color, a: float, sc: float = 1.0) -> void:
