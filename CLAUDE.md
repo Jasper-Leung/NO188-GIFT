@@ -104,6 +104,19 @@ scripts/          GDScript 脚本
   LayoutEditor.gd       编辑模式主控制器
   EditorHUD.gd          编辑模式 UI
   Player3D.gd / HUD3D.gd / MiniMap.gd / CheckInPrompt.gd ...
+  SettingsPanel.gd      设置面板：音量滑杆 ×2 / 画面三档 / 操作说明。顶栏右上角那个
+						「?」与暂停菜单里那一行「设置」进的是**同一个实例**
+						（`World3D/SettingsPanel`，`HUD3D._settings_panel()` 按
+						`get_parent()` 找它）。**它原来不存在**——那个位置的按钮指着
+						一块**从没被打开过**的 `HUD3D/HelpOverlay`（`show_help()` 零
+						调用者、`.tscn` 里也没有 `[connection]` 段），而那块面板是
+						键位表的**第四份实现**、写死中文。玩家中途想再看一眼操作说明
+						没有任何办法。现在键位表只有 `GameManager.PLAYER_ACTIONS`
+						一个出处：注册走它的循环、冷启动引导走
+						`player_control_rows()`、设置面板走同一个。
+						**打开面板时滑杆读的是当前真音量**（`set_value_no_signal(
+						AudioManager.bgm_volume())`），不是建面板那一刻的值——
+						在骑行中改过音量再打开面板，滑杆必须跟着走
   MiniGameBar.gd       云/茶/竹三个小游戏共用的进度条。**门槛要画在条上**：原来三处
 						都把门槛写在了字里（"到 75% 算过" / "3 秒后完成" / "进度 0/5"），
 						却没有一处给它一个位置——玩家盯着一条填到头就赢的槽，看不出
@@ -316,6 +329,40 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						（`focus_mode` + 真的在按钮排里）。**四个突变都做过**：世界不推
 						档位 → 4 条红 / 参数表加默认值 → 1 条红 / override 改回"只在 >0
 						时写" → 2 条红 / 提示行去掉最小宽度 → 4 条红
+  verify_settings.gd     设置面板回归（八节 127 条）。守八件事：
+						①**静音就是音量 0**（不是另一个布尔），取消静音回到玩家
+						自己那一档而不是 100%，顶栏「♪」按钮与滑杆读的是同一个状态；
+						②**量的是 `AudioStreamPlayer.volume_db` 而不是 `_bgm_volume`
+						那个字段**——字段写了而没人读，两侧各自都绿；顺带钉住
+						`PAUSE_DUCK_DB` 是**相对**的（第一版 `set_paused_bgm()`
+						写死 -18 dB，玩家把 BGM 拉到 20%（约 -20 dB）时**暂停反而
+						变吵**）、音量 0 落成有限的 `SILENT_DB` 而不是 -inf；
+						③`user://settings.cfg` 上有**两个主人**（`AudioManager`
+						的 `audio` 段与 `QualitySettings` 的 `video` 段），两边都得
+						读-改-写，各钉一条"写完另一边还在"**外加一条正对照**
+						（`resolution=2` 真的读得回来）——只钉"没被抹掉"的话，
+						一个从来不写的 `ConfigFile` 也能让那两条绿一辈子；
+						④画面档位是纯函数（`resolution_size()` /
+						`resolution_allowed()`），且"至少有一档因为屏幕放不下被拒"
+						这条在无头下**不恒真**（`_usable_size()` 固定 1152×648）；
+						⑤三道闸读**源码文本**：`persist` 参数表里一个 `=` 都没有
+						（不是 `contains("persist =")`，带类型的默认值中间隔着
+						`: bool `，那个子串压根不存在）、`window_set_size` 排在
+						`window_set_mode` **之后**（反过来 FULLSCREEN 会抹掉刚设的
+						尺寸）、`video_available()` 里排除了 web/mobile；
+						⑥键位表**只有一个出处**（见下面陷阱清单里这一轮新记的那条
+						"文本判据量到的可能是注释"）；⑦设置面板在真实 World3D 里：
+						「?」开得动、关得掉、暂停菜单那行进的是**同一个实例**、
+						滑杆**对齐当前真音量**且拖得动、暂停菜单里不再有那三个
+						静音按钮；⑧关闭按钮整个在屏内（中英各一遍）。
+						**十二条突变一个一个撤，全部咬住**
+						（`python tools/mutate_settings.py`，它自己会先跑一遍基线，
+						基线不干净就直接退出——不然下面每一条都分不清"没咬住"
+						和"没跑"）：断「?」接线 / 暂停压低退回绝对值 /
+						取消静音退回 100% / 落盘退回覆盖写 / 分辨率排在窗口模式之前 /
+						给 persist 加默认值 / 两处键位表退回手抄 / 注册退回逐行手抄 /
+						滑杆钉死建面板那一刻的值 / video_available 放行 web / 屏幕放不下
+						也照样设窗口
   verify_provenance.gd   资产来源清单回归（16 条）。`PROVENANCE.md` 是一份**决定能不能
 						收钱的凭据**，所以它必须有对拍，否则它就是第二个事实来源：
 						新增任何一个 `assets/` 下的文件而没在登记表里按**相对路径**逐字
@@ -933,6 +980,17 @@ echo. > .editor_mode
   `_sanitise_seen()` 的上界必须真的从 `RoadData` 的**实例** `stations` 取：
   拿静态那份 `FRAGMENT_SLOT_STATION_IDX`（只有五座）当上界，13 座普通驿站
   到过的记录会全被丢掉，顶栏「已过 n 驿」于是永远 ≤5
+- 改 `SettingsPanel.gd` / `AudioManager.gd` 的音量与静音那一族 /
+  `QualitySettings.set_resolution|set_window_mode|set_vsync` / `HUD3D._settings_panel()` /
+  `_on_help_btn_pressed()` / `GameManager.player_control_rows()` /
+  `OnboardingGuide` 的操作说明那一段前跑 `verify_settings.gd`。
+  **「静音就是音量 0」是不可退回的**：把 `_bgm_muted` 那个独立布尔捡回来，
+  顶栏「♪ 开」与设置面板的滑杆就能同时说两件事，而两个都在屏上。
+  改 `PAUSE_DUCK_DB` 时问一句"玩家把 BGM 拉到 20% 时暂停是不是更响"——
+  压低必须是**相对**的，绝对值在低音量那一档会翻面。
+  另外两处 `user://settings.cfg` 的主人（`AudioManager` 的 `audio` 段、
+  `QualitySettings` 的 `video` 段）**都只能读-改-写**，覆盖写会抹掉对方那一档。
+  **写完先证明它会红**（`tools/mutate_settings.py`，十二条突变一个一个撤，全部咬住）
 - **往 `assets/` 里加进或删掉任何一个文件**（模型、贴图、字体、音频、着色器）之前跑
   `verify_provenance.gd`，并同步改 `PROVENANCE.md` 的全量登记表与 `CREDITS.md`。
   判据钉的是**相对 `assets/` 的逐字路径**，所以「登记了但路径打错」和「压根没登记」一起红。
@@ -2542,3 +2600,55 @@ SDFGI 关掉之后 `b−r` 是 +21，而评审的门槛是 **±12**——还差�
 `stations` 取（16 座）。拿静态那份 `FRAGMENT_SLOT_STATION_IDX`（5 座）当上界，
 13 座普通驿站到过的记录会全被丢掉，顶栏「已过 n 驿」于是永远 ≤5——而这一条
 **不会报任何错**，玩家只是莫名其妙发现自己像是从没路过任何驿站。
+
+## 这一轮新记的两条（2026-10-04，第七轮 P0-3 设置面板）
+
+### ① 文本判据量到的可能是**注释**，而注释往往就写在你正在改的那件事上
+
+`verify_settings.gd` 有三条"这个键位表不许是第二份手抄"的源码文本判据，
+三条都是 `src.contains("GameManager.player_control_rows()")`。
+突变验证（把真的调用换成手抄数组）之后，**三条一条都没红**。原因不是判据松，
+是**这个字符串在注释里也出现过**——而那行注释恰好就是解释这件事的那句：
+
+```gdscript
+	# 所以它们调 `GameManager.player_control_rows()` 这一个出处。
+	_add_control_rows(vbox, GameManager.player_control_rows())
+```
+
+把第二行换掉，第一行还在。`QualitySettings.video_available()` 那条更绕一层：
+文件里**另有一处**一模一样的 `OS.has_feature("web")`（默认画质档那档），
+扫整个文件的话把 `video_available()` 改成 `return true` 之后它匹配到的是
+**那一处**。正解两刀一起下：先 `_strip_comments()`，再 `_func_body()`
+限死在那个函数的函数体里（`_func_body` 还得认 `static func`，
+只找 `"\nfunc "` 的话 static 后面跟 static 会一路取到文件末尾）。
+
+这和 `edge_line_color`（声明了从没被读）、`HUD3D/HelpOverlay`（那句注释描述的
+面板从来没被打开过）是**同一个家族**，只是这次更坏一档：前两者的症状是
+**文档和代码各说各话**，而这一条的症状是**断言和注释各说各话**——
+文档、代码、断言三方全绿，被测的行为一个字都没发生。
+可推广的一条：**文本判据搜的是"这个字符串出现过"，不是"这句话在执行"，
+所以凡是那个字符串可能出现在注释里的地方，判据必须先剔注释；
+凡是同一个字符串可能在文件别处也出现的，判据必须先限函数体。**
+判据自己写下来的注释越详细，它越容易替自己挡枪。
+
+### ② 突变驱动读的那份数据必须是**这一遍产出的那一份**
+
+`tools/mutate_settings.py` 第一版的 `run()` 是 `subprocess.run(..., capture_output=True)`
+**然后去读 `tools/_run.log`** ——而那份 log 是上一次 `check_all` / `_run.ps1`
+跑完留下的**绿**日志。十二条突变于是全部报"没红"，而真相是回归根本没被读。
+而"没红"这个读数**长得和"判据写错了"一模一样**：12 条一起不对，
+人第一反应是自己量错了，而不是量具读了一份上一次的残留。
+
+连带两条：①`fails()` 里 `"[FAIL] "` 按 **8** 个字符切（`[8:]`），实际是 **7** 个，
+于是每一条断言的名字都被啃掉第一个字——`"按「?」之后…"` 变成 `"「?」之后…"`，
+9 条真的红了的突变全被判成 `WRONG-RED`。**量具自己歪一格的时候，
+被量的东西全错，而它报出来的样子和判据有问题一模一样**；
+②"0 条 FAIL"有两种完全不同的病（没红 / 没跑），所以驱动现在**先跑一遍未突变的
+当基线**，且 0 条 FAIL 时把输出末尾抄进报告——一条 FAIL 都没有时，
+最常见的原因是突变把脚本编译搞挂了。锚点找不到也是另一种（`ANCHOR-MISSING`
+单独标出来，不和"没红"混在一起）。
+
+**突变一个一个撤**这条纪律本身是对的，但它有个前提：**驱动自己的输出
+得真的是被测物产出的**。CLAUDE.md 里已经写着"掩体是另一个突变提供的"
+（四个突变一起做的时候互相垫掉失败路径），这一条是它的另一半——
+**量具的输入不是这一遍的输出时，整轮结论都是上一轮的**。

@@ -87,9 +87,13 @@ func _section_keys() -> void:
 	_ck(blank_zh.is_empty(), "中文侧没有空串", str(blank_zh))
 	_ck(blank_en.is_empty(), "英文侧没有空串", str(blank_en))
 	# 中英同一个 key 不许是同一句话：整个界面切了语言等于没切。
-	# 例外是纯格式化 key（`visits_left_n` 的值就是 "%d"，它不带语言）：
-	# 判据写成"把 % 规格符全去掉之后还剩不下字"，而不是列一张白名单——
-	# 白名单每加一个键就多一个可以忘更新的地方。
+	# 例外是**不带语言的那一类**：
+	# ①纯格式化 key（`visits_left_n` 的值就是 "%d"）；
+	# ②纯数字/符号的量本身（分辨率那三档 `resolution_720` 的值是
+	#   "1280 × 720"，中英两侧必然逐字相同——把英文写成别的才是把
+	#   尺寸说错，而尺寸没有第二种语言）。
+	# 判据写成"剔掉 % 规格符之后还**不含任何一个字母或汉字**"，
+	# 而不是列一张白名单——白名单每加一个键就多一个可以忘更新的地方。
 	var same := []
 	for k in zh.keys():
 		if not en.has(k):
@@ -97,12 +101,28 @@ func _section_keys() -> void:
 		var v := str(zh[k])
 		if v != str(en[k]):
 			continue
-		var stripped := v.replace("%d", "").replace("%s", "").replace("%f", "")
-		if stripped.strip_edges() == "":
+		if not _has_letters(v):
 			continue
 		same.append(str(k))
 	_ck(same.is_empty(), "没有中英逐字相同的 key（否则切语言等于没切）", str(same))
 	print("[dbg] key 总数 %d（中）/ %d（英）" % [zh.size(), en.size()])
+
+
+## 这个串里有没有**任何一个字母或汉字**。`%d` / `%s` / `%f` 先剔掉，
+## 所以 `"%d"` 与 `""` 都读作"不带语言"，而 `"1280 × 720"` 也是。
+##
+## 正则用 `[A-Za-z]` 而不是 `\w`：`\w` 在 GDScript 里也吃中文，
+## 于是 `×` 之外什么都会被算成"有语言"，`"1280 × 720"` 会被误判成
+## 需要翻译——而它两侧本来就该逐字相同。汉字另走一条 `_is_cjk()`。
+func _has_letters(s: String) -> bool:
+	var stripped := s.replace("%d", "").replace("%s", "").replace("%f", "")
+	for i in stripped.length():
+		var c := stripped.unicode_at(i)
+		if (c >= 65 and c <= 90) or (c >= 97 and c <= 122):
+			return true
+		if c >= 0x4E00 and c <= 0x9FFF:
+			return true
+	return false
 
 
 ## 2. 反派三场的台词 key 真的存在

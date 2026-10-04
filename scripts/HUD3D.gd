@@ -1,8 +1,11 @@
 extends Control
-## HUD3D — 3D 场景顶部栏 + 右上角多按钮 + 帮助面板 (PRD F-29/F-31/F-32)
+## HUD3D — 3D 场景顶部栏 + 右上角多按钮 (PRD F-29/F-31/F-32)
 ## 显示：碎片 n/5、已过 n 驿、旅币、心神
-## 按钮：暂停 / 全局静音 / BGM 静音 / SFX 静音 / 帮助
+## 按钮：暂停 / 全局静音 / BGM 静音 / SFX 静音 / 「?」（进设置面板）
 ## 挂载：World3D/HUD3D，全屏锚点
+##
+## 那个「?」不再指自己的一块帮助面板了：它和暂停菜单里那一行「设置」进的是
+## 同一块 `SettingsPanel`（音量 / 画面 / 操作说明）。理由见 `_settings_panel()`。
 ##
 ## 顶栏**不挂里程**。世界只有 1228.8m 的一圈，而进度条写的是「已行 km / 188km」，
 ## 换算下来 2km/s：玩家骑三十秒就能心算出 7200km/h，然后「188」这个题眼连同
@@ -25,21 +28,10 @@ extends Control
 @onready var _mute_btn: Button = $TopRightHBox/MuteBtn
 @onready var _bgm_btn: Button = $TopRightHBox/BgmBtn
 @onready var _sfx_btn: Button = $TopRightHBox/SfxBtn
-@onready var _help_panel: Control = $HelpOverlay
-@onready var _help_title: Label = $HelpOverlay/Panel/VBox/HelpTitle
-@onready var _desktop_header: Label = $HelpOverlay/Panel/VBox/DesktopSection/DesktopHeader
-@onready var _key_w: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyW
-@onready var _key_s: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyS
-@onready var _key_a: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyA
-@onready var _key_d: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyD
-@onready var _key_space: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeySpace
-@onready var _key_esc: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyEsc
-@onready var _key_m: Label = $HelpOverlay/Panel/VBox/DesktopSection/KeyM
-@onready var _mobile_header: Label = $HelpOverlay/Panel/VBox/MobileSection/MobileHeader
-@onready var _touch_joy: Label = $HelpOverlay/Panel/VBox/MobileSection/TouchJoy
-@onready var _touch_checkin: Label = $HelpOverlay/Panel/VBox/MobileSection/TouchCheckin
-@onready var _touch_buttons: Label = $HelpOverlay/Panel/VBox/MobileSection/TouchBtns
-@onready var _help_mute_hint: Label = $HelpOverlay/Panel/VBox/HelpMuteHint
+## 「?」进的是**共享**的那块设置面板（`World3D/SettingsPanel`），
+## 和暂停菜单里那一行「设置」同一个实例。它原来指的 `HUD3D/HelpOverlay`
+## 已经删掉了，理由见文件末尾 `_settings_panel()` 那段注释。
+@onready var _help_btn: Button = $TopRightHBox/HelpBtn
 
 const MASK_TINT := Color(0.11, 0.14, 0.19)   # 冷灰蓝，读作「雾」；浓淡全靠 alpha
 const MASK_TEX_SIZE := 128
@@ -159,11 +151,13 @@ func _ready() -> void:
 	_mute_btn.pressed.connect(_on_mute_btn_pressed)
 	_bgm_btn.pressed.connect(_on_bgm_btn_pressed)
 	_sfx_btn.pressed.connect(_on_sfx_btn_pressed)
+	_help_btn.pressed.connect(_on_help_btn_pressed)
 	AudioManager.mute_changed.connect(_update_buttons)
-	Localization.language_changed.connect(_apply_language)
+	# 切语言要重画按钮文案（`_update_buttons` 里有 `Localization.t("on"/"off")`）。
+	# 原来这条接的是 `_apply_language()`，而那个函数只填 HelpOverlay —— 顶栏
+	# 这三个按钮在切换语言后一直留着旧语言的中/英文。
+	Localization.language_changed.connect(_update_buttons)
 	_update_buttons()
-	_apply_language()
-	_setup_help_sections()
 	_setup_economy_labels()
 	_setup_scrim()
 	_setup_blocked_hint()
@@ -175,29 +169,24 @@ func _ready() -> void:
 	_boundary_warning.visible = false
 
 
-func _setup_help_sections() -> void:
-	var desktop = $HelpOverlay/Panel/VBox/DesktopSection
-	var mobile = $HelpOverlay/Panel/VBox/MobileSection
-	var is_touch = DisplayServer.is_touchscreen_available()
-	desktop.visible = not is_touch
-	mobile.visible = is_touch
-	_help_panel.gui_input.connect(_on_help_overlay_input)
+## 顶栏右上角那个「?」进的是 `World3D/SettingsPanel` 这一个实例 ——
+## 和暂停菜单里那一行「设置」是同一块面板。
+##
+## 它原来指着 `HUD3D/HelpOverlay`，而那块面板**从来没人打开过**：
+## `show_help()` 零调用者，`World3D.tscn` 的这个节点上也没有 `[connection]` 段，
+## 也就是说这个按钮从加上去那天起就没接过线（CLAUDE.md 陷阱清单里那条
+## 「`.tscn` 里没有 `[connection]` 段的信号 = 从来没连过」）。玩家中途想再看
+## 一眼操作说明没有任何办法，而唯一的操作说明在冷启动那一次性的引导页里。
+## 更糟的是那块面板是键位表的**第四份实现**，而且是写死中文的那一份 ——
+## 英文界面下那十行仍然是中文。
+func _settings_panel() -> Control:
+	return get_parent().get_node_or_null("SettingsPanel")
 
 
-func _on_help_overlay_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		var mb = event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			var panel = $HelpOverlay/Panel
-			if not panel.get_global_rect().has_point(mb.position):
-				close_help()
-				get_viewport().set_input_as_handled()
-	elif event is InputEventScreenTouch:
-		if event.pressed:
-			var panel = $HelpOverlay/Panel
-			if not panel.get_global_rect().has_point(event.position):
-				close_help()
-				get_viewport().set_input_as_handled()
+func _on_help_btn_pressed() -> void:
+	var panel := _settings_panel()
+	if panel != null:
+		panel.open()
 
 
 func _process(delta: float) -> void:
@@ -361,43 +350,6 @@ func _update_buttons() -> void:
 	_bgm_btn.tooltip_text = Localization.t("bgm_mute")
 	_sfx_btn.text = "%s %s" % [Localization.t("sfx_short"), off if sfx_off else on]
 	_sfx_btn.tooltip_text = Localization.t("sfx_mute")
-
-
-func _apply_language() -> void:
-	_help_title.text = Localization.t("controls_title")
-	_help_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_help_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_help_title.add_theme_font_size_override("font_size", 22 if Localization.is_english() else 24)
-	_desktop_header.text = Localization.t("desktop_controls")
-	_desktop_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_desktop_header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_desktop_header.add_theme_font_size_override("font_size", 16 if Localization.is_english() else 18)
-	_key_w.text = "  W / ↑       " + Localization.t("key_forward")
-	_key_s.text = "  S / ↓       " + Localization.t("key_back")
-	_key_a.text = "  A / ←       " + Localization.t("key_left")
-	_key_d.text = "  D / →       " + Localization.t("key_right")
-	_key_space.text = "  Space     " + Localization.t("key_check_in")
-	_key_esc.text = "  ESC         " + Localization.t("key_pause")
-	_key_m.text = "  M           " + Localization.t("key_mute")
-	for lbl in [_key_w, _key_s, _key_a, _key_d, _key_space, _key_esc, _key_m]:
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.add_theme_font_size_override("font_size", 14 if Localization.is_english() else 15)
-	_mobile_header.text = Localization.t("touch_buttons_key")
-	_mobile_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_mobile_header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_mobile_header.add_theme_font_size_override("font_size", 16 if Localization.is_english() else 18)
-	_touch_joy.text = "  " + Localization.t("touch_joystick_key") + "     " + Localization.t("touch_joystick_desc")
-	_touch_checkin.text = "  " + Localization.t("touch_checkin_key") + "     " + Localization.t("touch_checkin_desc")
-	_touch_buttons.text = "  " + Localization.t("touch_buttons_key") + "     " + Localization.t("touch_buttons_desc")
-	for lbl in [_touch_joy, _touch_checkin, _touch_buttons]:
-		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		lbl.add_theme_font_size_override("font_size", 14 if Localization.is_english() else 15)
-	_help_mute_hint.text = Localization.t("help_close")
-	_help_mute_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_help_mute_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_help_mute_hint.add_theme_font_size_override("font_size", 13 if Localization.is_english() else 14)
 
 
 func _setup_economy_labels() -> void:
@@ -697,7 +649,7 @@ func show_pass_line(text: String) -> void:
 	_pass_left = PASS_HOLD_SEC
 
 
-## 遮罩本体。插到 index 0，让 TopBar / TopRightHBox / HelpOverlay 都压在上面。
+## 遮罩本体。插到 index 0，让 TopBar / TopRightHBox 都压在上面。
 func _setup_mood_mask() -> void:
 	_mood_mask = TextureRect.new()
 	_mood_mask.name = "MoodMask"
@@ -761,18 +713,3 @@ func set_boundary_intensity(v: float) -> void:
 	else:
 		if _boundary_warning.visible:
 			_boundary_warning.visible = false
-
-
-func show_help() -> void:
-	_help_panel.visible = true
-	_help_panel.modulate.a = 0.0
-	var tw = create_tween()
-	tw.tween_property(_help_panel, "modulate:a", 1.0, 0.2)
-
-
-func close_help() -> void:
-	var tw = create_tween()
-	tw.tween_property(_help_panel, "modulate:a", 0.0, 0.2)
-	await tw.finished
-	_help_panel.visible = false
-	_help_panel.modulate.a = 1.0

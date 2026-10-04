@@ -151,17 +151,23 @@ func _run() -> void:
 	_eq("遮罩不拦输入 (MOUSE_FILTER_IGNORE)", int(mask.mouse_filter), 2)
 	_ck("遮罩锚点铺满", absf(mask.anchor_right - 1.0) < 0.001 and absf(mask.anchor_bottom - 1.0) < 0.001)
 
-	# 遮罩必须在所有 HUD 子节点之下：TopBar / TopRightHBox / HelpOverlay 都在它后面。
+	# 遮罩必须在所有 HUD 子节点之下：TopBar / TopRightHBox 都在它后面。
 	# 走 get_children() 数序号，不用 get_index()：untyped 持有者上它会解析成错误重载。
+	#
+	# 原来这一节量的是 `HelpOverlay`（那块帮助面板），而它已经删掉了 ——
+	# `find()` 在找不到时返回 -1，`help_pos > mask_pos` 就**恒假**，
+	# 于是这条断言会一直红，而它红的原因跟被测的性质无关。
+	# 换成 `TopRightHBox`：那才是玩家真的隔着遮罩在按的东西
+	# （「?」那一下现在进设置面板，见 `HUD3D._settings_panel()`）。
 	var order: Array = []
 	for c in _hud.get_children():
 		order.append(str(c.name))
 	var mask_pos := int(order.find("MoodMask"))
 	var top_pos := int(order.find("TopBar"))
-	var help_pos := int(order.find("HelpOverlay"))
+	var btn_pos := int(order.find("TopRightHBox"))
 	_eq("遮罩是第一个子节点 (index 0)", mask_pos, 0)
 	_ck("TopBar 压在遮罩上面", top_pos > mask_pos, "top=%d mask=%d" % [top_pos, mask_pos])
-	_ck("HelpOverlay 压在遮罩上面", help_pos > mask_pos, "help=%d mask=%d" % [help_pos, mask_pos])
+	_ck("按钮排压在遮罩上面", btn_pos > mask_pos, "btn=%d mask=%d" % [btn_pos, mask_pos])
 
 	# ---- 2. 顶部经济栏标签 ----
 	_ck("旅币标签已创建", _hud._lvbi_label != null)

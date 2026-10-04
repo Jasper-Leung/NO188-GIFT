@@ -141,6 +141,48 @@ func _add_action(action_name, keys):
 		InputMap.action_add_event(action_name, ev)
 
 
+## 玩家真正要记的那几个键 —— **注册**与**屏上那份键位表**的同一个出处。
+##
+## 原来两边各写一份，而且屏上那份存在过**四份**不同的实现：这里逐行注册、
+## `OnboardingGuide` 的结构化 Label、`HUD3D/HelpOverlay` 场景里写死的中文、
+## `Localization.help_overlay` 一整段带换行的文本。四份互相对拍的话格式先对不上
+## （后一份根本没有结构），于是"新增一个键位忘了改屏上那份"这种漏改没有任何
+## 回归会红 —— 而 `verify_mood_mask` 里那条"区分用的字符必须是字"就是同一族的教训。
+##
+## `keys` 是真的绑定（`_setup_input_map` 拿它注册 InputMap），`keys_label` 只是
+## 屏上怎么写这两个键（箭头写 ↑ 还是 Up Arrow 是排版决定，不是绑定），
+## 而**键与字面量是否对得上由回归去比**，不许靠这里自觉一致。
+const PLAYER_ACTIONS := [
+	{"action": "move_up", "keys": [KEY_W, KEY_UP], "keys_label": "W / ↑", "desc_key": "key_forward"},
+	{"action": "move_down", "keys": [KEY_S, KEY_DOWN], "keys_label": "S / ↓", "desc_key": "key_back"},
+	{"action": "move_left", "keys": [KEY_A, KEY_LEFT], "keys_label": "A / ←", "desc_key": "key_left"},
+	{"action": "move_right", "keys": [KEY_D, KEY_RIGHT], "keys_label": "D / →", "desc_key": "key_right"},
+	{"action": "interact", "keys": [KEY_SPACE, KEY_ENTER], "keys_label": "Space / Enter", "desc_key": "key_check_in"},
+	{"action": "pause", "keys": [KEY_ESCAPE], "keys_label": "ESC", "desc_key": "key_pause"},
+	{"action": "mute", "keys": [KEY_M], "keys_label": "M", "desc_key": "key_mute"},
+]
+
+
+## 屏上那一行怎么写。**冷启动的操作说明与设置面板都调这一个出处**——
+## 键位表以前是冷启动唯一的一次性面板（`onboarding_shown` 一置就不再出现），
+## 而玩家中途想再看一眼时 HUD 上那个「?」按钮压根没接线（`show_help()` 零调用者）。
+func player_control_rows() -> Array:
+	var rows := []
+	for entry in PLAYER_ACTIONS:
+		rows.append([str(entry["keys_label"]), Localization.t(str(entry["desc_key"]))])
+	return rows
+
+
+## 触屏那三行。走 `Localization` 的 key 而不是写死中文 —— 原来 HUD 场景里那份
+## 触屏表是三行写死的中文，英文界面下那三行仍然是中文。
+func touch_control_rows() -> Array:
+	return [
+		[Localization.t("touch_joystick_key"), Localization.t("touch_joystick_desc")],
+		[Localization.t("touch_checkin_key"), Localization.t("touch_checkin_desc")],
+		[Localization.t("touch_buttons_key"), Localization.t("touch_buttons_desc")],
+	]
+
+
 func _add_action_with_modifier(action_name, keycode, ctrl: bool = false, shift: bool = false, alt: bool = false) -> void:
 	if not InputMap.has_action(action_name):
 		InputMap.add_action(action_name)
@@ -153,13 +195,12 @@ func _add_action_with_modifier(action_name, keycode, ctrl: bool = false, shift: 
 
 
 func _setup_input_map():
-	_add_action("move_up", [KEY_W, KEY_UP])
-	_add_action("move_down", [KEY_S, KEY_DOWN])
-	_add_action("move_left", [KEY_A, KEY_LEFT])
-	_add_action("move_right", [KEY_D, KEY_RIGHT])
-	_add_action("interact", [KEY_SPACE, KEY_ENTER])
-	_add_action("pause", [KEY_ESCAPE])
-	_add_action("mute", [KEY_M])
+	# 玩家要记的键位从 PLAYER_ACTIONS 走一遍，别再在这里逐行动手抄一遍——
+	# 注册处与"屏上那份键位表"曾经是两份独立的手抄，四份实现格式各不相同
+	# （这里逐行 / OnboardingGuide 的结构化 Label / HUD3D 场景里写死的中文
+	# / Localization 里一整段带换行的文本），漂了没有任何一条回归会红。
+	for entry in PLAYER_ACTIONS:
+		_add_action(str(entry["action"]), entry["keys"])
 	# 编辑模式动作(无副作用,普通运行也注册,只在编辑器里消费)
 	# 注意:不能用 --editor,会与 Godot 内置的 --editor 标志冲突
 	# 方向键只用于选中对象移动;选中对象时相机不响应方向键

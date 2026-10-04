@@ -11,6 +11,7 @@
 [ext_resource type="Script" path="res://scripts/EnvironmentAudioManager.gd" id="8_envaudio"]
 [ext_resource type="Script" path="res://scripts/HUD3D.gd" id="9_hud3d"]
 [ext_resource type="Script" path="res://scripts/PausePanel.gd" id="10_pausepanel"]
+[ext_resource type="Script" path="res://scripts/SettingsPanel.gd" id="10b_settings"]
 [ext_resource type="Script" path="res://scripts/VegBuilder.gd" id="11_veg"]
 [ext_resource type="Script" path="res://scripts/OnboardingGuide.gd" id="12_onboarding"]
 [ext_resource type="Script" path="res://scripts/DialoguePopup.gd" id="13_dialogue"]
@@ -333,121 +334,13 @@ layout_mode = 2
 text = "?"
 theme_override_font_sizes/font_size = 18
 
-[node name="HelpOverlay" type="Control" parent="HUD3D"]
+[node name="SettingsPanel" type="Control" parent="."]
 visible = false
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-mouse_filter = 0
-
-[node name="Panel" type="Panel" parent="HUD3D/HelpOverlay"]
-anchor_left = 0.25
-anchor_top = 0.15
-anchor_right = 0.75
-anchor_bottom = 0.85
-
-[node name="VBox" type="VBoxContainer" parent="HUD3D/HelpOverlay/Panel"]
-layout_mode = 1
-offset_left = 20.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
-theme_override_constants/separation = 10
-
-[node name="HelpTitle" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox"]
-layout_mode = 2
-text = "操作说明"
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 24
-theme_override_colors/font_color = Color(0.961, 0.784, 0.494, 1)
-
-[node name="DesktopSection" type="VBoxContainer" parent="HUD3D/HelpOverlay/Panel/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="DesktopHeader" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "键盘操作"
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 18
-theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
-
-[node name="KeyW" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  W / ↑       加速前进"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeyS" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  S / ↓       减速 / 倒车"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeyA" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  A / ←       左转"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeyD" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  D / →       右转"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeySpace" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  空格         靠近驿站时打卡"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeyEsc" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  ESC         暂停 / 继续"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="KeyM" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/DesktopSection"]
-layout_mode = 2
-text = "  M           全局静音"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="MobileSection" type="VBoxContainer" parent="HUD3D/HelpOverlay/Panel/VBox"]
-layout_mode = 2
-theme_override_constants/separation = 4
-
-[node name="MobileHeader" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/MobileSection"]
-layout_mode = 2
-text = "触屏操作"
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 18
-theme_override_colors/font_color = Color(0.85, 0.85, 0.85, 1)
-
-[node name="TouchJoy" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/MobileSection"]
-layout_mode = 2
-text = "  左下摇杆     推杆前进，左右转向"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="TouchCheckin" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/MobileSection"]
-layout_mode = 2
-text = "  点击光环     靠近驿站时打卡"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="TouchBtns" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox/MobileSection"]
-layout_mode = 2
-text = "  右上按钮     暂停 / 静音 / 帮助"
-theme_override_font_sizes/font_size = 15
-theme_override_colors/font_color = Color(0.9, 0.9, 0.9, 1)
-
-[node name="HelpMuteHint" type="Label" parent="HUD3D/HelpOverlay/Panel/VBox"]
-layout_mode = 2
-text = "点击面板外关闭"
-horizontal_alignment = 1
-theme_override_font_sizes/font_size = 14
-theme_override_colors/font_color = Color(0.5, 0.5, 0.5, 1)
+script = ExtResource("10b_settings")
 
 [node name="PausePanel" type="Control" parent="."]
 visible = false
@@ -496,21 +389,6 @@ theme_override_font_sizes/font_size = 18
 layout_mode = 2
 text = "操作说明"
 theme_override_font_sizes/font_size = 18
-
-[node name="MuteBtn" type="Button" parent="PausePanel/Overlay/Panel/VBox"]
-layout_mode = 2
-text = "全局静音 [关]"
-theme_override_font_sizes/font_size = 16
-
-[node name="BgmBtn" type="Button" parent="PausePanel/Overlay/Panel/VBox"]
-layout_mode = 2
-text = "BGM 静音 [关]"
-theme_override_font_sizes/font_size = 16
-
-[node name="SfxBtn" type="Button" parent="PausePanel/Overlay/Panel/VBox"]
-layout_mode = 2
-text = "音效静音 [关]"
-theme_override_font_sizes/font_size = 16
 
 [node name="LanguageBtn" type="Button" parent="PausePanel/Overlay/Panel/VBox"]
 layout_mode = 2

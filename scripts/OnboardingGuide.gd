@@ -164,25 +164,14 @@ func _add_glossary(vbox: VBoxContainer) -> void:
 
 
 func _add_keyboard_controls(vbox: VBoxContainer) -> void:
-	var rows = [
-		["W / ↑", Localization.t("key_forward")],
-		["S / ↓", Localization.t("key_back")],
-		["A / ←", Localization.t("key_left")],
-		["D / →", Localization.t("key_right")],
-		["Space", Localization.t("key_check_in")],
-		["ESC", Localization.t("key_pause")],
-		["M", Localization.t("key_mute")],
-	]
-	_add_control_rows(vbox, rows)
+	# 不许在这里再抄一份键位表：这一屏是**一次性的**（`onboarding_shown` 一置
+	# 就不再出现），而中途想再看一眼走的是设置面板。两屏必须逐行相同，
+	# 所以它们调 `GameManager.player_control_rows()` 这一个出处。
+	_add_control_rows(vbox, GameManager.player_control_rows())
 
 
 func _add_touch_controls(vbox: VBoxContainer) -> void:
-	var rows = [
-		[Localization.t("touch_joystick_key"), Localization.t("touch_joystick_desc")],
-		[Localization.t("touch_checkin_key"), Localization.t("touch_checkin_desc")],
-		[Localization.t("touch_buttons_key"), Localization.t("touch_buttons_desc")],
-	]
-	_add_control_rows(vbox, rows)
+	_add_control_rows(vbox, GameManager.touch_control_rows())
 
 
 func _add_control_rows(vbox: VBoxContainer, rows: Array) -> void:
