@@ -351,9 +351,24 @@ func _run() -> void:
 	_ck("山线三层都上了黄昏色",
 			_ridge._mats.size() == 3 and _ridge._mats[0].albedo_color.is_equal_approx(_dc.DUSK_RIDGE_TINT),
 			"n=%d tint=%s" % [_ridge._mats.size(), str(_ridge._mats[0].albedo_color)])
-	_ck("山线确实变暗了（否则三层会亮过黄昏的天空）",
-			_ridge._mats[0].albedo_color.get_luminance() < 0.95,
+	# 这一条原来写的是「山线确实变暗了（否则三层会亮过黄昏的天空）」，判据是
+	# tint 亮度 < 0.95——那是 `DUSK_RIDGE_TINT` **还是压暗值 (0.86,0.64,0.62) 时**
+	# 的代理量。天色那一轮修好之后（`DUSK_SKY_CURVE` 0.10→3.00、地平线蓝
+	# 0.58→0.68）黄昏的天亮了一大截，山线还压着暗值就成了三道暗带、层与层的
+	# 间距掉到判据之下，**方向整个反了**。所以这条断言改量它当初想量的那件事
+	# 本身：**黄昏的山不比正午的山暗**（白 = 1.0 就是白昼档）。
+	# 而"最外层山不比天亮"是无头量不到的——那是像素，归 `lookdev_journey` 12f，
+	# 别在这里拿一个反照率代理量假装量过。
+	_ck("山线在黄昏不压暗（天亮了一大截，山跟着抬才对）",
+			_ridge._mats[0].albedo_color.get_luminance() > 1.0,
 			str(_ridge._mats[0].albedo_color))
+	# 正对照：水面**不许**跟着抬同一个数。黄昏的水靠"比天更暗一档"压住远景，
+	# 跟到 1.30 就发白——山线和水从来没有同一个理由被同一个数管过，而这一族
+	# 一旦把两份合成一份，两侧各自都绿。量的是**真的推给了着色器**那个参数，
+	# 不是常量表（量常量表的话 `set_tint()` 断了接线也一样全绿）。
+	var wmat: ShaderMaterial = (_world._water.bodies()[0] as MeshInstance3D).material_override
+	var wtint: Color = wmat.get_shader_parameter("dusk_tint")
+	_ck("水面没跟着山线一起抬（两者不是同一个理由）", wtint.get_luminance() < 1.0, str(wtint))
 
 	# ---- 8. 浮了一行字 ----
 	# 断**信号发了几次**，别断标签上还有没有字：show_pass_line 会挂 3.2 秒，

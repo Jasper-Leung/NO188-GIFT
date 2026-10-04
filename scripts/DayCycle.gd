@@ -101,10 +101,37 @@ const DAY_SUN_CURVE := 0.04
 ## 心神遮罩也不背（同一帧顶栏金字日/昏两档逐通道相同）。
 ## 所以滤镜本身要收着写：**暖意交给散射和太阳，滤镜只留一点点偏红**。
 const DUSK_SKY_TOP := Color(0.14, 0.16, 0.32, 1.0)
-const DUSK_SKY_HORIZON := Color(0.98, 0.74, 0.58, 1.0)
+const DUSK_SKY_HORIZON := Color(0.98, 0.74, 0.68, 1.0)
 const DUSK_GND_HORIZON := Color(0.40, 0.28, 0.24, 1.0)
 const DUSK_GND_BOTTOM := Color(0.13, 0.11, 0.12, 1.0)
-const DUSK_SKY_CURVE := 0.10
+## ## 0.10 → 3.00，地平线的蓝 0.58 → 0.68（2026-10-04，量出来的）
+##
+## 「黄昏的天留住绿与蓝」那条判据量的是 `SKY_HUE_ROW`(fy 0.12) 那一行的
+## g/r 与 b/r，原读数 0.420 / 0.225——整片天读成一张红色滤色片。
+##
+## 第一版认定这条**够不到**，依据是逐条扫旋钮：`ground_horizon_color`
+## 换成 `sky_horizon_color` 之后那个数**一格没动**（0.42/0.22 → 0.42/0.22，
+## 因为 `eyedir.y > 0` 时 `ground_*` 那个分支压根不取样），而 `sky_curve`
+## 从 0.10 扫到 10.0 也只把 b/r 抬到 0.41 就**平了**。
+## 那个结论是**错的**，错在一次只动一个旋钮：把两条摆成一张网格再扫就出来了
+## （`tools/probe_sky_grass.gd`，逐格都渲了像素）：
+##
+## | `sky_curve` \ 地平线蓝 | 0.58 | 0.68 | 0.78 | 0.90 |
+## |---|---|---|---|---|
+## | 0.10 | .42/.22 | .42/.35 | .42/.52 | .42/.81 |
+## | 1.00 | .64/.37 | .64/.52 | .64/.69 | .64/.88 |
+## | 3.00 | .68/.40 | **.68/.56** | .68/.73 | .68/.90 |
+##
+## 两个旋钮各管一路，互不干扰：**g/r 由 `sky_curve` 管**（地平线色往上铺多远），
+## **b/r 由地平线蓝管**。取 3.00 / 0.68 那一格——两路都有 ≥0.11 的余量，
+## 而 0.10 那一行不管地平线蓝调到多少 g/r 都钉在 0.42。
+##
+## 地平线调淡不只是为了过判据：`verify_day_cycle.gd` 早就写明黄昏地平线是
+## **乘在散射结果上的滤镜**，而散射自己已经是深红带，所以「滤镜不许自己先饱和」
+## （min/max ≥ 0.50）。原来 0.58/0.98 = 0.59 刚过线，蓝通道要被连压两遍；
+## 0.68/0.98 = 0.69 之后黄昏那一档从「红」读成「暖橙」，而它仍然 r > b
+## （同一条的正对照，所以两条一起绿）。
+const DUSK_SKY_CURVE := 3.00
 const DUSK_GND_CURVE := 0.05
 const DUSK_SUN_ANGLE_MAX := 24.0
 const DUSK_SUN_CURVE := 0.10
@@ -135,8 +162,22 @@ const DUSK_AMB_ENERGY := 0.55
 ## 就还是白天那层青灰；反过来雾比天亮的话，地平线附近会浮出一条白带。
 const DUSK_FOG_COL := Color(0.62, 0.40, 0.34, 1.0)
 ## 山线是 unshaded，albedo_color 在这里就是个乘数：白 = 原样。
-## 天压暗之后乘数要跟着抬一点，否则最远那层会和天糊成一片，纵深又没了。
-const DUSK_RIDGE_TINT := Color(0.86, 0.64, 0.62, 1)
+##
+## 它是**三层同乘**的，所以它管不了层与层的**比值**，只管整条 ramp 落在 AGX 的
+## 哪一段上——而黄昏要的恰恰是"整条抬上去"：天色那一轮把 `DUSK_SKY_CURVE`
+## 从 0.10 提到 3.00、地平线蓝从 0.58 提到 0.68 之后，黄昏的天**亮了一大截**，
+## 而山线还是原来那份偏暗的填色，于是它在黄昏读成 L 76/86/94 的三道暗带，
+## 层与层的间距掉到判据（≥5）之下。**天一亮，山就得跟着抬**，否则空气透视
+## 的方向反了——原来这一档写的是 (0.86,0.64,0.62)，那是"跟着天一起暗"，
+## 是修天之前那个更暗的黄昏才对的数。
+##
+## 抬多少是量出来的（`tools/probe_sky_grass.gd --spread`）：**比值归 `LAYERS` 管，
+## 余量归这里管**，两头各扫各的。层与层的间距在 `LAYERS` 里拉开之后，剩下的
+## 是把整条 ramp 推离 AGX 的趾部。
+const DUSK_RIDGE_TINT := Color(1.30, 0.97, 0.94, 1)
+## 水面另有一份。黄昏的水本来就靠"比天更暗一档"压住远景，跟着山线一起抬到
+## 1.30 会让水在天底下发白——而山线和水从来没有同一个理由被同一个数管过。
+const DUSK_WATER_TINT := Color(0.86, 0.64, 0.62, 1)
 
 var _sun: DirectionalLight3D = null
 var _fill: DirectionalLight3D = null
@@ -302,7 +343,7 @@ func _apply(t: float) -> void:
 	if _ridge != null:
 		_ridge.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
 	if _water != null:
-		_water.set_tint(Color.WHITE.lerp(DUSK_RIDGE_TINT, t))
+		_water.set_tint(Color.WHITE.lerp(DUSK_WATER_TINT, t))
 	if _grass != null:
 		_apply_grass_light(t)
 
@@ -310,23 +351,74 @@ func _apply(t: float) -> void:
 ## 草皮的昼夜染色。草皮是整片写死的常量色，不走上面那几套（有 PBR 的、
 ## 有 set_tint 的），所以必须单独推一次——否则黄昏那一档草皮是全屏最亮的一块。
 ##
-## 两个量分开算：色相从**太阳色**取（归一化后不带亮度），亮度从太阳能量与
-## 环境光能量一起算。合成一个 Color 再插值是错的——"天变红"和"天变暗"会
-## 互相抵消，红得不够、暗得也不够，最后还是一块亮黄绿。
+## 色相与亮度分开算：合成一个 Color 再插值是错的——"天变红"和"天变暗"会互相
+## 抵消，红得不够、暗得也不够，最后还是一块亮黄绿。
 ##
 ## 亮度以白昼那一档为 1.0，所以 t=0 时这个系数必须精确等于 1，
 ## 否则"按开始到第一次昼夜切换之间草皮被悄悄调过"这种漂移没人查得到。
+##
+## ## 色相为什么不能只报太阳色（2026-10-04，量出来的）
+##
+## 原来 tint 直接就是太阳色，而黄昏那一档归一化之后是 (1.00, 0.80, 0.64)——
+## 绿的草皮乘上去**蓝通道只剩红通道的 0.64**，于是黄昏草带渲成 (99,61,13)、
+## 中位饱和度 **0.869**，全屏最艳的一块，读出来像自发光（那个症状早就写在
+## `grass.gdshader` 的注释里了，只是那一族旋钮一个都碰不到它）。
+##
+## 计划里给的两条候选都扫过、都够不到，而**够不到的原因正是它们都在拧能量**：
+## · `DUSK_FILL_ENERGY` 0.55 → 2.4：0.819 → 0.707。那盏冷补光本来就照着草皮，
+##   可它在**灯**那一侧，而橙调是在 **albedo** 那一侧乘进来的——灯侧加得再多
+##   也压不住一个乘数
+## · `blade_*` 蓝通道顶到 `verify_grass_scatter.gd` 允许的上限 0.45：→ 0.763
+##
+## 正解是**tint 往天光那边混**。真实黄昏里草皮主要被天穹照着：卡片是**竖着**
+## 的、吃环境光，太阳压到 9° 之后掠射方向的贡献很小，而天穹那一档是紫蓝的
+## ——就是 `DUSK_FILL_COL (0.40,0.44,0.72)`。
+##
+## 系数是量出来的（`tools/probe_sky_grass.gd`，**摆的是这一整条算式**
+## 而不是只摆 tint——`GrassScatter.set_light()` 会把 tint 归一化，而 AGX 在这个
+## 亮度上又不是线性的，只扫一半算式量到的数推不出产品的旋钮）。
+## 取 **1.00**，也就是**把 tint 整个交给天光**：
+## 0.85 → 0.586／0.90 → 0.558／0.95 → 0.530／**1.00 → 0.500**。
+## 门槛 0.55，而 1.00 正好落在 **0.500**——"黄昏的草皮不许比正午的更艳"
+## 这条线（`lookdev_journey.gd` 12g 的正午对照门槛也是 0.50）。
+## 亮度 0.233，与正午那一档基本齐平，所以"降饱和"没有顺带降掉亮度。
+##
+## **这一档的数在同一天里被量过两遍，而两遍差 0.08**——记在这儿是因为它差点
+## 变成又一次"同一个 bug 改了很多次都没改到"：第一遍是在**天色修好之前**
+## 量的（那时 `DUSK_SKY_CURVE` 还是 0.10），曲线是 0.70→0.571 / 0.85→0.500，
+## 于是选了 0.85；修好天之后同一个旋钮只到 0.586，定妆照当场红。
+## 草皮吃环境光、环境光来自天，所以**改天之后草皮那条曲线整条作废**，
+## 必须重扫——探针里那一组"摆回产品档"的天色参数现在是从 `DayCycle` 的常量
+## 上取的（`DUSK_SKY_CURVE` 等），**不许再手抄一份**：抄旧值等于把世界拨回
+## 那个已经不存在的天底下，然后照着一个假的数去推旋钮。
+const DUSK_GRASS_SKY_MIX := 1.00
 func _apply_grass_light(t: float) -> void:
 	var sun_col: Color = _sun.light_color if _sun != null else Color.WHITE
+	var fill_col: Color = _fill.light_color if _fill != null else Color.WHITE
 	var sun_e: float = _sun.light_energy if _sun != null else 0.0
 	var amb_e: float = _env.ambient_light_energy if _env != null else 0.0
-	var day_e: float = float(_day.get("sun_energy", 1.0)) \
-		+ float(_day.get("amb_energy", 0.0))
+	var day_e: float = float(_day.get("sun_energy", 1.0)) 			+ float(_day.get("amb_energy", 0.0))
 	var e: float = (sun_e + amb_e) / maxf(day_e, 0.0001)
-	# 下限不是 0.35：草皮在大��里是**唯一**还在的东西，压到接近零会让黄昏的
-	# 路两侧读成两道黑边。实测这一档落在 0.55~0.6 之间，配上偏红的 tint
+	var sun_h := _hue(sun_col)
+	var tint: Color = sun_h.lerp(_hue(fill_col), t * DUSK_GRASS_SKY_MIX)
+	# 归一化的 tint **只带色相不带亮度**，混过去之后三路的均值会掉
+	#（0.813 → 0.750）。那部分得补回 `light_energy`，否则"降饱和"就顺带
+	# "降了亮度"，而这两件事在图上长得一模一样。
+	# t=0 时 tint == sun_h、比值精确为 1，所以白昼那一档一个像素都不动。
+	e *= _mean(sun_h) / maxf(_mean(tint), 0.0001)
+	# 下限不是 0.35：草皮在大景里是**唯一**还在的东西，压到接近零会让黄昏的
+	# 路两侧读成两道黑边。实测这一档落在 0.55~0.6 之间，配上偏紫的 tint
 	# 就已经是"暮色里的草"而不是"荧光棒"。
-	_grass.set_light(sun_col, clampf(e, 0.35, 1.0))
+	_grass.set_light(tint, clampf(e, 0.35, 1.0))
+
+
+static func _hue(c: Color) -> Color:
+	var mx: float = maxf(c.r, maxf(c.g, c.b))
+	return c if mx <= 0.0001 else Color(c.r / mx, c.g / mx, c.b / mx)
+
+
+static func _mean(c: Color) -> float:
+	return (c.r + c.g + c.b) / 3.0
 
 
 ## 白昼那一档的原始值。给回归读（"t=0 时场景没被动过"这条只有它能量）。

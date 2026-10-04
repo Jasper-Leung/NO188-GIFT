@@ -96,9 +96,11 @@ func _snap(name: String) -> Image:
 ## 取到它们就不是"天是什么颜色"而是"草是什么颜色"了。
 ##
 ## 纵向这四行量的是**渐变**，从带顶一路量到最靠近地平线那一行。算出来的 0.321
-## 是**海平面地平线**在屏上的位置，而真实的地面轮廓线比它高得多——实测这条带
-## 整条都在天上：正午那张从 fy 0.086 的 sRGB(81,104,205) 一路泛白到 fy 0.22 的
-## (205,212,221)，再往下才是草地（0.23 起）。
+## 是**海平面地平线**在屏上的位置，而真实的地面轮廓线比它高得多——而**这两者之间
+## 那一段不是空的，是山**：`FarRidge` 三层的轮廓顶实测落在 y 105~202（fy 0.15~0.28）。
+## 所以这四行量到的是「天 → 远山 → 中山 → 近山」这一叠，不是「天 → 地平线霾」。
+## （这一段曾经被写成"整条都在天上、0.23 起才是草地"，那是把远山当成天量出来的
+## 结论——写进注释就变成了下一个人的前提。）
 const SKY_ROWS := [0.10, 0.14, 0.18, 0.22]
 const SKY_COLS := [0.06, 0.14, 0.22, 0.30, 0.38]
 
@@ -112,7 +114,8 @@ const SKY_COLS := [0.06, 0.14, 0.22, 0.30, 0.38]
 ## 而两端里靠近地平线的那一端按设计就不蓝。可推广的一条：**同一个取样框上的两个判据
 ## 不一定量的是同一件事**，取样框对了不代表每条判据都对。
 ##
-## 取 0.12：仍在 `SCRIM_H`(62px = 0.086) 之下，且离草地边沿（≈0.19）还隔着七行。
+## 取 0.12：仍在 `SCRIM_H`(62px = 0.086) 之下，且离**最远那层山线的轮廓顶**
+## （实测最低到 y=151 = fy 0.21）之上还隔着六行——量到的仍然是天，不是山。
 ## 那里正午是 sRGB(92,114,205)、r/b = 0.45；同一行黄昏是 (118,5,8)、r/b = 15.5。
 const SKY_HUE_ROW := 0.12
 
@@ -154,7 +157,8 @@ const ROAD_BOX := Rect2(0.12, 0.62, 0.50, 0.20)
 ## 实测 sRGB(162,168,87)、`b−r = −78`，离门槛一个数量级。
 const GRASS_BOX := Rect2(0.10, 0.47, 0.16, 0.08)
 
-## 一个框里逐像素的色相统计，返回 `[b−r 的中位数, 饱和度的中位数]`。
+## 一个框里逐像素的色相统计，返回
+## `[b−r 的中位数, 饱和度的中位数, r 中位, g 中位, b 中位]`。
 ##
 ## **两个量都必须逐像素算完再取中位数，不能"先取各通道的中位数再相减"。**
 ## 路面中间有白色虚线、边上那条白色实线，而逐通道中位数各自可能被那条白线
@@ -162,6 +166,9 @@ const GRASS_BOX := Rect2(0.10, 0.47, 0.16, 0.08)
 ## 逐像素算完再排序，中位数落在**某一个真实像素**上，于是它至少是一个
 ## 玩家真的看得见的颜色差。同族的一条见 CLAUDE.md：量像素的代码里选错函数
 ## （`absi` 是整数函数），等于把尺子自己折断了。
+##
+## 后面三路是为了**失败时能报出那个中位颜色**——只报一个饱和度的话，
+## 下一个人得重跑一遍才知道渲出来的是一片橙还是一片灰。
 func _region_hue(img: Image, box: Rect2) -> Array:
 	var x0: int = clampi(int(float(SHOT.x) * box.position.x), 0, SHOT.x - 1)
 	var y0: int = clampi(int(float(SHOT.y) * box.position.y), 0, SHOT.y - 1)
@@ -169,14 +176,20 @@ func _region_hue(img: Image, box: Rect2) -> Array:
 	var y1: int = clampi(y0 + int(float(SHOT.y) * box.size.y), 0, SHOT.y)
 	var brs: Array[float] = []
 	var sats: Array[float] = []
+	var rs: Array[float] = []
+	var gs: Array[float] = []
+	var bs: Array[float] = []
 	for y in range(y0, y1):
 		for x in range(x0, x1):
 			var c := img.get_pixel(x, y)
 			brs.append(c.b - c.r)
+			rs.append(c.r)
+			gs.append(c.g)
+			bs.append(c.b)
 			var mx: float = maxf(c.r, maxf(c.g, c.b))
 			var mn: float = minf(c.r, minf(c.g, c.b))
 			sats.append((mx - mn) / maxf(mx, 0.001))
-	return [_median(brs), _median(sats)]
+	return [_median(brs), _median(sats), _median(rs), _median(gs), _median(bs)]
 
 
 func _median(v: Array[float]) -> float:
@@ -198,15 +211,118 @@ func _sky_row(img: Image, fy: float) -> Color:
 	return Color(m.x, m.y, m.z, 1.0)
 
 
-## 天带里的纵向落差：从带顶那一行到地平线那一点的相对亮度差。
+## 天带里的纵向落差——**只量天，不量山**。
 ##
-## 这就是"天是一整片的"那句话在像素上的样子。实测同一机位同一组天空常量，
-## 场景雾画不画天（`fog_sky_affect` 0.3 → 0）、天空色按不按 sRGB 换算，
-## 三档量出来是 **7% / 3% / 21%**——门槛取 12%，三档分得开。
+## 这就是"天是一整片的"那句话在像素上的样子。原来的实现取固定四行
+## （`SKY_ROWS` 0.10~0.22）的两端，而 `FarRidge` 三层的轮廓顶实测就落在
+## **fy 0.146~0.208**——于是后两行量到的是**山**不是天，而它算出来的那个
+## "落差"里有一大截是山和天的亮度差。
+##
+## 这不是取样点选歪了，是**和下面 12f 那条判据互相拆台**：12f 要的是
+## 「最外层山不比它背后那行天亮」（≤ 4 个单位），而这一条把山那两行的亮度
+## 差算进了"天有没有层次"。山越贴近天色（正是空气透视要的样子），这一条
+## 越不可能过。正午那一档以前是靠**山太亮**过的——而那正是这一轮在修的缺陷
+## （1900m 那层亮过它背后那行天 43 个单位）；把山压到该有的亮度之后它当场转红。
+## 两条判据量的是同一个数、方向相反，所以修好一条必然弄坏另一条。
+##
+## 现在逐列各自找**它自己的**轮廓顶，从扫描带上沿量到那一条边为止，
+## 取中位数。实测正午 9.2%~27.9%（中位 **19.1%**）、黄昏 0.9%~1.8%
+## （中位 **0.9%**）——后者是真的平，那是这条判据该抓的东西。
+##
+## 一列都找不到边时返回 **-1** 而不是 0：一个读数 0 和一个"没找到"在断言里
+## 长得一模一样（CLAUDE.md 那条）。
 func _sky_gradient(img: Image) -> float:
-	var lo: float = _sky_row(img, SKY_ROWS[0]).get_luminance()
-	var hi: float = _sky_row(img, SKY_ROWS[SKY_ROWS.size() - 1]).get_luminance()
-	return absf(hi - lo) / maxf(lo, 0.001)
+	var y1: int = clampi(int(float(SHOT.y) * RIDGE_SCAN_BOTTOM),
+			RIDGE_SCAN_TOP + 1, SHOT.y - 1)
+	var drops: Array[float] = []
+	for fx in SKY_COLS:
+		var x: int = clampi(int(float(SHOT.x) * fx), 0, SHOT.x - 1)
+		var edge := -1
+		for y in range(RIDGE_SCAN_TOP, y1):
+			var a := img.get_pixel(x, y)
+			var b := img.get_pixel(x, y + 1)
+			if maxf(absf(a.r - b.r), maxf(absf(a.g - b.g), absf(a.b - b.b))) * 255.0 \
+					>= RIDGE_EDGE_MIN:
+				edge = y
+				break
+		if edge <= RIDGE_SCAN_TOP + 1:
+			continue
+		var lo: float = _lum255(img.get_pixel(x, RIDGE_SCAN_TOP))
+		var hi: float = _lum255(img.get_pixel(x, edge - 2))
+		drops.append(absf(hi - lo) / maxf(lo, 0.001))
+	if drops.is_empty():
+		return -1.0
+	return _median(drops)
+
+
+## 远景山线那三条轮廓顶的扫带与门槛。
+##
+## ## 为什么扫带是"逐列自定位"而不是一条写死的 fy
+##
+## 山线的轮廓**会动**：三层在屏上的顶行实测是远 105~151 / 中 159~202 /
+## 近 185~200（同一个机位，只因为山本身的形状和相机看的方位不同）。
+## 而这一族上一版写的是「天穹硬缝在 y=133」——那个数**是 1900m 那层的
+## 轮廓**被当成天自己的缺陷量出来的，写进了注释就成了下一个人的前提。
+## 写死像素行等于把判据挂在别人的轮廓上，所以这里逐列往下找。
+##
+## ## 跳变门槛 8 而不是 20
+##
+## 三层之间必须各自读得到边，而它们互相之间的亮度差只有 4~7 个单位
+## （近 125 / 中 138 / 远 149）——用 20 去找，一半的列根本找不出第二第三条，
+## 于是"三层分得开"那条永远在量一个不存在的量。8 是量出来的：
+## 20 时五列里只有两列凑得齐三条，8 时五列里有四列。
+## 可读性由**逐通道**的跳变承担而不是由亮度差承担，所以 8 不等于"看不见"。
+const RIDGE_SCAN_TOP := 62
+const RIDGE_SCAN_BOTTOM := 0.34
+const RIDGE_EDGE_MIN := 8.0
+## 一列里最多认三条边——再多就是地形轮廓和草皮纹理了，不是山线。
+const RIDGE_MAX_EDGES := 3
+
+## 字节尺度的相对亮度。`get_pixel()` 给的是 0~1 归一化浮点，判据定在字节上。
+static func _lum255(c: Color) -> float:
+	return (c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722) * 255.0
+
+
+## 逐列找出山线那三条轮廓顶，返回
+## `[近层亮度, 中层亮度, 远层亮度, 远层减它背后那行天, 凑齐三条的列数]`。
+##
+## 每层的"山"取轮廓**下面**那一行、"它背后"取**上面**那一行，中间跨的就是那道边。
+## 三层在屏上是上远下近叠着的，所以对第二三层来说"上面那一行"是**它背后那一层**——
+## 而空气透视要的正是这个次序逐层成立（近的暗、远的淡）。
+##
+## **必须能报出"凑齐几列"**：找不到时返回的是空数组而不是 0，而一个读数 0
+## 和一个"没找到"在断言里长得一模一样（CLAUDE.md：「改了没反应要先确认你改的
+## 那个东西找得到」）。上一版扫带下沿压在 fy 0.25，近层那条边落在 0.25 之下，
+## 于是它一张都找不到、报成"亮度 0"，看着像"这层是黑的"。
+func _ridge_edges(img: Image) -> Array:
+	var near := PackedFloat32Array()
+	var mid := PackedFloat32Array()
+	var far := PackedFloat32Array()
+	var diff := PackedFloat32Array()
+	var y1: int = clampi(int(float(SHOT.y) * RIDGE_SCAN_BOTTOM),
+			RIDGE_SCAN_TOP + 1, SHOT.y - 1)
+	for fx in SKY_COLS:
+		var x: int = clampi(int(float(SHOT.x) * fx), 0, SHOT.x - 1)
+		var edges: Array = []
+		var last := -9
+		for y in range(RIDGE_SCAN_TOP, y1):
+			var a := img.get_pixel(x, y)
+			var b := img.get_pixel(x, y + 1)
+			var j: float = maxf(absf(a.r - b.r),
+					maxf(absf(a.g - b.g), absf(a.b - b.b))) * 255.0
+			if j >= RIDGE_EDGE_MIN and y - last >= 3:
+				edges.append([_lum255(img.get_pixel(x, y - 1)),
+						_lum255(img.get_pixel(x, y + 1))])
+				last = y
+				if edges.size() >= RIDGE_MAX_EDGES:
+					break
+		if edges.size() < RIDGE_MAX_EDGES:
+			continue
+		near.append(edges[2][1])
+		mid.append(edges[1][1])
+		far.append(edges[0][1])
+		diff.append(edges[0][1] - edges[0][0])
+	return [_median(near), _median(mid), _median(far), _median(diff), near.size()]
 
 
 func _free_scene(n: Node) -> void:
@@ -775,11 +891,13 @@ func _run() -> void:
 	# AGX 会把中间调提亮并去饱和，数字全对也完全可能渲成一片橙的糊。这条改动
 	# 动了太阳方向、环境光、雾、远景山线四样，只有看图能判它们凑在一起对不对。
 	#
-	# _odometer_units 是**累加器**（World3D 只在玩家位移时往上加），所以站着不动
-	# 把它摆到门槛之后 0.5 圈就成立，转场期间玩家没动它也不会被改回去。
-	# 跟着 `DUSK_FROM_LAP` 走而不是写死一个圈数：门槛一挪（现在 2.0 → 1.0，
-	# 因为一趟从 20~30 分钟缩到 3.1 分钟），这一屏得跟着代表"玩家真的会看到的那一段"。
-	_world._odometer_units = (_world._day_cycle.DUSK_FROM_LAP + 0.5) * _world._total_arclen
+	# **先把 `DayCycle` 冻上再推里程计**：里程计一推过门槛，转场就在下一个物理帧
+	# 开始按 FADE_SEC 走，而下面为了等相机落位还要花掉 1.5 秒——于是 `12b_day_正午`
+	# 拍到的是 **t≈0.167** 处的一个天，读成"正午的山线只有 2/5 列"。
+	# `set_laps()` 在 `_ready_done == false` 时第一行就 return，所以冻住 = 不动。
+	# （同一族的坑 `probe_sky_grass.gd` 里也栽过一次，两边是同一个。）
+	# 真正的推里程计放在 `12b` 拍完之后，顺便解冻。
+	_world._day_cycle._ready_done = false
 	# 机位必须是**真实跟随相机**（Player3D._update_camera 的第三人称机位）。
 	# 旧版把人按到离地 1m 处平视，拍出来是一堵草墙：车小到只剩一个红点，
 	# 地平线压在画面上沿，判不出黄昏到底把光打成了什么样——而这正是这一屏
@@ -805,7 +923,21 @@ func _run() -> void:
 	_check_bike_on_screen()
 	# 正午那一张要和黄昏那张**同一个机位**，否则两帧之间混进了机位差，
 	# 看的人分不清哪些变化是天色给的、哪些是视角给的。
+	#
+	# 钉一条 t==0 的前提断言：这一屏下面 12f 那三条判据量的全是**山线**，
+	# 而山线的颜色是 unshaded 的顶点色 × tint，压根不吃 `t` —— 于是一张
+	# t≈0.167 的天（转场走了 1.5/9）只改背景那一层，而"正午 2/5 列"这个
+	# 读数看上去和"正午的山线真的分不开"一模一样。见上面那段注释。
+	_ck("正午那张真的是正午（转场还没开始）", float(_world._day_cycle.get_t()) == 0.0,
+			"t=%f" % float(_world._day_cycle.get_t()))
 	var img_day: Image = await _snap("12b_day_正午")
+	# 现在才推里程计放转场。`_odometer_units` 是**累加器**（World3D 只在玩家
+	# 位移时往上加），所以站着不动把它摆到门槛之后 0.5 圈就成立，转场期间
+	# 玩家没动它也不会被改回去。跟着 `DUSK_FROM_LAP` 走而不是写死一个圈数：
+	# 门槛一挪（现在 2.0 → 1.0，因为一趟从 20~30 分钟缩到 3.1 分钟），
+	# 这一屏得跟着代表"玩家真的会看到的那一段"。
+	_world._day_cycle._ready_done = true
+	_world._odometer_units = (_world._day_cycle.DUSK_FROM_LAP + 0.5) * _world._total_arclen
 	# 转场 9 秒（DayCycle.FADE_SEC），按墙钟等 —— 这台机器帧数不等于秒数
 	await create_timer(11.0).timeout
 	var dusk_t: float = float(_world._day_cycle.get_t())
@@ -824,16 +956,37 @@ func _run() -> void:
 	#   ② 天空色在引擎里是辐照度、直接当线性值用，而那六个常量照着显示器写成
 	#      了 sRGB——`DAY_SKY_HORIZON` 渲出来接近纯白，再被 AGX 的高光肩去一次饱和。
 	# 而"天是蓝的还是灰的""黄昏有没有烧起来"这两件事，也没有任何一个常数能量。
-	_ck("正午那档的天在像素上是有层次的，不是「一整片」（带内纵向落差 ≥ 12%）",
+	_ck("正午那档的天在像素上是有层次的，不是「一整片」（天带内纵向落差 ≥ 12%）",
 			_sky_gradient(img_day) >= 0.12,
-			"实测 %.0f%%  顶行 %s 地平线行 %s" % [_sky_gradient(img_day) * 100.0,
-			str(_sky_row(img_day, SKY_ROWS[0])), str(_sky_row(img_day,
-			SKY_ROWS[SKY_ROWS.size() - 1]))])
-	_ck("黄昏那档的天在像素上也是有层次的（上暗下亮）",
-			_sky_gradient(img_dusk) >= 0.12,
-			"实测 %.0f%%  顶行 %s 地平线行 %s" % [_sky_gradient(img_dusk) * 100.0,
-			str(_sky_row(img_dusk, SKY_ROWS[0])), str(_sky_row(img_dusk,
-			SKY_ROWS[SKY_ROWS.size() - 1]))])
+			"实测 %.0f%%  顶行 %s" % [_sky_gradient(img_day) * 100.0,
+			str(_sky_row(img_day, SKY_ROWS[0]))])
+	# ---- 黄昏那一档的「上暗下亮」这条**故意没装**，理由和数字写在这里 ----
+	#
+	# 换成逐列自定位的取样之后（见 `_sky_gradient()` 那段注释：原来的固定四行
+	# fy 0.10~0.22 有两行落在**山**上，而这一条和 12f「最外层山不比天亮」
+	# 量的是同一个数、方向相反），黄昏那一条读出来是 **0.9%**——平得离谱。
+	#
+	# 换过三种量法，结论一致，不是取样点的问题：
+	#   · 逐列自定位（现在这一版）：0.9%~1.8%，中位 0.9%
+	#   · 逐行打印整条亮度剖面：y 60~96 五个通道全是 183~186，之后的下降
+	#     已经是**山**（y≥105）——天自己那一段是真的平
+	#   · `tools/probe_sky_grass.gd` 扫 `DUSK_SKY_CURVE` 0.4~6.0：落差
+	#     7% / 3% / 2% / 1% / 1%，**没有一个到得了 12%**
+	#
+	# 为什么够不到：这一屏用的是**真实追尾相机**，而它俯 12.5°，屏顶才 +22.5°，
+	# 于是骑行视角能看见的天只有**仰角 4°~15.5°**那么窄一条。太阳压到 9° 时
+	# 物理散射自己就是一条又宽又亮的带，而 `DUSK_SKY_CURVE` 是"地平线色往上
+	# 铺多远"——它调到最小（0.4）也只买到 7%，代价是把色相判据
+	# （g/r、b/r ≥ 0.45）推到 0.59/0.47，只剩 4% 余量：那正是本轮已经栽过一次
+	# 的"刚好过线"陷阱（山线那把尺子 0.2% 的反照率就能把 5/5 列翻成 4/5）。
+	# 拿一条**量不到**的判据换一个**刚好压线**的旋钮，是把可测的换成不可测的。
+	#
+	# 所以这一条不装，而**不是**把门槛调到 5% 假装它过了——那样下一个人会以为
+	# "黄昏的天有层次"这件事有回归守着，而它其实没有。真正守住黄昏天色的是
+	# 下面那两条**色相**判据（g/r 与 b/r ≥ 0.45，实测 0.68 / 0.56），
+	# 它们量的是这一档真正坏过的那个东西（一张红色滤色片）。
+	# 要量「上暗下亮」得换一个看得见更多天的机位，那是 `lookdev_horizon.gd`
+	# 的活，不该塞进这一屏——这一屏存在的理由是"车在画面里、玩家真的看得见"。
 	# 下面两条问的是**色相**，取样行是 SKY_HUE_ROW 而不是 SKY_ROWS 的末行——
 	# 理由写在那个常量上：末行落在设计成近白的地平线霾上，量到的是霾不是天。
 	# 「正午到黄昏只有曝光变化」这句话的判据就在这里：如果黄昏只是把正午调暗，
@@ -858,8 +1011,13 @@ func _run() -> void:
 	# 判据是"次通道压过主通道的百分之几"，不是"谁大谁小"。
 	var dusk_gr: float = dusk_row.g / maxf(dusk_row.r, 0.001)
 	var dusk_br: float = dusk_row.b / maxf(dusk_row.r, 0.001)
+	# 门槛 0.10 → 0.45：**上一版那个 0.10 是量出来的错**，实测 0.378 / 0.250
+	# 在它下面全绿，而它放过去的正是 P0-2 那条 63px 的饱和红带
+	# （红带底缘那一行 g/r 0.37、b/r 0.20，两条都在 0.10 之上、看着"合规"）。
+	# 0.45 取自「红带上方那一行」与「地平线霾那一行」的实测中值，
+	# 落在中间而不是贴着任何一侧——所以它同时拦得住"滤色片"和"一片死灰"。
 	_ck("黄昏的天留住绿与蓝（不是一张红色滤色片）",
-			dusk_gr >= 0.10 and dusk_br >= 0.10,
+			dusk_gr >= 0.45 and dusk_br >= 0.45,
 			"g/r=%.3f b/r=%.3f  实测 %s" % [dusk_gr, dusk_br, str(dusk_row)])
 	# 正对照：正午那档**绿蓝都压过红**，黄昏这一档**绿蓝都被红压过**。
 	# 第一版写的是 `(day.b > day.r) != (dusk.r > dusk.b)`——那正好是上面两条
@@ -883,6 +1041,44 @@ func _run() -> void:
 			_wcag_lum(band_day) < bg_lum and _wcag_lum(band_dusk) < bg_lum,
 			"声明 %.3f（sRGB %s）  正午实测 %.3f  黄昏实测 %.3f" % [bg_lum,
 			str(SCRIM_WORST_BG), _wcag_lum(band_day), _wcag_lum(band_dusk)])
+
+	# ---- 12f 远景山线与天之间那道边 ----
+	#
+	# 这一族改过一次判据的对象，改的是**它一直在量别人的轮廓**：
+	# 上一版断「天带内相邻两行跳变 ≤ 24」，注释里写着"那道天穹硬缝在 y=133"。
+	# 把三层山线整张藏掉之后，天里一个 ≥20 的跳变都找不到——那道边从头到尾
+	# 是 `FarRidge` 1900m 那层的轮廓。而山线是 `SHADING_MODE_UNSHADED` 的硬边，
+	# 轮廓本来就该硬，所以那条判据量的不是缺陷、是山本来该有的东西；
+	# 把 `sky_curve` 从 0.15 扫到 10 也只从 88 掉到 36，因为它在调别的东西。
+	#
+	# 真正的缺陷是**方向**：空气透视要求远处的山**不比天亮**。那一层原来渲出来
+	# 是 sRGB(179,191,221)、它背后那行天是 (122,150,219)——亮 43 个单位，
+	# 于是地平线上横着一道**比天还白的硬边**，骑行视角下读成"天上贴了一条褪色的纸"。
+	var rg_day: Array = _ridge_edges(img_day)
+	var rg_dusk: Array = _ridge_edges(img_dusk)
+	# 先钉前提：三条边都得找得到。少了它，上面那条在「山线整个没建出来」的图上
+	# 报的是 0，而 0 看上去就是"通过"。
+	_ck("三层山线的轮廓找得到（≥ 3/5 列凑齐三条边，否则下面两条量的是空气）",
+			rg_day[4] >= 3 and rg_dusk[4] >= 3,
+			"正午 %d/%d 列　黄昏 %d/%d 列" % [rg_day[4], SKY_COLS.size(),
+			rg_dusk[4], SKY_COLS.size()])
+	_ck("最外层山不比它背后那一行天亮（地平线上不许横着一道比天还白的硬边）",
+			rg_day[3] <= 4.0 and rg_dusk[3] <= 4.0,
+			"正午 %+.0f（远 %.0f 天 %.0f）　黄昏 %+.0f" % [rg_day[3], rg_day[2],
+			rg_day[2] - rg_day[3], rg_dusk[3]])
+	# 正对照：上面那条只断"更亮"，**对"三层一起淡成一样白"完全免疫**——
+	# 而那正是上一版的病（0.13/0.30/0.52 那一档每层都比上一层淡，照绿）。
+	# 所以另钉一条：三层逐层变淡、每层之间差 ≥ 5。
+	# 5 是量出来的折中：实测两处间距是 11 和 12，而三层一起塌成一条时是 0。
+	var d_gap_near: float = rg_day[1] - rg_day[0]
+	var d_gap_far: float = rg_day[2] - rg_day[1]
+	var k_gap_near: float = rg_dusk[1] - rg_dusk[0]
+	var k_gap_far: float = rg_dusk[2] - rg_dusk[1]
+	_ck("正对照：三层仍然分得开（近暗远淡，每层之间 ≥ 5，不许一起淡成一样）",
+			d_gap_near >= 5.0 and d_gap_far >= 5.0
+			and k_gap_near >= 5.0 and k_gap_far >= 5.0,
+			"正午 近%.0f 中%.0f 远%.0f　黄昏 近%.0f 中%.0f 远%.0f"
+			% [rg_day[0], rg_day[1], rg_day[2], rg_dusk[0], rg_dusk[1], rg_dusk[2]])
 
 	# ---- 12e 路面本身的色相 ----
 	#
@@ -909,6 +1105,27 @@ func _run() -> void:
 	_ck("正对照：同一帧的草地明显偏绿（|b−r| ≥ 25，尺子分得开蓝和绿）",
 			absi(int(round(grass[0] * 255.0))) >= 25,
 			"实测 b−r = %+.0f  饱和度 %.3f" % [grass[0] * 255.0, grass[1]])
+
+	# ---- 12g 草皮在两档天色下的饱和度 ----
+	#
+	# 第四轮 P1-1 把 `DUSK_SUN_COL` 从 (1.0,0.70,0.42) 降到纯度 (1.0,0.80,0.64)，
+	# 方向对、**旋钮不是那个**：渲出来的饱和度由草皮自身 albedo 的蓝通道决定
+	# （`blade_base` b=0.270 / `ground_color` b=0.285），把太阳降纯度几乎不动
+	# 那个乘积——于是黄昏草皮的饱和度**比白昼还高**（0.796 对 0.474）。
+	#
+	# 而第四轮新加的三条判据**全部在量常量的纯度**，没有一条量渲出来的像素——
+	# 同一个项目自己写下的教训：把"我不测观感"写进文档，要读成"观感由看图负责"。
+	# 这一节是那把看图的尺子。
+	var grass_day: Array = _region_hue(img_day, GRASS_BOX)
+	var grass_dusk: Array = _region_hue(img_dusk, GRASS_BOX)
+	_ck("黄昏草皮不是一片霓虹（草带中位饱和度 ≤ 0.55）", grass_dusk[1] <= 0.55,
+			"实测 %.3f（中位 sRGB %s）" % [grass_dusk[1],
+			str(Color(grass_dusk[2], grass_dusk[3], grass_dusk[4]))])
+	# 正对照：正午那档必须**本来就**在门槛之内（实测 0.442）。
+	# 少了它，把门槛一路收紧到"任何世界都过不了"也能让上面那条绿。
+	_ck("正对照：正午草皮本来就是收敛的（≤ 0.50，门槛不是靠收紧收出来的）",
+			grass_day[1] <= 0.50,
+			"正午 %.3f  黄昏 %.3f" % [grass_day[1], grass_dusk[1]])
 
 	# ---- 13 集齐合成 ----
 	_gm.seen_villain = 3
