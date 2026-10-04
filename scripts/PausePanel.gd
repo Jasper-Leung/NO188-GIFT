@@ -20,11 +20,13 @@ extends Control
 @onready var _title_label: Label = $Overlay/Panel/VBox/TitleLabel
 
 var _finish_btn: Button = null
+var _tier_label: Label = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	_finish_btn = _make_finish_btn()
+	_tier_label = _make_tier_label()
 	_continue_btn.pressed.connect(_on_continue_pressed)
 	_restart_btn.pressed.connect(_on_restart_pressed)
 	_settings_btn.pressed.connect(_on_settings_pressed)
@@ -64,6 +66,45 @@ func _refresh_finish_btn() -> void:
 	_finish_btn.visible = have
 	_finish_btn.text = Localization.t("finish_run")
 	_finish_btn.tooltip_text = Localization.t("finish_run_hint")
+	_refresh_tier_label()
+
+
+## 「此刻这一趟会做出哪一档明信片，还差几步到完满」——**收工这个决定发生在这一屏上，
+## 而这个数以前只在集齐面板的一句话里出现过**（还是另一个时刻、另一块板子）。
+## 玩家在这里决定"现在停还是再骑一趟"，屏上却只有一个按钮：按下去会收工，
+## 按之前他知道收工能得到什么吗？不知道——五档的名字 `Localization` 里一个字都没有，
+## README 还把它写成"分四档"，把唯一有玩法含义的完满整个漏在外面。
+##
+## 跟 FinishBtn 一样代码里建：它跟着按钮一起显隐，而那个条件在存档里。
+##
+## **`custom_minimum_size.x` 是必须的，不是排版洁癖**：带 `autowrap_mode` 的 Label
+## 不给这个数，最小宽度是 1px，自动折行会**逐字**断成十几行（见文件头那条）。
+func _make_tier_label() -> Label:
+	var lbl := Label.new()
+	lbl.name = "TierLabel"
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var vbox := _continue_btn.get_parent()
+	var want: float = vbox.get_combined_minimum_size().x
+	lbl.custom_minimum_size = Vector2(maxf(want, 440.0), 0)
+	vbox.add_child(lbl)
+	vbox.move_child(lbl, _finish_btn.get_index() + 1)
+	return lbl
+
+
+func _refresh_tier_label() -> void:
+	if _tier_label == null:
+		return
+	_tier_label.visible = _finish_btn.visible
+	var v := PostcardVariant.compute_variant()
+	var left := PostcardVariant.visits_to_full()
+	if left <= 0:
+		_tier_label.text = Localization.t("tier_full")
+	else:
+		_tier_label.text = Localization.t("tier_now") % [
+			Localization.t(PostcardVariant.tier_name_key(v)),
+			v + 1, PostcardVariant.tier_count(), left,
+		]
 
 
 func _on_finish_pressed() -> void:
@@ -79,6 +120,9 @@ func _apply_language() -> void:
 	_language_btn.text = "%s  %s" % [Localization.t("language"), Localization.t("language_current")]
 	if _quality_hint != null:
 		_quality_hint.text = Localization.t("quality_hint")
+	# 切语言时这一行必须跟着重算：档名是玩家看得见的五个词，
+	# 停在中文那一侧等于英文界面里这一行还是半个中文。
+	_refresh_tier_label()
 
 
 func _on_language_pressed() -> void:

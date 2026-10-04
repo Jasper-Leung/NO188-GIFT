@@ -369,3 +369,158 @@ func _doc_readme_section() -> void:
 			var want: String = name_zh if label == "README.md" else str(s.get("name_en", ""))
 			_ck(want != "" and txt.contains(want),
 				"%s 里有碎片站名「%s」" % [label, want])
+
+	_doc_counts_section()
+
+
+## 5.6 README 报的那几个数，是**数得出来的**那几个
+##
+## 上一节钉的是"说法对不对"，这一节钉的是"报的那个数还对不对"。
+## README 开头「这个项目有 42 条回归 + 8 套出图 + 2 条探针」这一句，
+## 到本轮为止**从来没被任何东西钉过**，而它已经错了两轮：
+## 出图实际 11 套、探针实际 4 条，README 还写着 8 和 2。
+## 症状和 `edge_line_color` 完全一样——两边各自都绿，因为"文档里的数"
+## 和"仓库里的数"之间**没有任何对拍**。
+##
+## 钉哪几个数是选出来的，不是全钉：
+## · **数得出来的**（仓库里几个文件就是几）→ 钉。回归条数、出图套数、探针条数，
+##   以及 `check_all.sh` 里 `NEEDS_WINDOW` 那七条的条数（两份 runner 都钉，
+##   .sh 和 .ps1 各写一份而它们本来就得一样）。
+## · **跑一次才知道的**（PASS 几条、断言几千条）→ **不钉**。它们每加一条断言
+##   就变，钉住的当天就开始说谎，而 README 上一版恰恰是把这两个数写死的。
+##   所以那一句连同"以你自己那一次的输出为准"一起留在文档里。
+##
+## 少一格都拦不住：前两版判据只查"README 里有没有 42 这个数字"，
+## 于是 README 把 8 改成 11 之后它照样绿。
+func _doc_counts_section() -> void:
+	print("\n---- 5.6 README 报的那几个数不许对不上仓库 ----")
+
+	var verifies := _count_scripts("verify_")
+	var lookdevs := _count_scripts("lookdev_")
+	var probes := _count_scripts("probe_")
+	# **正对照先摆**：`DirAccess` 在导出后的 Web 构建里列不出目录
+	# （见 verify_provenance.gd 第 103 行那条注释），所以"数出来是 0"和
+	# "仓库真的空了"在下游看起来一模一样。哪一格真的 0 了，后面那几条
+	# 会安静地全绿，所以先断这一条。
+	_ck(verifies >= 30, "正对照：tools/ 真的列出了 ≥30 条 verify_*.gd",
+		"只列出 %d 条（导出后 DirAccess 不可用会让这一族空过）" % verifies)
+	if verifies == 0:
+		return
+
+	var window_sh := _needs_window("res://tools/check_all.sh")
+	var window_ps := _needs_window("res://tools/check_all.ps1")
+	_ck(window_sh > 0, "正对照：check_all.sh 的 NEEDS_WINDOW 列得出来",
+		"一格都没列出来，这一族会空过")
+	if window_sh > 0:
+		# 两份 runner 各写一份名单，而它们本来就必须一样——CLAUDE.md 里
+		# 专门解释了 .ps1 为什么存在（没装 Git 的 Windows 上 bash 是 WSL）。
+		# 只钉 .sh 的话，.ps1 少一条而默认轮次照跑不误。
+		_ck(window_sh == window_ps,
+			"check_all.sh 与 check_all.ps1 的 NEEDS_WINDOW 一样长",
+			"sh=%d ps1=%d" % [window_sh, window_ps])
+
+	var readmes := {"res://README.md": "README.md", "res://README.en.md": "README.en.md"}
+	# **遍历字典只给 key，不给 pair**——第一版写成 `for pair in {...}` 之后
+	# `pair[path]` 当场抛 "Invalid access ... on a base object of type 'String'"，
+	# 于是这一节从中间掐断、下面 8 条一条没跑，而**汇总照样打 PASS**。
+	# 那是 CLAUDE.md 里记着的"抛异常的回归退出码是 0"那一条的现场版：
+	# 一行断言没打过的后半截看着像跑通了。所以末尾那条 `_ck(_checks >= …)`
+	# 断的是"整份真的跑完了"，不是"跑到这儿为止都对"。
+	for key in readmes:
+		var path: String = key
+		var label: String = readmes[key]
+		if not FileAccess.file_exists(path):
+			_ck(false, "%s 存在" % label)
+			continue
+		var txt := FileAccess.get_file_as_string(path)
+		var is_en := label == "README.en.md"
+		# **正向 + 反向成对写**。第一版只钉正向（"README 里得有 11 套出图"），
+		# 突变验证把其中一处的 11 改回 8 —— 另一处还写着 11，于是
+		# `contains` 照样为真、**一条都没红**。这和"落盘闸必须配正对照"、
+		# "并集每一路都要配承重的正对照"是同一条：`contains` 量的是
+		# "**某一处**写对了"，而同一件事在文档里会被写两遍（开头的总述 +
+		# 下面那一节）。反向把**上一版的错值**钉死，"只改了一处"当场红。
+		# **三元必须显式加括号**：GDScript 里 `a % n if c else b % n` 求值成
+		# `(a if c else b) % n`——条件表达式的优先级比 `%` **高**，于是
+		# 第一版把两种语言的后缀拿去当格式化参数，六个断言全红而读起来
+		# "哪都对"。和 `ROAD_HALF_WIDTH := ROAD_WIDTH * 0.5` 那条同族：
+		# 你以为谁先算，写出来才知道。
+		var triples := [
+			[("%d regressions" % verifies) if is_en else ("%d 条回归" % verifies),
+				"four regressions" if is_en else "四条回归", "回归条数"],
+			[("%d screenshot" % lookdevs) if is_en else ("%d 套出图" % lookdevs),
+				"8 screenshot" if is_en else "8 套出图", "出图套数"],
+			[("%d probes" % probes) if is_en else ("%d 条探针" % probes),
+				"2 probes" if is_en else "2 条探针", "探针条数"],
+		]
+		for triple in triples:
+			var want_txt: String = triple[0]
+			var stale_txt: String = triple[1]
+			var what: String = triple[2]
+			_ck(txt.contains(want_txt), "%s 报的%s对得上仓库" % [label, what],
+				"找不到「%s」" % want_txt)
+			_ck(not txt.contains(stale_txt), "%s 里没有留下一处旧的%s" % [label, what],
+				"还写着「%s」—— 同一件事文档里写了两遍，只改一处的话" % stale_txt
+				+ "只钉正向那条永远不会红")
+		if window_sh > 0:
+			_ck(txt.contains("%d window-only" % window_sh if is_en
+						else "%d 条要开窗口" % window_sh),
+				"%s 报的要开窗口条数就是 NEEDS_WINDOW 的 %d 条" % [label, window_sh])
+
+	# 整份真的跑完了吗。门槛 80 是**量出来的**：全绿跑一遍是 82 条，
+	# 而 5.6 从中间掐断（字典迭代那个坑）时只有 74 条——差 8 条，
+	# 汇总照样打 PASS。留 2 条余量给以后加断言。
+	_ck(_checks >= 80, "这一整份真的跑完了（≥80 条断言，现在 %d）" % _checks,
+		"某一节中途抛异常时汇总照样打 PASS —— 缺的那几条只有这条拦得住")
+
+
+func _count_scripts(prefix: String) -> int:
+	var d := DirAccess.open("res://tools")
+	if d == null:
+		return 0
+	var n := 0
+	for f in d.get_files():
+		if f.begins_with(prefix) and f.ends_with(".gd"):
+			n += 1
+	return n
+
+
+## 从 runner 脚本里把 `NEEDS_WINDOW` 那份名单数出来。**刻意不执行脚本**，
+## 只数词——runner 自己就是按词拆的（`case " $NEEDS_WINDOW "`），
+## 所以判据量的就是 runner 用的那一份。
+##
+## **必须跨行数**：`.ps1` 那份名单是折成两行写的，第一版只读 `NEEDS_WINDOW`
+## 所在的那一行，于是数出来 0——而"0"和"这份 runner 没写名单"长得一模一样，
+## 那条断言会安静地绿下去。同一族的教训：`grep` 到的一行不等于一份名单。
+func _needs_window(path: String) -> int:
+	if not FileAccess.file_exists(path):
+		return 0
+	var lines := FileAccess.get_file_as_string(path).split("\n")
+	var in_list := false
+	var names: Array[String] = []
+	for raw in lines:
+		var line: String = raw
+		if not in_list:
+			# .sh 写的是 `NEEDS_WINDOW="..."`，.ps1 写的是 `$NEEDS_WINDOW = @(...)`
+			if not line.contains("NEEDS_WINDOW"):
+				continue
+			if not line.contains("="):
+				continue
+			in_list = true
+			line = line.substr(line.find("=") + 1)
+		names.append_array(_verify_names(line))
+		# 收尾：这一行后面没有任何 `verify_` 了，且已经点过至少一个名字。
+		# 收在"点过之后"而不是"行尾"，因为两份 runner 写完名单的那一行
+		# 后面还跟着注释行，把注释里的 `verify_*` 数进去就虚高了。
+		if names.size() > 0 and not line.contains("verify_"):
+			break
+	return names.size()
+
+
+func _verify_names(line: String) -> Array[String]:
+	var out: Array[String] = []
+	var re := RegEx.new()
+	re.compile("verify_[A-Za-z0-9_]+")
+	for m in re.search_all(line):
+		out.append(m.get_string())
+	return out

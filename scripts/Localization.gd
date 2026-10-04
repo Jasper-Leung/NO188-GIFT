@@ -177,6 +177,15 @@ const STRINGS := {
 		"dialogue_start": "开始游戏 ✚",
 		"postcard_signature": "五件小乐事 · 记五",
 		"postcard_variant_hint": "同一处驿站再访两次，第五格才落成真禽。",
+		# ---- 明信片评级（玩家看得见的五个档名，见 PostcardVariant.TIER_KEYS）----
+		# 以前这一组一个字都没有：五档只活在代码注释里，README 还写成「分四档」。
+		"tier_0": "初旅",
+		"tier_1": "探索者",
+		"tier_2": "朝圣者",
+		"tier_3": "大师",
+		"tier_4": "完满",
+		"tier_now": "此刻的明信片：%s（第 %d 档 / 共 %d 档）· 完满还差 %d 次",
+		"tier_full": "此刻的明信片：完满。五座都走满了。",
 		# ---- 明信片正面顶部那一块：这一趟的路线图 ----
 		# 正面原先顶部是一段云天、五块碎片排成五格色卡，谁看都是同一张。
 		# 换成「你实际骑过的那条路」之后，正面才真的属于这一趟。
@@ -433,6 +442,13 @@ const STRINGS := {
 		"dialogue_start": "Start ✚",
 		"postcard_signature": "Five Small Joys · Ride Complete",
 		"postcard_variant_hint": "Visit one station twice more and the last panel fills in.",
+		"tier_0": "First Ride",
+		"tier_1": "Explorer",
+		"tier_2": "Pilgrim",
+		"tier_3": "Master",
+		"tier_4": "Full",
+		"tier_now": "This run's postcard: %s (grade %d of %d) · %d more visits to Full",
+		"tier_full": "This run's postcard: Full. All five walked three times.",
 		"postcard_map_title": "The route you rode",
 		"postcard_map_legend": "Filled = passed　Hollow = not yet",
 		"postcard_joys_title": "The five joys",

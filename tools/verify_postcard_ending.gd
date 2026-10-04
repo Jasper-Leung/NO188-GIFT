@@ -235,6 +235,76 @@ func _audit_extras() -> void:
 	await _free(pplain_fiber)
 
 
+## 五个档名是**玩家看得见的**——它们以前一个字都不在 `Localization` 里，
+## 只活在 `PostcardVariant` 顶部的注释中，README 那边还写成"分四档"，
+## 把唯一按次数分的完满整个漏在外面。于是玩家全程读不到自己拿到的是哪一档。
+##
+## 三组断言各管一头：**表与分母**（`tier_count()` 必须等于档名表长度，
+## 不许 Label 里再抄一个 5）、**每个 key 两侧都在且不相同**（`t()` 查不到 key
+## 时返回 key 自己，所以漏一边在屏上露的是一串下划线）、**剩下的次数真的对得上存档**。
+func _audit_tier_names() -> void:
+	print("\n---------- 3b. 五个档名（玩家看得见的那五个词）----------")
+	var pv: Object = load("res://scripts/PostcardVariant.gd")
+
+	_eq("五档（不是四档——完满是第五档）", int(pv.tier_count()), 5)
+	_eq("布局表也是五档，两处不许漂", int(_pc("VARIANT_LAYOUTS").size()), int(pv.tier_count()))
+
+	var names: Array[String] = []
+	var names_en: Array[String] = []
+	for v in int(pv.tier_count()):
+		var k: String = str(pv.tier_name_key(v))
+		var zh: String = _loc.t(k)
+		var en := _t_en(k)
+		_ck("第 %d 档的 key 是 tier_%d" % [v, v], k == "tier_%d" % v, k)
+		# `t()` 查不到 key 时返回 key 自己，所以"两侧都在"必须写成 != key
+		_ck("中文表里有 %s" % k, zh != k, zh)
+		_ck("英文表里有 %s" % k, en != "" and en != k, en)
+		_ck("%s 中英不同字" % k, zh != en, "zh=%s en=%s" % [zh, en])
+		names.append(zh)
+		names_en.append(en)
+	# **两侧都要两两不同**。原来只查中文那一列，于是把英文的 tier_1 填成
+	# "Master"（和 tier_3 撞了）一条红都不报：五档在英文界面里读起来是
+	# First Ride / Master / Pilgrim / Master / Full —— 第 2 档和第 4 档同一个词，
+	# 而"这一行报的是我这一档"正是暂停面板上那行字存在的全部理由。
+	for a in names.size():
+		for b in names.size():
+			if a < b:
+				_ck("档名 %s 与 %s 不是同一个词" % [names[a], names[b]],
+						names[a] != names[b])
+				_ck("英文档名 %s 与 %s 不是同一个词" % [names_en[a], names_en[b]],
+						names_en[a] != names_en[b])
+
+	# 越界不许踩出调色板 / 露一个不存在的 key
+	_eq("越界 -5 夹回 0 档", str(pv.tier_name_key(-5)), "tier_0")
+	_eq("越界 99 夹回 4 档", str(pv.tier_name_key(99)), "tier_4")
+
+	# 离完满还差多少次：必须现算自存档，不许是另一个手抄的数
+	_gm.reset()
+	_eq("零碎片：还差满额 15 次", int(pv.visits_to_full()), 15)
+	for i in _frag_idx.size():
+		_gm.collected[_frag_idx[i]] = 1
+	_eq("五站各一次：还差 10 次", int(pv.visits_to_full()), 10)
+	_gm.collected[_frag_idx[0]] = 3
+	# 15 - (3 + 1×4) = 8。四座还欠两次、一座还欠零次 —— 这一条不许
+	# 简化成"刷满一站省两次"，因为那正是第一次算错的地方。
+	_eq("一站刷满三次：还差 8 次", int(pv.visits_to_full()), 8)
+	_gm.collected[_frag_idx[0]] = 9
+	_eq("存档被裁剪过（>MAX）：不许算成负数", int(pv.visits_to_full()), 8)
+	for i in _frag_idx.size():
+		_gm.collected[_frag_idx[i]] = 3
+	_eq("五站全满：还差 0 次", int(pv.visits_to_full()), 0)
+	_eq("五站全满：评级就是完满(4)", int(pv.compute_variant()), 4)
+
+
+## 英文那一侧的值。`Localization` 只有 `t()` + `set_language()`，而
+## `t()` 在当前语言下取值 —— 所以量英文必须真切一次语言再切回来。
+func _t_en(key: String) -> String:
+	_loc.set_language("en")
+	var s: String = _loc.t(key)
+	_loc.set_language("zh")
+	return s
+
+
 func _audit_variant_independent() -> void:
 	print("\n---------- 3. 碎片档位不被纸面档位带偏 ----------")
 
@@ -275,6 +345,8 @@ func _audit_variant_independent() -> void:
 		for entry in layouts[li]:
 			_ck("布局 %d 第 %s 格 占位标记与槽位一致" % [li, str(entry[0])],
 					entry[1] == (entry[0] < 0), "entry=%s" % str(entry))
+
+	await _audit_tier_names()
 
 	await _audit_panel_identity()
 	await _audit_panel_quietness()

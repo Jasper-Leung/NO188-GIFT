@@ -170,6 +170,7 @@ func _run() -> void:
 	_ck("只骑全程买得上笺", b["ride_only"] >= b["fine"])
 	_ck("只骑全程买不了珍藏", b["ride_only"] < b["rare"])
 	_ck("全清买得起珍藏", b["full"] >= b["rare"])
+	_budget_comment_section(b)
 
 	# ---- 2. 商品表与铺子 ----
 	_eq("商品数 10", int(_sd.GOODS.size()), 10)
@@ -467,3 +468,54 @@ func _run() -> void:
 	for f in _fails:
 		print("  [FAIL] ", f)
 	quit(0 if _fails.is_empty() else 1)
+
+
+
+## 799 / 1010 / 211 这个三连**在三个地方各手抄了一份**：这一段断言的字面量、
+## `GameManager.gd` 头部的预算注释、`shop_data.gd` 头部的预算注释。
+## 上面那几条 `_eq` 钉的是第一份，而**后两份谁都没钉**——加一件商品、
+## 改一个 `LVBI_*` 常量之后，这三处会安静地分叉，而下一个人照着注释里的
+## 799 去算预算，算出来的缺口已经不是产品的那个缺口了。
+##
+## 这一族和 `edge_line_color`、`_draw` 不落盘并排：**症状不是红，是一句错话**。
+## 所以钉的方式是"从那两份注释里把数抠出来，和 `_recompute()` 当场比"，
+## 而不是"注释里不许出现某个数"（后者改文案就红，而文案本来就是给人读的）。
+##
+## 判据量的是**注释**而不是代码，所以这里**刻意不剔注释**——那一节的规矩
+## 是"搜到的字符串可能出现在注释里"，这里要的恰恰是那个注释。
+## 词表（`全清` / `全购` / `缺口`）是锚点：认不出锚点会返回 -1，
+## 那样 `_eq(-1, 799)` 照样红，所以每份文件先各断一条"锚点找得到"。
+func _budget_comment_section(b: Dictionary) -> void:
+	print("--- 预算注释不许和公式分叉 ---")
+	for path in ["res://scripts/GameManager.gd", "res://scripts/shop_data.gd"]:
+		var fname: String = path.get_file()
+		if not FileAccess.file_exists(path):
+			_ck("%s 存在" % fname, false)
+			continue
+		var txt := FileAccess.get_file_as_string(path)
+		for pair in [["全清", int(b["full"])],
+				["全购", int(b["sensible"])],
+				["缺口", int(b["gap"])]]:
+			var anchor: String = pair[0]
+			var want: int = pair[1]
+			var got := _number_after(txt, anchor)
+			_ck("%s 里有「%s」那一行" % [fname, anchor], got != -1,
+				"找不到锚点，后面那条会拿 -1 去比而看不出是'没找到'")
+			_eq("%s 的「%s」和公式重算一致" % [fname, anchor], got, want)
+
+
+## 取 anchor 之后**第一行**里的第一个整数。取第一行是有意的：
+## `shop_data.gd` 那行三个数连着写（"全清总收入 799 旅币；合理全购 1010；
+## 缺口 211"），而 `GameManager.gd` 是三行——两种排版用同一个办法都吃得下。
+func _number_after(txt: String, anchor: String) -> int:
+	for line in txt.split("\n"):
+		var i := line.find(anchor)
+		if i < 0:
+			continue
+		var tail := line.substr(i + anchor.length())
+		var re := RegEx.new()
+		re.compile("\\d+")
+		var m := re.search(tail)
+		if m != null:
+			return int(m.get_string())
+	return -1

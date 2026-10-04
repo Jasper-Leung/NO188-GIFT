@@ -222,6 +222,20 @@ func _run() -> void:
 	var pause = _world._pause_panel
 	_ck("暂停面板在场", pause != null)
 	if pause != null:
+		# **先把语言钉死，再量"切语言跟着走"**：Localization 把语言存进
+		# `user://settings.cfg`，所以上一轮跑完留在什么语言，这一轮开局就是什么语言。
+		# 不钉的话，切到英文那一步是个空操作，而判据写的是 `t_en != tnow` ——
+		# 于是"开局本来就是英文"被报成"切语言没生效"，红得极像产品坏了。
+		# 一条量"状态切换"的断言必须自己先把起点摆出来。
+		_loc.set_language("zh")
+		pause.call("_apply_language")
+		await process_frame
+		var t_zh: String = "" if pause.get("_tier_label") == null else str(pause._tier_label.text)
+		# 拿 `tier_now` 那个模板里第一个 `%` 之前的那截固定前缀，不写死中文字面量
+		# （改文案时这条不该红，它要量的是"语言钉住了"而不是"这句话长这样"）。
+		var zh_prefix: String = _loc.t("tier_now").split("%")[0]
+		_ck("正对照：开局语言被钉在中文（上一轮残留的那份不许带进来）",
+				t_zh.contains(zh_prefix), t_zh)
 		_ck("暂停面板有「结束这一趟」按钮", pause._finish_btn != null)
 		if pause._finish_btn != null:
 			_gm.reset()
@@ -229,6 +243,9 @@ func _run() -> void:
 			pause.visible = true
 			await process_frame
 			_ck("一块碎片都没有：不许收工", not bool(pause._finish_btn.visible))
+			_ck("那一行也跟着收掉（零碎片时不许报一个评级）",
+					pause._tier_label != null and not bool(pause._tier_label.visible),
+					"" if pause._tier_label == null else str(pause._tier_label.text))
 			_gm.check_in(first)
 			_gm.check_in(order[1])
 			pause.visible = false
@@ -240,6 +257,46 @@ func _run() -> void:
 			# 收工时评级必须按"真的走过几站"算，而不是一律完满
 			_eq("只走过两站就收工：评级是探索者(1)",
 					int(load("res://scripts/PostcardVariant.gd").compute_variant()), 1)
+
+			# **收工这个决定发生在这一屏上，而屏上以前只给一个按钮。**
+			# 五个档名当时一个字都没有（只活在代码注释里），README 还写成"分四档"，
+			# 于是玩家在按下去之前无从知道按下去会拿到什么。
+			# 下面量的是"玩家读到的那一行"：档名对、分母对、还差几次真的对得上存档。
+			_ck("暂停面板有那行「此刻这一趟会做出哪一档」",
+					pause._tier_label != null and bool(pause._tier_label.visible))
+			var tnow: String = "" if pause._tier_label == null else str(pause._tier_label.text)
+			_ck("它报的是当前这一档的名字（探索者）",
+					tnow.contains(_loc.t("tier_1")), tnow)
+			# 五座碎片驿站 × 三次 = 15，已走 2 次 ⇒ 还差 13 次。
+			_eq("离完满还差几次 = 存档真值（15 - 2）",
+					int(load("res://scripts/PostcardVariant.gd").visits_to_full()), 13)
+			_ck("那行字里写的正是这个数（不是另抄一份）", tnow.contains("13"), tnow)
+			# 判"没报完满"要断**那一句收尾话**，不能断「完满」这两个字：
+			# 「完满还差 13 次」里本来就有"完满"，断字的话这条在正确的产品上
+			# 当场红——而它红得极像"档位算错了"。第一版就是这么写的。
+			# 判据要问的是"它说的是不是『已经完满了』"，不是"句子里有没有那个词"。
+			_ck("没刷满时不得说成已经完满（`tier_full` 那一句不在）",
+					not tnow.contains(_loc.t("tier_full")), tnow)
+
+			# 切语言必须跟着走：档名是五个玩家看得见的词，停在中文那一侧
+			# 等于英文界面里这一行还是半个中文。
+			#
+			# **这里必须再取一次成员、且不许直接解引用**：突变把
+			# `_make_tier_label()` 换成 null 之后，第一版这几行当场抛
+			# "Invalid access ... 'text' on a base object of type 'Nil'"，
+			# 协程被掐断 → `quit()` 走不到 → 进程**挂到超时**。
+			# 也就是说**判据在它自己要抓的那个缺陷上把自己搞崩了**，
+			# 而"挂住"和"红"在驱动眼里长得不一样。
+			# 取法：`get()` 拿不到的当空串，断言照样打出来。
+			_loc.set_language("en")
+			pause.call("_apply_language")
+			await process_frame
+			var t_en := "" if pause.get("_tier_label") == null else str(pause._tier_label.text)
+			_ck("切到英文后那一行跟着换（不是把上一段没删干净）",
+					t_en != tnow and t_en.contains(_loc.t("tier_1")), t_en)
+			_loc.set_language("zh")
+			pause.call("_apply_language")
+			await process_frame
 			pause.visible = false
 
 

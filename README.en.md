@@ -45,12 +45,18 @@ the feeling comes from arriving, not from beating anything.
 
 ---
 
-## The idea: "188" is two things, not three
+## The idea: "188" is three things, and none of them is a distance
 
 | "188" means | In the game |
 | :--- | :--- |
 | **No.188** | the gift's serial number, printed on the postcard |
 | **16 stations** | the "驿" (post-stations) you pass; the HUD counts `n 驿` (no denominator — the station count can change, and a hard-coded one would have to be edited by hand every time) |
+| **Four steles** | four stones at the roadside: three carved with 「188」, and the fourth chiseled flat (the "stone with the writing on it" that Zheng Duo names) |
+
+The third row is the one this table used to leave out, and it is the only place
+the number exists **as a physical object**: the other two live in UI text, while
+the steles are things you ride past, lit by the sun, one of them with a corner
+broken off.
 
 **It is not a distance.** An earlier version of this README called it a "188 km
 loop", and that was simply wrong in a way players would catch in the first ten
@@ -137,12 +143,19 @@ Both differences land on the **front** of the exported PNG, not just on a menu.
 Then you can write on the back yourself, and the game shows you a live preview
 of exactly what will be exported.
 
-The postcard is graded four ways depending on how far you got: **初旅 /
-探索者 / 朝圣者 / 大师** (First Journey / Explorer / Pilgrim / Master).
+The postcard is graded **five ways**: **First Ride / Explorer / Pilgrim / Master
+/ Full**. The first four are by station count (1 / 2 / 3 / 4–5 fragment
+stations); **Full** is the only one graded by visits — all five fragment
+stations, three visits each. (This used to say "graded four ways" and left the
+one grade that carries the whole replay hook out of the list, while the five
+names existed only in a code comment and no player could ever read them.)
 
 If you would rather stop early, the pause panel has **"finish this run"** — it
 is hidden until you hold at least one fragment, because an empty card has
-nothing to say.
+nothing to say. The line under that button reports **which grade this run
+would produce right now** and **how many more visits Full needs**, so
+"stop now or ride one more lap" is a decision made with the numbers in front
+of you.
 
 ---
 
@@ -198,8 +211,8 @@ and the game will let you stop there via the pause panel.
 
 ## How it's verified
 
-The project ships **39 regressions (32 headless + 7 window-only), 8 screenshot
-suites, and 2 probes**.
+The project ships **42 regressions (35 headless + 7 window-only), 11 screenshot
+suites, and 4 probes**.
 One command runs the headless lot; the other seven need `--window`.
 
 ```bash
@@ -212,10 +225,18 @@ bash tools/check_all.sh
   verify_water                 PASS             3s   23 ok / 0 fail
   ...
 === 自检摘要 ===
-  跑过 32 条：PASS 32 / FAIL 0 / 没跑成 0
-  断言 1960 条，其中 0 条红
+  跑过 35 条：PASS 35 / FAIL 0 / 没跑成 0
+  断言 2266 条，其中 0 条红
   没跑（要开窗口，--headless 跑出来的 PASS 是假的）：7 条
 ```
+
+Those two counts (how many ran, how many assertions) are **what that run
+produced**, not constants — they move every time an assertion is added, so
+they are deliberately **not** hard-typed here; read them off your own run.
+They were hard-typed once, and they were false by the next run. What
+`verify_story.gd` *does* pin is the other pair: how many `verify_*.gd` files
+the repo actually has, and how many of them need a window. Those two are
+countable, and a mismatch goes red.
 
 Four verdicts, each meaning something different:
 
@@ -241,7 +262,7 @@ and the resulting PASS is fake. They are excluded from the default round because
 a check that did not run has to say so out loud and print the command to run it;
 silence is not an acceptable substitute.
 
-**The 8 screenshot suites** (`bash tools/check_all.sh --lookdev`) write to
+**The 11 screenshot suites** (`bash tools/check_all.sh --lookdev`) write to
 `user://` and assert on **pixels**. They also cannot take `--headless`: the dummy
 renderer doesn't compile shaders and `_draw()` never lands a single mark. Some
 defects are only visible by looking — while every size assertion was green. The
