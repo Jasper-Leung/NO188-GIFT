@@ -81,6 +81,23 @@ func _uniform_default(name: String) -> Color:
 			parts[2].strip_edges().to_float())
 
 
+## 同一个取法，只是从任意一份着色器源码里读 `uniform vec4 NAME : source_color`。
+## 手抄一份 `ground_color` 到这里的话，terrain_grass.gdshader 一改这边就安静地
+## 过期——那正是「手抄的常量副本会自己长出一套预算曲线」这一族。
+func _shader_color_of(src: String, name: String) -> Color:
+	var rx := RegEx.new()
+	rx.compile("uniform\\s+vec4\\s+" + name + "\\s*:\\s*source_color\\s*=\\s*vec4\\(([^)]*)\\)")
+	var hit := rx.search(src)
+	if hit == null:
+		return Color(-1, -1, -1)
+	var parts: PackedStringArray = hit.get_string(1).split(",")
+	if parts.size() < 3:
+		return Color(-1, -1, -1)
+	return Color(parts[0].strip_edges().to_float(),
+			parts[1].strip_edges().to_float(),
+			parts[2].strip_edges().to_float())
+
+
 func _run() -> void:
 	print("=== 沥青着色器回归 ===")
 	_src = FileAccess.get_file_as_string(SHADER_PATH)
@@ -152,6 +169,31 @@ func _run() -> void:
 			absf(ec.get_luminance() - cc.get_luminance())],
 			absf(ec.get_luminance() - cc.get_luminance()) <= 0.10,
 			"差太远读成两种材料")
+
+	# ---- 3b. 路肩那一层不许是土 ----
+	# `dirt_color` 这个名字是历史留下来的：它驱动 `shoulder` 那条 smoothstep
+	# （4.0→6.5m 的路肩）**和**路缘起灰那一层渐变，而它的值原来是
+	# (0.300, 0.256, 0.184) ——**那是土**。于是沿整条环路两侧读成两条泥带，
+	# 而"名字还叫 dirt"这件事让下一个人完全看不出它已经改过。
+	#
+	# 换成灰砾石 (0.430, 0.420, 0.398) 之后，量得到的那一条是**通道差**
+	# （砾石低饱和，土高饱和，两者差一倍多）。这里钉上限，
+	# 配一条**正对照**：`asphalt_color` 通道差 0.015（也是灰的），
+	# 而"绿"的世界里草的通道差在 0.3 以上——用 `terrain_grass.gdshader`
+	# 里那个 `ground_color` 当尺子的另一头，量的是"这把尺子分得开灰和绿"。
+	var dc := _uniform_default("dirt_color")
+	var sat := maxf(dc.r, maxf(dc.g, dc.b)) - minf(dc.r, minf(dc.g, dc.b))
+	_ck("路肩不是土（dirt_color 通道差 %.3f ≤ 0.06）" % sat,
+			sat <= 0.06,
+			"dirt_color=(%.3f,%.3f,%.3f) 通道差=%.3f —— 土是 0.130"
+			% [dc.r, dc.g, dc.b, sat])
+	var tsrc: String = FileAccess.get_file_as_string(
+			"res://assets/shaders/terrain_grass.gdshader")
+	var gc: Color = _shader_color_of(tsrc, "ground_color")
+	var gsat: float = maxf(gc.r, maxf(gc.g, gc.b)) - minf(gc.r, minf(gc.g, gc.b))
+	_ck("正对照：地形草色通道差 %.3f 远在门槛之外（尺子分得开灰和绿）" % gsat,
+			gsat > 0.15,
+			"正对照只有 %.3f，这条判据就成了恒绿" % gsat)
 
 	# ---- 4. 宽度常量不许和 RoadBuilder 悄悄错开 ----
 	# 着色器里 `road_half_width` / `total_half_width` 的默认值和

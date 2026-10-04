@@ -44,8 +44,12 @@ scripts/          GDScript 脚本
   World3D.gd            3D 场景主控
   RoadBuilder.gd        沥青双车道 mesh 生成
   RoadVerge.gd          路肩之外那道**看得见**的软边界：6.5m（沥青外沿）到
-						14.5m 铺一条踩出来的土径，在**恰好 `World3D.SOFT_BOUND`
-						那个距离上**提亮成一道漂白带，再淡回地形自己的草色。
+						14.5m 铺一条压实的碎石路肩，在**恰好 `World3D.SOFT_BOUND`
+						那个距离上**刷亮成一道粉线，再淡回地形自己的草色。
+						**中间三档是低饱和的灰砾石**（`GRAVEL`/`PACKED`/`LINE`
+						通道差 ≤0.06）——这一带原来是一条**土径**，而那正是这一轮
+						清掉的东西：沿整条环路两侧读成两条泥带。`verify_road_verge.gd`
+						第 ④ 节钉着"不许调回土"，配一条用 `GRASS` 当尺子的正对照。
 						只铺主环路（支线不参与那道推力）。零纹理，纯顶点色。
 						`SOFT_BOUND` 是 `build()` 的**参数**、`World3D` 从自己那个
 						常量传进来的，不是两边各抄一个 12.0——画出来的那道线与
@@ -293,6 +297,20 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						（`focus_mode` + 真的在按钮排里）。**四个突变都做过**：世界不推
 						档位 → 4 条红 / 参数表加默认值 → 1 条红 / override 改回"只在 >0
 						时写" → 2 条红 / 提示行去掉最小宽度 → 4 条红
+  verify_provenance.gd   资产来源清单回归（16 条）。`PROVENANCE.md` 是一份**决定能不能
+						收钱的凭据**，所以它必须有对拍，否则它就是第二个事实来源：
+						新增任何一个 `assets/` 下的文件而没在登记表里按**相对路径**逐字
+						登记 → 红；登记表上留着一个已经删掉的文件 → 红；表行数与实际文件数
+						不等 → 红（**两个方向都要**，只查少的那头会漏掉"清单指着空气"）。
+						另一组守的是**内部清单 vs 对外署名文件**：`CREDITS.md` 是随发行物发出去的，
+						未核实的项如果只停在 `PROVENANCE.md` 里，对外那份就成了"只字未提"——
+						那比写「待核实」糟得多，所以「对外报出的未核实数 ≥2 且不多于内部」两条
+						各钉一头。**正对照先摆**：走目录那个函数自己可能一个文件都列不出来，
+						所以第一条先断「真的列出了 ≥15 个」。四个突变都做过：删一行登记 → 红 2 /
+						把登记表里一个文件改成不存在的名字 → 红 2 / 把 CREDITS 里的「待核实」
+						全替换成「已核实」→ 红 1 / 删掉 LICENSE → 红 3。
+						**它故意不判断许可条款对不对**——读不了 Tripo 的服务条款，也追不到
+						那个 `10489_bicycle` 是谁，剩下的是人的活
   probe_water.gd         一次性探针：逐只碗报自由板 / 水面盖住碗的百分比 /
 						各方向水面半径 / 有几个角找不到岸。**改碗的参数先跑它**
   verify_water.gd         三处水回归（水体挂在那三座名字承诺了水的站上、水面
@@ -315,7 +333,14 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 							两件事，**不信退出码**——抛异常的回归退出码是 0。
 							跑之前会把 `res://layout.json` 存一份、跑完原样还回去
 							（回归往这个产品文件里写测试数据过一次，见陷阱清单）。
-							`--window` / `--lookdev` 两个子模式
+							`--window` / `--lookdev` 两个子模式。
+							**红的那一条会复跑一次再定性**：有几族断言量的是墙钟
+							（草皮的铺满预算与最慢帧），量的是机器不是代码——
+							2026-10-04 实测整轮里 6376ms / 125 tick、空机单跑
+							721ms / 42 tick，慢 9 倍，而当轮没有任何一处改动
+							碰得到那几行。复跑才过的照记 `PASS~`，**并在摘要里
+							单独列出来**（分开之后信息不许丢）；总断言数只累计
+							**最后一次**那一遍，头一遍是被噪声污染过的样本
   check_all.ps1            上面那条的 **PowerShell 等价物**，判据逐条照抄。
 						存在的理由：Windows 上 `bash` 有两个东西——装了 Git 的
 						是 Git Bash（看得见 D: 盘），**没装 Git 的是 WSL**
@@ -330,8 +355,12 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						而不是一段路的末梢**（最亮的一列 + 两侧各一个台阶），
 						**外加两条读源码文本钉住真正的那两个 bug**（`ARRAY_NORMAL`
 						与 `vertex_color_is_srgb`）——见下面陷阱清单里
-						「反照率对比度不是渲出来的对比度」；③**土径两头都不自己造
-						硬边**（外沿落在地形自己的取值范围内、内沿接住沥青外沿）。
+						「反照率对比度不是渲出来的对比度」；③**砾石带两头都不自己造
+						硬边**（外沿落在地形自己的取值范围内、内沿接住沥青外沿）；
+						④**中间三档不许调回土**（`GRAVEL`/`PACKED`/`LINE` 通道差
+						≤0.06，配一条拿 `GRASS`（0.242）当尺子的正对照——
+						这一条量的是「有没有调回土色」，而「好不好看」只有定妆照能量到，
+						所以它钉的是一个**可复算的通道差**）。
 						**这一族量不到「看不看得见」**——无头回归量不了渲染结果，
 						那一条在 `lookdev_verge.gd` 的像素里
   lookdev_verge.gd      路肩软边界的定妆照 + **像素判据**（骑行视角 / 路心平拍 /
@@ -339,7 +368,7 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 						量的是**渲出来的那一列像素**：亮峰必须落在 12.0m（±0.75）、
 						不顶到白（≤0.92）也不读不出来（≥0.55）、两侧各有一个台阶、
 						外沿与地形之差 ≤0.10、**另一侧同形**（正对照）、
-						路面上真的有一道比土径亮得多的白标线（正对照）。
+						路面上真的有一道比砾石带亮得多的白标线（正对照）。
 						**不能加 --headless、不能加 --quit-after**
   verify_road_steles.gd   路碑回归（四块碑都建出来了、刻的真是 188、落点不压沥青
 						也不糊在驿站上、**石板正面朝着路且字在正面那块宽板上**、
@@ -486,7 +515,7 @@ tools/            Python 字体子集化 / 音频生成 + GDScript 无头验证�
 
 ## 关键约束
 
-1. **零纹理资产（WebGL 友好）**: 路面 asphalt 用 `assets/shaders/asphalt.gdshader` 程序化生成（颗粒、胎痕、路缘起灰、潮斑、路肩泥土、**中央白色虚线 + 两侧白色实边线**——原来是"双黄虚线"，而代码从头到尾只画过一条白虚线，`edge_line_color` 那个 uniform 声明了从没被读过），地形用 `assets/shaders/terrain_grass.gdshader`（低频色块、中频草丛斑驳、高频麻点、随距离淡出的法线扰动），近处草皮用 `assets/shaders/grass.gdshader` 的实例化卡片。植被 mesh 用 `SphereMesh`+`StandardMaterial3D` 程序化或 GLB。
+1. **零纹理资产（WebGL 友好）**: 路面 asphalt 用 `assets/shaders/asphalt.gdshader` 程序化生成（颗粒、胎痕、路缘起灰、潮斑、路肩碎石、**中央白色虚线 + 两侧白色实边线**——原来是"双黄虚线"，而代码从头到尾只画过一条白虚线，`edge_line_color` 那个 uniform 声明了从没被读过），地形用 `assets/shaders/terrain_grass.gdshader`（低频色块、中频草丛斑驳、高频麻点、随距离淡出的法线扰动），近处草皮用 `assets/shaders/grass.gdshader` 的实例化卡片。植被 mesh 用 `SphereMesh`+`StandardMaterial3D` 程序化或 GLB。
 2. **路线是自行构造的贝塞尔 8 字图案**: `scripts/road_data.gd` 的 `LEMNISCATE_LOCAL` 是解析式采样的 49 点 lemniscate，经旋转/缩放后生成 3D 路网。**不引用任何外部 SVG 或现实道路数据**。任何"几何简化"或"手调节点"都只影响游戏内观感，不涉及外部数据一致性。
 3. **8 字交叉点高度查询**: 玩家 Y 必须用 `RoadBuilder.get_road_ribbon_height(x, z)`（三角形质心插值 + max 聚合），不能用 `get_road_height_at_xy`（会跳变 0.143m）。
 4. **MiniMap 是 3D 在线组件**: `MiniMap.gd` 在 `World3D.gd` 启动时初始化，**不能删**（过去差点被误删）。
@@ -570,6 +599,9 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 # 故事层一致性：中英 key 对齐 + 反派台词 key + 碎片身份 + 文档不许说谎（秒级）
 "$GODOT" --headless --path . --script tools/verify_story.gd
 
+# 资产来源清单与 assets/ 目录对拍（新增/删除任何资产后必跑；秒级）
+"$GODOT" --headless --path . --script tools/verify_provenance.gd
+
 # 驿站屋顶暖中性色（材质按后缀命中、必须 duplicate、屋顶 vs 墙的亮度比、贴图模型不受影响）
 "$GODOT" --headless --path . --script tools/verify_station_roof.gd
 
@@ -614,7 +646,7 @@ GODOT="D:\Godot_v4.6.2-stable_win64.exe\Godot_v4.6.2-stable_win64.exe"
 "$GODOT" --path . --script tools/lookdev_postcard.gd
 
 # ---------------------------------------------------------------- 一条命令全跑完
-# 31 条无头回归 + 7 条要开窗口的（不列进默认轮次，因为没跑的必须明写"没跑"）。
+# 32 条无头回归 + 7 条要开窗口的（不列进默认轮次，因为没跑的必须明写"没跑"）。
 # 这两个数是 `tools/` 下 `verify_*.gd` 的总数减去 `check_all.ps1` 里那份
 # `$NEEDS_WINDOW`——**别手抄**，`pwsh -File tools/check_all.ps1` 每次都会把
 # 真实的条数打进汇总那一行。
@@ -691,14 +723,21 @@ echo. > .editor_mode
 - 改 `FragmentIcon.paint_bird` / `bird_parts()` / `FragmentBar._draw_bird` / `Postcard._draw_bird` 前跑 `verify_postcard_ending.gd` **第 3b-2 节** + `lookdev_postcard.gd`。禽这只鸟**画过三遍**（顶栏底栏、单碎片放大图、明信片五格），原来是**三份**画法、其中两份还是**两套不同的**：底栏与放大图是「圆 + 棍」（读成棒棒糖），明信片是「填实的圆 + **同色的**翅」（两块并成一颗疙瘩）。云那一族是三份抄开的**同一个**算法，禽更糟——玩家一路看着它长大，最后带走的那张纸上根本不是同一只东西，所以现在三处都调 `FragmentIcon.paint_bird` 一个出处。第 3b-2 节钉两件事：①**三处调的是同一个出处**（读源码文本，`_draw` 在 headless 下一笔都不落盘，"两处形状一样"量笔法量不出来）；②**那只剪影本身**认不认得出是鸟——`bird_parts()` 是不碰画笔的纯函数，`paint_bird` 只是把它重放一遍，所以量的是剪影：有尾（甩到左下）、喙是往前伸的尖楔且伸出头外、脚下有栖枝、身子是**扁**椭圆、翅是**留白**、整只装得进 `FragmentBar` 那个 22px 的盘。**翅是留白这一条只有像素量得到**（几何全绿而两块并成疙瘩），`lookdev_postcard.gd` 在 `10_终局二选一` 的底栏量它：亮一截取 0.05，禽实测 **93**，翅改回墨色（或退回旧画法）只剩 **10**（那是眼睛），门槛 60 正落中间；相对量而不是绝对的白，因为底板是深色屏、翅是 0.30 白压在橙上，AGX 之后两色被拉近。另四件实测 云40 / 茶10 / 琴110 / 竹0，所以这条**只断禽**，别拿去当"五格谁最亮"的排序。**写完先证明它会红**（突变一个一个撤）：翅改回 `"c": "ink"` → 无头红 1 条、定妆照红 1 条；`Postcard._draw_bird` 退回自己画一颗圆 → 红 1 条；撤掉栖枝那条 line → 红 1 条
 - 修改 `scripts/TerrainBuilder.gd` / `assets/shaders/terrain_grass.gdshader` 前先跑 `verify_terrain_shader.gd` + `verify_road_height.gd` + `verify_crossing.gd`
 - 修改 `scripts/road_data.gd` / `scripts/RoadBuilder.gd` 前先在 headless 跑 `verify_8_shape.gd`
-- 改 `scripts/RoadVerge.gd` 的任何一处（`INNER` / `OUTER` / `LIFT` / `DIRT` / `MIX` /
-  `LINE` / `GRASS` / `verge_profile()` / `_face_normals()` / `vertex_color_is_srgb`）
+- 改 `scripts/RoadVerge.gd` 的任何一处（`INNER` / `OUTER` / `LIFT` / `GRAVEL` /
+  `PACKED` / `LINE` / `GRASS` / `verge_profile()` / `_face_normals()` /
+  `vertex_color_is_srgb`），或 `assets/shaders/asphalt.gdshader` 的 `dirt_color`
+  （**那个名字是历史留下来的，它驱动 4.0→6.5m 的路肩与路缘起灰，而它现在已经是
+  灰砾石不是土**——名字还叫 dirt，所以下一个人看代码看不出它改过），
   或 `World3D` 里 `_verge.build(..., SOFT_BOUND)` 那一行之前跑
-  `verify_road_verge.gd` **+** `lookdev_verge.gd`（后者**不能加 --headless**，
-  也不能加 `--quit-after`）。**四个颜色是按"渲出来什么样"定的，不是按反照率定的**：
+  `verify_road_verge.gd` **+** `verify_asphalt_shader.gd` **+** `lookdev_verge.gd`
+  （后者**不能加 --headless**，也不能加 `--quit-after`）。
+  **四个颜色是按"渲出来什么样"定的，不是按反照率定的**：
   量法是正交俯拍（`size = 60m`，比例尺 `图高 / 60`）从路心往外每 0.5m 读一行像素。
-  现在实测：土 0.452 → **漂白带峰值 0.780 正在 12.0m** → 外沿 0.640 对地形 0.680
-  （接缝 0.040）。**改任何一个数都要重跑定妆照看峰值位置和台阶**，
+  改成砾石之后的实测（2026-10-04）：沥青 0.378 → 白边线 **0.959** →
+  砾石 0.494 → **粉线峰值 0.798 正在 12.00m**（内侧台阶 62% / 外侧 84%）→
+  另一侧 12.0m/0.787（正对照）。改砾石**之前**那一组是土 0.452 / 峰值 0.780 /
+  外沿 0.640 对地形 0.680（接缝 0.040）。
+  **改任何一个数都要重跑定妆照看峰值位置和台阶**，
   因为无头回归量不到渲染结果——而那一族前两版的判据量的是**反照率**，
   在一片全白的六米宽水泥地面前**全绿**（详见陷阱清单里那条）。
   **写完先证明它会红**（突变一个一个撤）：删掉 `arrays[Mesh.ARRAY_NORMAL]` 那行
@@ -706,7 +745,10 @@ echo. > .editor_mode
   删掉 `mat.vertex_color_is_srgb = true` → 无头红 1 条、定妆照红 4 条
   （峰值从 0.780 涨到 **0.944**——所以定妆照那条「不顶到白」的门槛是 **0.92**，
   写 0.95 时它只差 0.006 就被放过）；
-  外侧那一列退回 `LINE` → 红 1 条；`MIX` 调亮过 `LINE` → 红 2 条
+  外侧那一列退回 `LINE` → 红 1 条；`PACKED` 调亮过 `LINE` → 红 2 条；
+  **`GRAVEL` 调回旧的土色 `(0.300,0.250,0.170)` → 第 ④ 节红 1 条**
+  （这是这一轮新加的那条：它守的不是"好不好看"，是"有没有调回土"，
+  而"好不好看"只有定妆照量得到，所以那条判据量的是一个**可复算的通道差**）
 - 改 `World3D` 的站名牌（`STATION_LABEL_PIXEL_SIZE` / `_FONT_PX` / `_FONT_PX_SMALL` /
   `_CLEAR` / `_INK` / `_HALO` / `_HALO_PX` / `_add_label()` / `label_y_for()`）前跑
   `verify_stations.gd` 末节 + `lookdev_stations.gd` 看那 16 张 `ride_*`。
@@ -799,6 +841,21 @@ echo. > .editor_mode
 - 改 `Postcard.MAP_BAND_FRAC` / `_layout_map()` / `_map_inner()` / `_map_project()` / `_draw_map_caption()` 前跑 `verify_postcard_ending.gd` 第 3c 节 + `lookdev_postcard.gd` 看 `05_tier3_满配`（投影抽成了不碰画笔的纯函数，所以「16 驿有没有被框裁掉」「买了信封方框有没有让开左上角的折角」在 headless 下判得了；折角是 `min(w,h) × 0.16` 的一条等腰直角，方框照旧贴着左边上角放就会被削掉框线和路各一角——**两处都是定妆照先发现的，尺寸断言当时全绿**）
 - 改 `Postcard._caption_col_w()` / `_joys_column_rect()` / `_draw_joys_column()` / `Localization` 的 `postcard_joys_title` / `postcard_visit_n` 前跑 `verify_postcard_ending.gd` **第 3d 节** + `lookdev_postcard.gd` 看 `05_tier3_满配` / `09_未竟_三碎片缺格`。第 3d 节量的三件玩家读得出来的事：抬头**右沿不留死区**（这一列真的排到右边去，不许只是换了个地方继续空着）、**不压左边那一列的字**、**每一行放得下**——最后一条是必须的，因为次数是**右对齐**画上去的，而 `draw_string` 的宽度参数是**裁切宽度**，字比列宽就整段被裁掉而尺寸断言照样全绿。中英 × 900/1920 四种组合都过，因为英文那一列长一截。**另有一条是读源码文本的**：`_draw_map_caption` 的函数体里必须真的有 `_draw_joys_column(` —— 几何函数对不对和画笔有没有去调它是两件事，把那一行删掉几何断言全绿而图上重新变成空白的纸（`--headless` 一笔都不落盘，纯函数量不到调用点）。**写完先证明它会红**：删掉画笔里那一行 → 1 条红；右沿退回 `w * 0.62` → 4 条红（4 个组合各一条）；图例那一项不加上两个圆点那 44k → 4 条红
 - 改打卡流程的"这站还欠我一块碎片吗"判据前跑 `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（`station_has_fragment(i)` 是站的静态属性、`is_collected(i)` 才是玩家进度；拿前者当前者会让回访重播小游戏并谎报"获得碎片"，而 HUD 的"下一处"早就把这站摘掉了，两边对不上）
+- **往 `assets/` 里加进或删掉任何一个文件**（模型、贴图、字体、音频、着色器）之前跑
+  `verify_provenance.gd`，并同步改 `PROVENANCE.md` 的全量登记表与 `CREDITS.md`。
+  判据钉的是**相对 `assets/` 的逐字路径**，所以「登记了但路径打错」和「压根没登记」一起红。
+  **反方向也钉**：登记表里留着一个已经删掉的文件同样红——那份清单会让人去找一份
+  不存在的授权凭证，而那种错**在发版当天才会被发现**。
+  **当前未核实的三项**（阻塞商用发行）：`assets/bike.glb` 与它的贴图**来源不明**
+  （mesh 名 `10489_bicycle_L2` 是从某个编号目录下载的指纹，Blender 导出时原样保留了
+  上游节点名）；`assets/models/station_2.*` 是**上传参考图**后生成的，所以还要按
+  **上传物**的条款算风险；7 个 Tripo 资产的**账号档位与当时的条款**未定，
+  而 README 末尾那行 `*Tripothon S1 · @TripoAI*` 暗示管着它们的可能是**活动条款**
+  而不是通用服务条款。**别把「待核实」改成「已核实」来让发版流程走通**——
+  `verify_provenance.gd` 有一条专门拦这个（对外署名的未核实数不得少于内部清单的）。
+  顺带一条将来会踩的雷：`tools/subset_font.py` 是**原地覆盖**字体文件的，
+  而 OFL §3 要求修改过的版本**不得使用保留字体名**——它现在产出的任何子集都是违规分发。
+  Web 导出正式启用前必须先改它（子集另存 + 改写 name 表 ID 3/4/6）
 - 改 `World3D._tint_station_roofs()` / `STATION_ROOF_TINT` 前跑 `verify_station_roof.gd` + `lookdev_journey.gd` 看 `04_ride`（填色要过 `linear_to_srgb`，写错方向屋顶比墙暗 30 倍，数字还是"暖的"，只有比值看得出来）
 - 改 `GameManager.check_in()` 里那两个闩锁 / `all_fragments_maxed()` / `_load_save()` 末尾的补齐 / `World3D._on_all_collected()` / `_on_all_maxed()` / `_spawn_synthesis_animation()` / `PostcardVariant.compute_variant()` 前跑 `verify_minimap.gd` 第 9/10 节 + `verify_postcard_ending.gd` §3b + `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（"集齐"与"走完"是两个时刻，判据只能有一个）
 - 改 `SynthesisPanel.gd` 的任何一处 / `World3D._synthesis_choice_open` / `_on_all_collected()` 的尾巴 / `_on_synthesis_choice()` / `HUDLayer/SynthesisPanel` 节点前跑 `verify_interact_latch.gd` **第 10 节** + `verify_minimap.gd` 第 9 节 + `verify_demo_path.gd` 第 1 节 + `lookdev_journey.gd` 看 `13b_synthesis_集齐二选一` 与 `13c_after_再骑一圈`。三件事一条都不能省：**第 10 节量面板本身**（两个按钮都在屏内不叠、都有 `focus_mode`、ESC 收得掉、`_all_done` 没被顺带翻过去）；**`verify_minimap` 第 9 节现在必须先选「再骑一圈」再逐站核对脚下的圈**——它原来直接接着扫，扫的时候面板还开着，`_nearby_*` 早被清成 -1，十条断言一起红，而那个红是**新行为的正确结果**，不是产品坏了；**`verify_demo_path` 第 1 节**守着 90 秒演示不被这个面板打断（`fill_finished_run()` 走直写字段不发信号，而刷满的碎片站被 `is_station_exhausted` 挡在 `_nearby_station_idx` 之外，演示里根本打不了卡）

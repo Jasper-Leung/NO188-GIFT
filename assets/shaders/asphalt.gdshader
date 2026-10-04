@@ -14,7 +14,14 @@ shader_type spatial;
 // 调它们的时候去查样本，不要对着屏幕拉。
 uniform vec4 asphalt_color     : source_color = vec4(0.355, 0.350, 0.340, 1.0);
 uniform vec4 grain_dark_color  : source_color = vec4(0.215, 0.212, 0.206, 1.0);
-uniform vec4 dirt_color        : source_color = vec4(0.300, 0.256, 0.184, 1.0);
+// 路肩与路缘起灰那一层。**原来写着 vec4(0.300, 0.256, 0.184)——那是土**，
+// 而它在路面上占的是 4.0~6.5m 那一条，加上往里 2.4m 的起灰渐变，
+// 于是整条环路两侧读成两条泥带。现在换成**低饱和的灰砾石**
+// （通道差 0.032）：铺法上和「沥青 → 碎石路肩」是一回事，
+// 亮度还比沥青高一截（0.430 对 0.355），所以路肩是从路面上"退下去"的一层，
+// 不是从路面上"长出来"的一层。回归 verify_asphalt_shader.gd 有一条
+// 「`dirt_color` 的通道差 ≤ 0.06」钉着这件事——不然下一次调观感很容易调回土色。
+uniform vec4 dirt_color        : source_color = vec4(0.430, 0.420, 0.398, 1.0);
 uniform vec4 edge_line_color   : source_color = vec4(0.900, 0.900, 0.858, 1.0);
 uniform vec4 center_line_color : source_color = vec4(0.928, 0.928, 0.898, 1.0);
 
@@ -95,7 +102,7 @@ void fragment() {
 		col *= 1.0 - 0.34 * tracks;
 	}
 
-	// 路缘起灰：靠近路缘的尘土堆积
+	// 路缘起灰：靠近路缘的细料堆积（不是尘土——`dirt_color` 已经是灰砾石了）
 	float dust = smoothstep(road_half_width * 0.60, road_half_width, edge);
 	dust *= 0.4 + 0.6 * vnoise(vec2(along * 0.18, 9.1));
 	col = mix(col, dirt_color.rgb * 1.12, dust * 0.5 * (1.0 - plaza_mode));
@@ -104,7 +111,7 @@ void fragment() {
 	float wet = smoothstep(0.42, 0.56, fbm2(wp * 0.13 + vec2(7.0, 2.0)));
 	col *= 1.0 - 0.18 * wet;
 
-	// 路肩 → 泥土过渡
+	// 路肩 → 碎石过渡（铺到 `total_half_width` 6.5m，正好接住 RoadVerge 的内沿）
 	float shoulder = smoothstep(road_half_width, total_half_width, edge);
 	col = mix(col, dirt_color.rgb, shoulder * (1.0 - plaza_mode));
 
@@ -117,8 +124,10 @@ void fragment() {
 	//   ①沥青到路肩是**几何上的一刀切**（mesh 的外沿，|lateral| = road_half_width），
 	//     切面上没有任何过渡，掠射角下读成一条锯齿。一条**在切面内侧**慢慢
 	//     淡出的实线把人的视线钉在路缘上，锯齿于是有了去处。
-	//   ②没有边线时，沥青到泥土是靠 `shoulder` 那条 smoothstep 混出来的，
-	//     而 dirt 偏黄、沥青偏冷，两色直接相接读成"路面画到一半断了"。
+	//   ②没有边线时，沥青到路肩是靠 `shoulder` 那条 smoothstep 混出来的，
+	//     两色直接相接读成"路面画到一半断了"。（当年那一段还叠着"dirt 偏黄"
+	//     这一条，而 dirt 现在已经是灰砾石了——这一条边线留着是因为它治的是
+	//     **边界本身**，不是那两种颜色的色相差。）
 	// 宽度 0.12m 的半宽是给抗锯齿留的余量：白线两侧各有 0.10m 的羽化，
 	// 所以它在 1m 外的一辆自行车上仍是一条线，而它在 40m 外是一条会抖的亮带。
 	float asp_mask = 1.0 - smoothstep(road_half_width - 0.06, road_half_width, edge);
