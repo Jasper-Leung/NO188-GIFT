@@ -6,8 +6,14 @@ shader_type spatial;
 // UV.x: 横向 0..1（覆盖路面+路肩全宽）  UV.y: 沿路距离 / tile_size
 // v_world = (横向米数, 沿路米数)，噪声全部按世界尺度采样
 
-uniform vec4 asphalt_color     : source_color = vec4(0.168, 0.170, 0.178, 1.0);
-uniform vec4 grain_dark_color  : source_color = vec4(0.068, 0.068, 0.074, 1.0);
+// 反照率是这一族量到的量，不是调出来的观感。这两个常量带 `source_color`，
+// 所以它们是 **sRGB**；而沥青的线性反照率大致 0.10~0.15，折回 sRGB 是 0.35~0.42。
+// 旧值 0.168 折成线性只有 0.023——**比真实沥青暗四到五倍**，于是近处路面读成
+// 蓝紫霉斑，而且这一层下面什么余量都没有：黄昏把太阳压到 9° 时，路面直接黑掉
+// （P0-1 / P1-1 是同一条的上下游）。三个数现在都取自实测的沥青样本，
+// 调它们的时候去查样本，不要对着屏幕拉。
+uniform vec4 asphalt_color     : source_color = vec4(0.355, 0.350, 0.340, 1.0);
+uniform vec4 grain_dark_color  : source_color = vec4(0.215, 0.212, 0.206, 1.0);
 uniform vec4 dirt_color        : source_color = vec4(0.300, 0.256, 0.184, 1.0);
 uniform vec4 edge_line_color   : source_color = vec4(0.900, 0.900, 0.858, 1.0);
 uniform vec4 center_line_color : source_color = vec4(0.928, 0.928, 0.898, 1.0);
@@ -71,7 +77,7 @@ void fragment() {
 	float large  = fbm2(wp * 0.22 + vec2(11.0, 5.0));
 
 	vec3 col = asphalt_color.rgb;
-	col = mix(col, grain_dark_color.rgb, grain * 0.6);
+	col = mix(col, grain_dark_color.rgb, grain * 0.45);
 	col *= 0.80 + 0.40 * mottle;
 	col *= 0.88 + 0.28 * large;
 
@@ -141,15 +147,22 @@ void fragment() {
 	ROUGHNESS = clamp(rough, 0.06, 1.0);
 
 	// 湿斑区域提高 metallic，模拟积水反光
-	METALLIC = wet * 0.12;
+	// 0.12 那版是"假高光"的代价：沥青不是金属，而 0.12 的金属度在湿斑上
+	// 等于把它变成一面朝天的镜子，它映的是天空。降到 0.03 只留一点湿意。
+	METALLIC = wet * 0.03;
 
 	// 微观凹凸：砂石颗粒的法线扰动，让沥青在光照下有实体颗粒感
-	vec2 dp = wp * 11.0;
+	// 三个数是一组的，改一个要连着两个改。玩家眼高 1.6m、看 1~3m 处的路面时
+	// 一个像素盖住好几个特征，所以**特征必须大过一个像素**：旧版 11 周/米
+	// ≈ 9cm 一个特征、梯度乘 16.0，于是每个微面片都在陡峭翻转——每个像素
+	// 要么翻到天上（接到蓝天→蓝）、要么翻到地里（黑），那片蓝紫胡椒盐是
+	// **走样**，不是斑块。现在特征放大到 17cm、梯度降到 4.0、混合降到 0.22。
+	vec2 dp = wp * 6.0;
 	float d0 = fbm2(dp);
 	float dxn = fbm2(dp + vec2(0.35, 0.0));
 	float dzn = fbm2(dp + vec2(0.0, 0.35));
-	vec3 micro = vec3((d0 - dxn) * 16.0, 1.0, (d0 - dzn) * 16.0);
-	NORMAL = normalize(mix(NORMAL, normalize(micro), 0.45));
+	vec3 micro = vec3((d0 - dxn) * 4.0, 1.0, (d0 - dzn) * 4.0);
+	NORMAL = normalize(mix(NORMAL, normalize(micro), 0.22));
 
 	// 湿斑 rim：高光边缘光晕，模拟积水边缘漫反射
 	float rim = 1.0 - max(dot(NORMAL, VIEW), 0.0);

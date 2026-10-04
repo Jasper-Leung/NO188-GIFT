@@ -191,17 +191,105 @@ func _run() -> void:
 	_ck("RoadBuilder 真的把 total_half_width 推给材质",
 			rb.contains("set_shader_parameter(\"total_half_width\""))
 
+	# ---- 6. 底色与微表面：量的是**物理量**，不是观感 ----
+	# 2026-10-03 第四轮 P0-1。这一节守的三个数，**全部是量出来的**，
+	# 而修复之前那 18 条断言一条都没红——因为它们守的是"边线画没画出来"，
+	# 守不到"路面是什么颜色、法线有多陡"。这是 `edge_line_color` 那条的
+	# **另一半**：那条是声明了没人读，这条是**读了但量错了量**。
+	#
+	# ① 底色反照率。真沥青的**线性**反照率大致 0.10~0.15。这两个常量带
+	#    `source_color`，是 sRGB：旧值 0.168 → 线性 0.023，**暗四到五倍**，
+	#    于是近处路面读成蓝紫霉斑，而黄昏把太阳压到 9° 时它没有余量可剩
+	#    （P1-1 是这条的下游，不是并列的一条）。
+	# ② 偏蓝。两个旧常量都是 b > g > r 的冷灰，而天空环境光本身偏蓝，
+	#    底色再偏蓝一次就走样成椒盐。判据量的是**这三个通道的差**，
+	#    不是"它是不是灰色"——灰色是三个数都小，而这是三个数不一样。
+	# ③ 微表面走样。玩家眼高 1.6m、看 1~3m 处的路面时一个像素盖住好几个
+	#    特征，所以**特征必须大过一个像素**，而法线梯度必须小到不会把
+	#    每个微面片都掀翻（旧版 9cm 一个特征、梯度 ×16、混合 0.45：
+	#    每个像素要么接到蓝天、要么接到地面，那片"斑块"是走样不是斑块）。
+	# ④ 沥青没有金属度可言。`METALLIC = wet * 0.12` 那是在一片本来就
+	#    接近纯黑的底子上加一面朝天的镜子，而它映的是天空。
+	var ac := _uniform_default("asphalt_color")
+	if ac.r >= 0.0:
+		var alin := _lin_luma(ac)
+		_ck("沥青底色的**线性**反照率落在真沥青那一档（%.3f ∈ [0.08, 0.18]）" % alin,
+				alin >= 0.08 and alin <= 0.18,
+				"sRGB %.3f → 线性 %.3f。带 : source_color 的默认值是 sRGB，"
+				% [ac.get_luminance(), alin]
+				+ "而 ALBEDO 是线性——中间隔着 srgb_to_linear 那一支，"
+				+ "忘了它就会把「看着挺暗」当成「线性 0.168」")
+		var skew := ac.b - ac.r
+		_ck("底色不是偏蓝的冷灰（b - r = %.3f ≤ 0.02）" % skew,
+				skew <= 0.02,
+				"天空环境光本身偏蓝，底色再偏一次就叠加成椒盐")
+	var gd := _uniform_default("grain_dark_color")
+	if gd.r >= 0.0 and ac.r >= 0.0:
+		var glin := _lin_luma(gd)
+		_ck("颗粒暗色比底色暗、但仍在沥青这一族里（线性 %.3f < %.3f）"
+				% [glin, _lin_luma(ac)],
+				glin < _lin_luma(ac) and glin >= 0.02,
+				"暗到 0.005 的话 grain 那一层就是往纯黑里混")
+
+	var dp_line := _decl_of("dp")
+	var dp := _last_factor(dp_line.replace("vec2 dp = wp *", ""))
+	_ck("微表面特征大过一个像素（1/%.1f = %.0fcm ≥ 14cm）" % [dp, 100.0 / dp],
+			dp > 0.0 and 1.0 / dp >= 0.14,
+			"dp 那一行：%s" % dp_line.strip_edges())
+	var grad := _frag_float("\\(\\s*d0\\s*-\\s*dxn\\s*\\)\\s*\\*\\s*([0-9]+(?:\\.[0-9]+)?)")
+	var nmix := _frag_float("mix\\(\\s*NORMAL\\s*,\\s*normalize\\(\\s*micro\\s*\\)\\s*,\\s*([0-9]+(?:\\.[0-9]+)?)")
+	_ck("法线扰动的强度（梯度 %.1f × 混合 %.2f = %.2f ≤ 1.5）不会逐像素走样"
+			% [grad, nmix, grad * nmix],
+			grad > 0.0 and nmix > 0.0 and grad * nmix <= 1.5,
+			"旧版 16.0 × 0.45 = 7.2：每个微面片都在陡峭翻转，"
+			+ "像素要么接到蓝天（蓝）要么接到地面（黑）")
+	var mfac := _last_factor(_decl_of("METALLIC"))
+	_ck("湿斑的金属度 ≤ 0.05（%.3f）——沥青不是金属" % mfac,
+			mfac >= 0.0 and mfac <= 0.05,
+			"METALLIC 那一行：%s" % _decl_of("METALLIC").strip_edges())
+	var gmix := _frag_float("mix\\(\\s*col\\s*,\\s*grain_dark_color\\.rgb\\s*,\\s*grain\\s*\\*\\s*([0-9]+(?:\\.[0-9]+)?)")
+	_ck("颗粒往暗色混的系数 ≤ 0.5（%.2f）" % gmix, gmix > 0.0 and gmix <= 0.5)
+
 	_finish()
 
 
 ## 取 `float NAME = …` 那一行的**整行**文本。找不到返回空串。
+## `METALLIC = …` 这种没有类型前缀的也认（第二遍找 `NAME =`）。
 func _decl_of(name: String) -> String:
-	var marker := "float " + name + " ="
-	var i := _frag.find(marker)
-	if i < 0:
-		return ""
-	var eol := _frag.find("\n", i)
-	return _frag.substr(i, (eol if eol > 0 else _frag.length()) - i)
+	for marker in ["float " + name + " =", name + " ="]:
+		var i := _frag.find(marker)
+		if i >= 0:
+			var eol := _frag.find("\n", i)
+			return _frag.substr(i, (eol if eol > 0 else _frag.length()) - i)
+	return ""
+
+
+## 从 `… * 2.5` 这种行里取最后一个乘数。取不到返回 -1。
+func _last_factor(line: String) -> float:
+	var rx := RegEx.new()
+	rx.compile("\\*\\s*([0-9]+(?:\\.[0-9]+)?)\\s*;")
+	var hit := rx.search(line)
+	return -1.0 if hit == null else hit.get_string(1).to_float()
+
+
+## sRGB 分量 → 线性。复制 Godot 那一支：着色器上带 `: source_color` 的
+## vec4 默认值是**按 sRGB 解释**的，而 ALBEDO 是线性——中间隔着这一支。
+## 忘了它就会把"0.168 看着挺暗"当成"线性 0.168"，而实际是 0.023。
+func _s2l(c: float) -> float:
+	return c / 12.92 if c <= 0.04045 else pow((c + 0.055) / 1.055, 2.4)
+
+
+## 一个 sRGB 颜色的线性亮度。
+func _lin_luma(c: Color) -> float:
+	return 0.2126 * _s2l(c.r) + 0.7152 * _s2l(c.g) + 0.0722 * _s2l(c.b)
+
+
+## 在 fragment() 函数体里按正则抓一个数，抓不到返回 -1。
+func _frag_float(pattern: String) -> float:
+	var rx := RegEx.new()
+	rx.compile(pattern)
+	var hit := rx.search(_frag)
+	return -1.0 if hit == null else hit.get_string(1).to_float()
 
 
 func _uniform_float(name: String) -> float:
