@@ -139,6 +139,54 @@ static func _s2l(v: float) -> float:
 	return v / 12.92 if v <= 0.04045 else pow((v + 0.055) / 1.055, 2.4)
 
 
+## **路面**：全场唯一大面积、近水平、朝天的表面，任何一张骑行截图里占 40%~60%，
+## 所以它的色相是"第一眼"。框是按 12b 那一档的真实机位量的，不是拍脑袋取的：
+## 地平线在 fy 0.321，往下先过中景草地（约 0.45~0.58），沥青从 0.60 起铺满
+## 整个下半屏，底栏碎片格在 0.85 以下——所以 0.62~0.82 这一段整块都是裸沥青，
+## 横向取 0.12~0.62 避开右侧那条白边线和更外面的路肩砾石带。
+const ROAD_BOX := Rect2(0.12, 0.62, 0.50, 0.20)
+
+## **正对照**：同一帧的草地，必须明显偏绿而不是偏蓝。
+##
+## 没有这一条，"把路面调成纯灰"也能让下面那两条绿——而**纯灰的路面本身就是
+## 病**（沥青偏蓝就已经在读成水泥地了，全灰读成的是一条塑料跑道）。
+## 框取 fy 0.47~0.55、fx 0.10~0.26：那是路左边的中景草坡，
+## 实测 sRGB(162,168,87)、`b−r = −78`，离门槛一个数量级。
+const GRASS_BOX := Rect2(0.10, 0.47, 0.16, 0.08)
+
+## 一个框里逐像素的色相统计，返回 `[b−r 的中位数, 饱和度的中位数]`。
+##
+## **两个量都必须逐像素算完再取中位数，不能"先取各通道的中位数再相减"。**
+## 路面中间有白色虚线、边上那条白色实线，而逐通道中位数各自可能被那条白线
+## 拉到不同的一侧去——量出来的是一个既不对应任何像素、也不对应任何面的数。
+## 逐像素算完再排序，中位数落在**某一个真实像素**上，于是它至少是一个
+## 玩家真的看得见的颜色差。同族的一条见 CLAUDE.md：量像素的代码里选错函数
+## （`absi` 是整数函数），等于把尺子自己折断了。
+func _region_hue(img: Image, box: Rect2) -> Array:
+	var x0: int = clampi(int(float(SHOT.x) * box.position.x), 0, SHOT.x - 1)
+	var y0: int = clampi(int(float(SHOT.y) * box.position.y), 0, SHOT.y - 1)
+	var x1: int = clampi(x0 + int(float(SHOT.x) * box.size.x), 0, SHOT.x)
+	var y1: int = clampi(y0 + int(float(SHOT.y) * box.size.y), 0, SHOT.y)
+	var brs: Array[float] = []
+	var sats: Array[float] = []
+	for y in range(y0, y1):
+		for x in range(x0, x1):
+			var c := img.get_pixel(x, y)
+			brs.append(c.b - c.r)
+			var mx: float = maxf(c.r, maxf(c.g, c.b))
+			var mn: float = minf(c.r, minf(c.g, c.b))
+			sats.append((mx - mn) / maxf(mx, 0.001))
+	return [_median(brs), _median(sats)]
+
+
+func _median(v: Array[float]) -> float:
+	if v.is_empty():
+		return 0.0
+	var s: Array[float] = v.duplicate()
+	s.sort()
+	return s[s.size() / 2]
+
+
 ## 某一行的平均颜色。
 func _sky_row(img: Image, fy: float) -> Color:
 	var y: int = clampi(int(float(SHOT.y) * fy), 0, SHOT.y - 1)
@@ -835,6 +883,32 @@ func _run() -> void:
 			_wcag_lum(band_day) < bg_lum and _wcag_lum(band_dusk) < bg_lum,
 			"声明 %.3f（sRGB %s）  正午实测 %.3f  黄昏实测 %.3f" % [bg_lum,
 			str(SCRIM_WORST_BG), _wcag_lum(band_day), _wcag_lum(band_dusk)])
+
+	# ---- 12e 路面本身的色相 ----
+	#
+	# 这一族是"数字全绿而画面是坏的"里最容易被漏掉的一个：路面着色器里
+	# 每个常量都取自实测沥青样本、每条无头回归都量的是源码文本，
+	# 而渲出来的沥青**蓝得发紫**，读成的是水泥地不是路面。
+	# 第五轮已经把三个成因逐一排除（EMISSION 归零纹丝不动、
+	# `ambient_light_sky_contribution` 归到 0.62 并转暖后逐像素不变、
+	# `SPECULAR = 0` 只掉 3 个单位），所以剩下的是漫反射本身。
+	#
+	# 阈值 12 与 0.12 都取自实测基线的**一半**：实测 `b−r` 中位数 25、
+	# 饱和度 0.263，所以 12 / 0.12 各自留着两倍余量——渲染管线动一次
+	# （换 tonemap、换环境光）不至于当场翻面，而现在的这一档离门槛两倍远。
+	var road: Array = _region_hue(img_day, ROAD_BOX)
+	_ck("正午路面不偏蓝（|b−r| 中位 ≤ 12，现在读成的是水泥地不是沥青）",
+			absi(int(round(road[0] * 255.0))) <= 12,
+			"实测 b−r = %+.0f（%d 像素的中位数）" % [road[0] * 255.0,
+			int(float(SHOT.x) * ROAD_BOX.size.x) * int(float(SHOT.y) * ROAD_BOX.size.y)])
+	_ck("正午路面自己的饱和度收敛（中位 ≤ 0.12）", road[1] <= 0.12,
+			"实测 %.3f" % road[1])
+	# 正对照：同一帧的草地必须明显偏绿。
+	# 少了它，上面两条只钉住"路面不是蓝的"，而"路面是灰的"照样全绿。
+	var grass: Array = _region_hue(img_day, GRASS_BOX)
+	_ck("正对照：同一帧的草地明显偏绿（|b−r| ≥ 25，尺子分得开蓝和绿）",
+			absi(int(round(grass[0] * 255.0))) >= 25,
+			"实测 b−r = %+.0f  饱和度 %.3f" % [grass[0] * 255.0, grass[1]])
 
 	# ---- 13 集齐合成 ----
 	_gm.seen_villain = 3

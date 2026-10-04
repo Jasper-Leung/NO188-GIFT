@@ -198,7 +198,7 @@ and the game will let you stop there via the pause panel.
 
 ## How it's verified
 
-The project ships **34 regressions (27 headless + 7 window-only), 8 screenshot
+The project ships **39 regressions (32 headless + 7 window-only), 8 screenshot
 suites, and 2 probes**.
 One command runs the headless lot; the other seven need `--window`.
 
@@ -212,8 +212,8 @@ bash tools/check_all.sh
   verify_water                 PASS             3s   23 ok / 0 fail
   ...
 === 自检摘要 ===
-  跑过 27 条：PASS 27 / FAIL 0 / 没跑成 0
-  断言 1396 条，其中 0 条红
+  跑过 32 条：PASS 32 / FAIL 0 / 没跑成 0
+  断言 1960 条，其中 0 条红
   没跑（要开窗口，--headless 跑出来的 PASS 是假的）：7 条
 ```
 

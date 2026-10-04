@@ -50,7 +50,18 @@ tonemap_exposure = 1.0
 glow_enabled = true
 glow_intensity = 0.25
 glow_bloom = 0.05
-sdfgi_enabled = true
+; SDFGI 关掉了。**这一行是第五轮 P0-1「路面蓝紫霉斑」的真凶**，
+; 而它躲过了评审那三个成因假设（自发光 / 天光环境光 / 掠射菲涅尔）——
+; 三条量下来路面读数一格没动。原因是 SDFGI 是**从天空反推出来的间接反弹光**：
+; 它既不乘 DirectionalLight3D.light_color，也不是 ambient_light_energy 那一路，
+; 所以「把太阳换成纯红它还是蓝」「把四个天空滤镜全拉黑它一点不变」
+; 「两盏灯 + 环境光全灭它还亮着（sRGB(6,17,70)）」三件事同时成立。
+; 实测关掉之后正午路面 b−r 由 +29 掉到 +21、饱和度 0.252 → 0.210。
+; 材质那一侧同时把 `asphalt_color` 调暖（见 asphalt.gdshader 开头那段），
+; 两条合起来 b−r −3 / 饱和度 0.092。
+; 附带一条：SDFGI 在 Compatibility 渲染器下**根本不支持**，
+; 而 Web 导出正是跑在 Compatibility 上——开着的话桌面与 Web 看到的是两个世界。
+sdfgi_enabled = false
 sdfgi_cascade0_resolution = 2
 sdfgi_cascade1_resolution = 4
 sdfgi_max_distance = 200.0

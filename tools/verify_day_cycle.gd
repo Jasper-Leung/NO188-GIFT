@@ -187,6 +187,23 @@ func _run() -> void:
 	#    带内落差从 8% 涨到 15%。
 	_ck("场景的雾不画天（fog_sky_affect = 0，天色归天色管）",
 			is_zero_approx(_env.fog_sky_affect), str(_env.fog_sky_affect))
+	# ③ **SDFGI 不许开**。第五轮 P0-1「路面蓝紫霉斑」的真凶，而它躲过了
+	#    评审那三个成因假设（自发光 / 天光环境光 / 掠射菲涅尔）——三条量下来
+	#    路面读数一格没动，于是「成因收窄到天穹漫反射辐照度」停在那里没往下走。
+	#    往下走一步是拆 SDFGI：它是**从天空反推出来的间接反弹光**，既不乘
+	#    `DirectionalLight3D.light_color`、也不是 `ambient_light_energy` 那一路，
+	#    所以「换成纯红太阳它还是蓝」「把四个天空滤镜全拉黑它一点不变」
+	#    「两盏灯加环境光全灭它还亮着（实测 sRGB(6,17,70)）」三件事同时成立。
+	#    正对照那个「全灭还亮着」量在 `tools/probe_road_hue.gd --split`，
+	#    **headless 量不到像素，所以本条只能是成因断言**——
+	#    渲出来的那两条（`|b−r| ≤ 12` / 饱和度 `≤ 0.12`）在
+	#    `lookdev_journey.gd` 的 `12b_day` 那一档上量。
+	#
+	#    附带一条它顺带修掉的东西：SDFGI 在 Compatibility 渲染器下**不支持**，
+	#    而 Web 导出跑的正是 Compatibility——开着的话桌面与 Web 根本是两个世界，
+	#    而桌面那三十几条回归量的是开着的那一个。
+	_ck("SDFGI 关着（它是天穹漫反射的间接反弹，路面蓝紫的真凶）",
+			not _env.sdfgi_enabled, str(_env.sdfgi_enabled))
 	# ② **天空色必须按线性算纵向反差**。天空色在引擎里是辐照度、直接当线性值用，
 	#    而那六个常量是照着显示器写的 sRGB。不换算的话 `DAY_SKY_HORIZON`
 	#    渲出来是 sRGB(0.87,0.94,0.99)——几乎就是白的。
