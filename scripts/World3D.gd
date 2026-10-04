@@ -89,6 +89,15 @@ var _stele_inside: Dictionary = {}
 ## 碑离路心线 9m（RoadSteles.STELE_OFFSET），所以半径得比它大一点，
 ## 不然骑在路中心线上根本进不了圈——那块碑就永远只是一件布景。
 const STELE_PASS_RADIUS := 11.0
+## 家 -> 此刻是否在家门口 HOME_PASS_RADIUS 内。和碑同一个边沿触发：
+## 停着不动不重弹，只在"从外圈骑进来"的那一帧浮一句。半径比碑大：
+## 碑只有 1.1m 宽而房子 8×6m，门朝路，从路边看过去的张角不一样。
+##
+## 这份常量抄的是 `HomeBase.PASS_RADIUS`，而 HomeBase 没有 class_name，
+## 跨脚本按类名取常量会让 --script 下的回归在编译期拉依赖、报
+## `Identifier not found` 然后整个 SceneTree 挂死不退出（同 PROMPT_RADIUS
+## 那条注释）。两份必须相等，由 `verify_home_base.gd` 对拍。
+const HOME_PASS_RADIUS := 12.0
 var _road_points_2d: PackedVector2Array = []
 var _boundary_intensity: float = 0.0
 ## 8 字交叉点那块「路自此复」的碑（scripts/CrossingMark.gd）。
@@ -98,6 +107,12 @@ var _crossing_mark: Node3D = null
 ## 路肩外那道看得见的软边界（scripts/RoadVerge.gd）。preload，理由同上。
 const RoadVergeRef = preload("res://scripts/RoadVerge.gd")
 var _verge: Node3D = null
+## 主角的家（scripts/HomeBase.gd）。preload，理由同上。
+const HomeBaseRef = preload("res://scripts/HomeBase.gd")
+var _home: Node3D = null
+## 玩家有没有正骑在家门口那一圈里。和 `_stele_inside` 同一个边沿触发的用法：
+## 停着不动不能每秒重弹一次，只在"从外圈骑进来"的那一帧浮一句。
+var _home_inside: bool = false
 ## 三处水（scripts/Water.gd）。preload 而不是 class_name，同 RoadSteles。
 const WaterRef = preload("res://scripts/Water.gd")
 var _water: Node3D = null
@@ -303,12 +318,34 @@ func _ready() -> void:
 		_grass_scatter.setup(_terrain_builder, _road_builder.get_all_centerlines(),
 			all_station_pos)
 
+	# 家必须排在 TreeScatter **之前**：行道树要让开这块地，否则会从屋顶里
+	# 长出来。而路碑的落点反过来要等树建好（它按"视线上不许有树"挑地方），
+	# 于是"家离碑够不够远"只能事后量——见 HomeBase.check_steles()，
+	# 它只记录不搬家，回归 `verify_home_base.gd` 断这一条。
+	var station_xz: Array = []
+	for st in _stations:
+		station_xz.append(Vector2(st.position.x, st.position.z))
+	_home = HomeBaseRef.new()
+	_home.name = "HomeBase"
+	add_child(_home)
+	_home.setup(_road_builder.get_road_data(), _terrain_builder, station_xz,
+			Localization.t("home_name"))
+	if _home.placed and _minimap != null and _minimap.has_method("set_home"):
+		# 小地图上线比家早（`_ready()` 前半段），所以这枚钉是后补的。
+		_minimap.set_home(_home.site)
+
 	if _tree_scatter != null:
 		# 行道树和草皮用同一份中心线与同一份驿站净空：树脚下就是草，
 		# 两者让位判据不一致的话会出现"树长在草让开的空地中间"。
 		var tree_protect: Array = []
 		for st in _stations:
 			tree_protect.append(st.position)
+		if _home != null and _home.placed:
+			# 家的让位半径不用另开一个：STATION_CLEAR(10m) 已经大过房子半对角线
+			# （sqrt(4²+3²)=5.0m），而它顺带把"路到家门那条视线"也清出来了
+			# ——线段上任一点要么离中心线 ≤9m（TreeScatter.ROAD_CLEAR），
+			# 要么离家 ≤10m，两个圆盘正好盖满那 11~15m。
+			tree_protect.append(_home.site)
 		_tree_scatter.setup(_terrain_builder, _road_builder.get_all_centerlines(),
 			tree_protect)
 
@@ -324,6 +361,8 @@ func _ready() -> void:
 			var tp: Vector3 = t["pos"]
 			tree_xz.append(Vector2(tp.x, tp.z))
 	_steles.setup(_road_builder.get_road_data(), _terrain_builder, tree_xz)
+	if _home != null:
+		_home.check_steles(_steles.stele_positions)
 
 	# 交叉点那块碑排在 _steles 之后：它不靠树判可见性（交叉点 14m 外就是沥青
 	# 边沿，本来就没有行道树），但要复用同一份 road_data 的采样结果。
@@ -682,6 +721,31 @@ func _apply_station_keepout() -> void:
 		_player.position.x = c.x + dir.x * r
 		_player.position.z = c.y + dir.y * r
 		_player.damp_speed(0.7)
+	_push_out_of_home()
+
+
+## 房子是实心的，和亭子一样推不动 —— 所以和驿站走同一套硬推出。
+##
+## 单拎出来是因为它多一条驿站没有的约束：**推出的位置必须还在玩家骑得到的
+## 范围内**。驿站背后有 15m 的打卡圈撑着，墙大一圈也只是够不着；家背后
+## 没有圈，所以半径必须让"被推到圈外那一点"离中心线还 < SOFT_BOUND。
+## 实测 keepout 6.6m、落点横向 15m，推出去落在离中心线 8.4m 的地方，
+## 那里 `_apply_boundary_force()` 的推力恰好是 0。
+func _push_out_of_home() -> void:
+	if _home == null or not _home.placed or _player == null:
+		return
+	var r: float = _home.keepout_radius()
+	if r <= 0.0:
+		return
+	var c := Vector2(_home.site.x, _home.site.z)
+	var to := Vector2(_player.position.x, _player.position.z) - c
+	var d := to.length()
+	if d >= r:
+		return
+	var dir := to / d if d > 0.001 else Vector2(0.0, 1.0)
+	_player.position.x = c.x + dir.x * r
+	_player.position.z = c.y + dir.y * r
+	_player.damp_speed(0.7)
 
 
 ## 只换屋顶材质，其余一律不碰。
@@ -959,6 +1023,7 @@ func _physics_process(_delta: float) -> void:
 	_nearby_shop_dist = best_shop_dist
 
 	_check_steles()
+	_check_home()
 
 	# 面板开着却骑出了铺子范围就自动收摊，不然玩家被困在面板上。
 	if _shop_open and _nearby_shop_idx < 0:
@@ -994,6 +1059,25 @@ func _check_steles() -> void:
 			if line != "":
 				_hud3d.show_pass_line(line)
 		_stele_inside[i] = inside
+
+
+## 家也不走主循环里那个驿站 for——它不是驿站：不加旅币、不进 `_nearby_*`、不能打卡。
+## 它多出来的只有一样，是"据点"那两个字的意思：**骑得到**。所以按和碑
+## 同一套边沿触发浮一句"到家了"，玩家就知道这一趟有个起点也有个终点，
+## 而不用去数自己绕了几圈。半径同样按 XZ 量（家坐在地形上、路在路基上，
+## 门朝着路，两边高差能有两米多）。
+func _check_home() -> void:
+	if _home == null or not _home.placed or _hud3d == null \
+			or not _hud3d.has_method("show_pass_line"):
+		return
+	var here := Vector2(_player.position.x, _player.position.z)
+	var site := Vector2(_home.site.x, _home.site.z)
+	var inside := here.distance_to(site) <= HOME_PASS_RADIUS
+	if inside and not _home_inside:
+		var line := Localization.t("home_pass_line")
+		if line != "":
+			_hud3d.show_pass_line(line)
+	_home_inside = inside
 
 
 func _apply_boundary_force(delta: float) -> void:

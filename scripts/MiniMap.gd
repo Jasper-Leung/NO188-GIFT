@@ -7,9 +7,20 @@ const MAP_PAD = 8.0
 ## 未收碎片站的金色，和 CheckInPrompt 的碎片提示圈同一个值：顶栏、屏幕提示圈、
 ## 小地图三处指的必须是同一批地方，颜色不一样玩家会以为是两套东西。
 const FRAG_GOLD := Color(0.96, 0.78, 0.49)
+## 家的钉。**刻意不走金色**——金色这一档全工程是"还欠一次到访的碎片站"
+## （和 CheckInPrompt 同一个值），家不是目标，抢那个颜色会被读成"下一处"。
+## 也不能是驿站那种灰或本色：那些读成"路过的地方"。米白 + 深色描边读成
+## "这是你的、它哪儿也不去"。
+const HOME_TINT := Color(0.93, 0.91, 0.85)
+const HOME_EDGE := Color(0.12, 0.10, 0.06, 0.95)
 ## 下一处的白环。它套在最近的那颗未收碎片站外面，是"往这儿骑"的唯一图示。
 const NEXT_RING := Color(1, 1, 1, 0.9)
 const PULSE_HZ := 1.7
+
+## 家的落点。世界3D 在房子建好之后调一次 `set_home()`；建没建成之前
+## 小地图上就不该有这枚钉（一个钉在空气里的"家"比没有更糟）。
+var home_site := Vector3.ZERO
+var has_home := false
 
 var road_data: RoadData
 var player: CharacterBody3D
@@ -27,6 +38,37 @@ func setup(rd: RoadData, p: CharacterBody3D) -> void:
 	road_data = rd
 	player = p
 	_compute_bounds()
+
+
+func set_home(p: Vector3) -> void:
+	home_site = p
+	has_home = true
+
+
+## 一枚"房子"形状的钉：一个方身 + 一个三角顶。
+##
+## 画法是**两遍**：先把放大 1.3 倍的同一个形状画成深色，再把原尺寸的盖上去，
+## 于是边缘自带一圈描边。小地图底色是 (0.08,0.10,0.06) 那块近黑的深绿，
+## 米白直接画上去会糊成一团光斑，看不出是房子——**而"看得出是房子"
+## 正是这枚钉唯一要干的事**（玩家不会去读"这是个据点"，他只会读形状）。
+## 不用 `draw_polyline` 描边是因为它不闭合，画出来缺一条底边。
+func _draw_home() -> void:
+	if not has_home:
+		return
+	var h := _w2m(home_site)
+	var s := 4.6
+	for pass_edge in 2:
+		var k := 1.32 if pass_edge == 0 else 1.0
+		var col: Color = HOME_EDGE if pass_edge == 0 else HOME_TINT
+		draw_colored_polygon(PackedVector2Array([
+			h + Vector2(-s * k, -s * 0.1 * k),
+			h + Vector2(s * k, -s * 0.1 * k),
+			h + Vector2(s * k, s * k),
+			h + Vector2(-s * k, s * k)]), col)
+		draw_colored_polygon(PackedVector2Array([
+			h + Vector2(-s * 1.2 * k, -s * 0.1 * k),
+			h + Vector2(s * 1.2 * k, -s * 0.1 * k),
+			h + Vector2(0.0, -s * 1.25 * k)]), col)
 
 
 func _compute_bounds() -> void:
@@ -152,3 +194,7 @@ func _draw() -> void:
 	var bl = ppos - fwd * 3 + perp * 3
 	var br = ppos - fwd * 3 - perp * 3
 	draw_colored_polygon(PackedVector2Array([tip, bl, br]), Color(1, 0.25, 0.15, 1))
+
+	# 家的钉最后画，所以它压在玩家三角上面——开局那一帧车就站在家门口，
+	# 两枚图钉叠在一起，先画的那枚会被盖掉，读起来像"家不见了"。
+	_draw_home()

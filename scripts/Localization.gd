@@ -265,6 +265,9 @@ const STRINGS := {
 		"stele_2_line": "你替所有人记住回家的路。",
 		"stele_3_line": "编号 188。这条路认得每一个走过的人。",
 		"stele_4_line": "字被人凿平了。只剩半个 188。",
+		# ---- 主角的家（HomeBase）。门牌上一个字，和骑到家门口浮出的那一句。----
+		"home_name": "家",
+		"home_pass_line": "到家了。灯还亮着。",
 	},
 	"en": {
 		"game_title": "Gift No.188",
@@ -483,6 +486,10 @@ const STRINGS := {
 		"stele_2_line": "You keep the way home for everyone.",
 		"stele_3_line": "Marked No.188. This road knows everyone who has walked it.",
 		"stele_4_line": "The letters have been chiselled away. Half a 188 is all that's left.",
+		# ---- The protagonist's home (HomeBase). One word on the door plate, plus
+		# the line that floats up when you ride home. ----
+		"home_name": "Home",
+		"home_pass_line": "Home. The lamp is still on.",
 	}
 }
 
