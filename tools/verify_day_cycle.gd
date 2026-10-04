@@ -71,6 +71,13 @@ static func _sky_contrast(top: Color, horizon: Color) -> float:
 	return (hl - top.get_luminance()) / maxf(hl, 0.001)
 
 
+## 一个"染色"常量的自身纯度：最小通道 / 最大通道。
+## 1.0 = 纯白（不染色），0 = 纯色相。用来钉"滤镜不许自己先饱和"——
+## 理由见下面黄昏那几条的注释。
+static func _min_max(c: Color) -> float:
+	return minf(minf(c.r, c.g), c.b) / maxf(maxf(c.r, c.g), maxf(c.b, 0.001))
+
+
 func _initialize() -> void:
 	call_deferred("_run")
 
@@ -279,6 +286,33 @@ func _run() -> void:
 	_ck("黄昏的地平线是烧红的（红压过蓝）",
 			_sky.sky_horizon_color.r > _sky.sky_horizon_color.b,
 			str(_sky.sky_horizon_color))
+	# 上一条只判方向：实测那一行 sRGB(0.377, 0.007, 0.030) 时它照样绿
+	# （0.377 > 0.030），而那一行根本不是天，是一张红色滤色片。
+	# **成因在这里，结果在 `lookdev_journey.gd`**：Godot 4 的
+	# `ProceduralSkyMaterial` 只有物理散射一种模型（4.0 删掉 Preetham 之后
+	# 连 `sky_type` 属性都没了），`sky_horizon_color` 是**乘在散射结果上的滤镜**
+	# 而不是天本身的颜色。太阳压到 9° 时散射自己就是深红带，于是再乘一层
+	# 饱和的橙 (0.95,0.52,0.26)：红乘 0.95 几乎不动，绿先被散射压到很小、
+	# 再乘 0.52 —— **两个红相乘，小通道被压两遍**。
+	# 所以判据钉的是**滤镜自己的纯度**：`min/max` 低于 0.5 的滤镜，等于
+	# 保证再压一遍小通道。太阳色那份是直接乘在草皮卡片上的，同一条道理。
+	# 排除过的两条写在这儿免得下一个人重新怀疑：`tonemap_mode = 3`（AGX）
+	# 不背这个锅（同一个 (0.95,0.52,0.26) 单独过 AGX 出来是 (1.000,0.702,0.369)，
+	# 绿反而被抬上去），心神遮罩也不背（同一帧顶栏金字日/昏两档逐通道相同）。
+	_ck("黄昏地平线滤镜没有自己先饱和（min/max ≥ 0.50，暖意交给散射）",
+			_min_max(_dc.DUSK_SKY_HORIZON) >= 0.50,
+			"min/max=%.3f  %s" % [_min_max(_dc.DUSK_SKY_HORIZON),
+			str(_dc.DUSK_SKY_HORIZON)])
+	_ck("黄昏太阳色没有自己先饱和（min/max ≥ 0.50，它直接乘在草皮上）",
+			_min_max(_dc.DUSK_SUN_COL) >= 0.50,
+			"min/max=%.3f  %s" % [_min_max(_dc.DUSK_SUN_COL),
+			str(_dc.DUSK_SUN_COL)])
+	# 正对照：只测"低饱和"的话，一份全灰的天也能过，所以另钉一条"它还是暖的"。
+	# 两条必须成对——和 CLAUDE.md 里 WCAG 那条「别把极性写反」同一个道理。
+	_ck("收着写之后黄昏仍然是暖的（低饱和 ≠ 变成灰）",
+			_dc.DUSK_SKY_HORIZON.r > _dc.DUSK_SKY_HORIZON.b
+			and _dc.DUSK_SUN_COL.r > _dc.DUSK_SUN_COL.b,
+			"天 %s  灯 %s" % [str(_dc.DUSK_SKY_HORIZON), str(_dc.DUSK_SUN_COL)])
 	_ck("黄昏的雾是暖的（白昼那档是青白的）",
 			_env.fog_light_color.r > _env.fog_light_color.b,
 			str(_env.fog_light_color))

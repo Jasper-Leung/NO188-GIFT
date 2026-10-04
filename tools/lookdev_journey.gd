@@ -799,6 +799,31 @@ func _run() -> void:
 	_ck("走到黄昏是换了颜色而不是只降了曝光（同一行由红压过蓝）",
 			dusk_row.r > dusk_row.b,
 			"正午 %s → 黄昏 %s" % [str(day_row), str(dusk_row)])
+	# 上一条只判**方向**，于是它对"红压过蓝"这件事的**程度**完全免疫：
+	# 实测那一行是 sRGB(0.377, 0.007, 0.030) 时它照样绿——0.377 > 0.030。
+	# 而那一行之所以是那样，是因为 Godot 4 的 `ProceduralSkyMaterial` 只有物理
+	# 散射一种模型，`sky_horizon_color` 是**乘在散射结果上的滤镜**而不是天色：
+	# 太阳压到 9° 时散射自己就是深红带，再乘一层饱和橙，两个红相乘、
+	# 小通道被压两遍，绿和蓝在物理上归零。渲出来是一张红色滤色片而不是天。
+	# 成因那一条（滤镜不许自己先饱和）在 `verify_day_cycle.gd` 里，
+	# 这里量的是**结果**——两档的天都得留住自己的次通道，
+	# 判据是"次通道压过主通道的百分之几"，不是"谁大谁小"。
+	var dusk_gr: float = dusk_row.g / maxf(dusk_row.r, 0.001)
+	var dusk_br: float = dusk_row.b / maxf(dusk_row.r, 0.001)
+	_ck("黄昏的天留住绿与蓝（不是一张红色滤色片）",
+			dusk_gr >= 0.10 and dusk_br >= 0.10,
+			"g/r=%.3f b/r=%.3f  实测 %s" % [dusk_gr, dusk_br, str(dusk_row)])
+	# 正对照：正午那档**绿蓝都压过红**，黄昏这一档**绿蓝都被红压过**。
+	# 第一版写的是 `(day.b > day.r) != (dusk.r > dusk.b)`——那正好是上面两条
+	# 断言各自已经钉死的那一件事，于是两个布尔量恒相等，这条**恒红**：
+	# 它量的是"两条断言有没有都成立"，不是"两档天是不是两档色相"。
+	# 改成**加绿那一路**：上面三条一次都没碰过 g，所以
+	# 「黄昏发暗绿/橄榄」（r>g>b，b/r 和 g/r 都合规）这一档只有这条拦得住。
+	_ck("黄昏的天和正午的天不是同一档色相（一档蓝绿、一档暖红）",
+			day_row.g > day_row.r and day_row.b > day_row.r
+			and dusk_row.g < dusk_row.r and dusk_row.b < dusk_row.r,
+			"正午 (r=%.3f g=%.3f b=%.3f)  黄昏 (r=%.3f g=%.3f b=%.3f)"
+			% [day_row.r, day_row.g, day_row.b, dusk_row.r, dusk_row.g, dusk_row.b])
 	# 跨脚本的一条：顶栏衬底声明的最坏背景（verify_mood_mask.gd 第 9 节）还够用吗。
 	# 取 SKY_ROWS[0] 那一行，因为它正好落在衬底下沿（fy 0.086）之下几像素——
 	# 衬底自己的 alpha 在那里已经淡到接近 0，量到的基本就是裸天，
