@@ -1474,6 +1474,12 @@ func _popup_body_text(idx: int) -> String:
 ## 原来这块 Label 在回访时被整个藏掉，于是 MiniGamePicker 那张轮换表从头到尾
 ## 没有任何一个像素告诉过玩家：三次到访玩的是三件不同的乐事，而他每次都以为
 ## 重玩的是同一件。
+##
+## 首访那一句规则补的是**另一半**：顶栏一直在写「还差 2 次」，所以"要来三次"
+## 玩家知道，而"每次换一件"从头到尾没人说过——于是他把回访读成"再玩一遍
+## 刚才那件"。写在**首访**而不是三趟都写，是因为那是唯一一次他还来得及
+## 决定要不要为这件事再跑两趟的时刻；而这一行必须**放得下**（回归量的是
+## `get_string_size()` 而不是那个框的宽度，见 verify_interact_latch 第 4 节）。
 func _popup_foot_text(idx: int) -> String:
 	if _is_revisit(idx):
 		if _last_joy_slot < 0:
@@ -1482,7 +1488,8 @@ func _popup_foot_text(idx: int) -> String:
 				+ Localization.t(RevisitNote.joy_key(_last_joy_slot))
 	var frag := _station_fragment(idx)
 	if frag != "":
-		return Localization.t("fragment_obtained") + frag
+		return Localization.t("fragment_obtained") + frag \
+				+ Localization.t("checkin_three_joys")
 	return ""
 
 

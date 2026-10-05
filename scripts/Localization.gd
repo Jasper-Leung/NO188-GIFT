@@ -140,6 +140,12 @@ const STRINGS := {
 		# 回访那一趟轮到的乐事报出来——原来 `_popup_fragment` 在回访时被藏掉，
 		# 于是「每次到访玩的那件会换」这件事从头到尾没有任何一个像素告诉过玩家。
 		"mg_played": "这一趟：",
+		# 首访那一屏的**规则**，不是它的结果。「还差 2 次」顶栏一直在写，
+		# 而"每次换一件乐事"这一半从头到尾没有任何一个像素告诉过玩家——
+		# 于是玩家把回访读成"再玩一遍刚才那件"，三次到访最强的那个钩子
+		# 在他眼里是同一件事重复三遍。写在**首访**是因为那是唯一一次
+		# 他还来得及决定要不要为这件事再跑两趟的时刻。
+		"checkin_three_joys": "· 三次到访，三件乐事",
 		# collecting_message 原来写的是"礼物正在合成…"，而它同时也是这一趟的
 		# 结束提示——于是第一次集齐时玩家被锁死 2.5 秒弹去结算页，
 		# 顶栏一路写的「再访 · 还差 N 次」一句也兑现不了。
@@ -411,6 +417,7 @@ const STRINGS := {
 		"revisit_3rd_here": "Third time down this road. One more run of this joy.",
 		"revisit_3rd_round": "Another full loop. Last call here — take your time.",
 		"mg_played": "This round: ",
+		"checkin_three_joys": " · three visits, three joys",
 		"collecting_message": "All five joys collected. The gift is formed.",
 		"revisit_available": "The pips in the top bar are still open — two more visits to every post.",
 		"synthesis_take_postcard": "Keep the postcard · End this ride",

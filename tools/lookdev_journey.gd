@@ -854,6 +854,34 @@ func _run() -> void:
 	await _snap("06_dialogue_驿站对白")
 	_world._dialogue_popup.visible = false
 
+	# ---- 06b 打卡弹窗：首访那一屏的底行 ----
+	# 这一屏以前一张图都没有，于是**「获得碎片：禽」那一行和它后面追加的
+	# 「三次到访，三件乐事」从来没被眼睛看过**。无头回归量的是
+	# `get_string_size()` ≤ 框宽，而"没折行"和"读得出来"在图上是两件事：
+	# 22px 的米金字居中排在深底板上、四周空着的时候，它读起来是"一行小字"，
+	# 而不是一句规则——而这一行存在的全部理由就是让玩家读出规则。
+	# 摆的是 `_show_check_in` 那几个字段本体，不另演一遍。
+	var foot_shown: String = _world._popup_foot_text(4)
+	_world._popup_name.text = _world._station_name(4)
+	_world._popup_event.text = _world._station_event(4)
+	_world._popup_text.text = _world._popup_body_text(4)
+	_world._popup_fragment.text = foot_shown
+	_world._popup_fragment.visible = foot_shown != ""
+	_world._check_in_popup.visible = true
+	await create_timer(0.6).timeout
+	_ck("首访那一屏的底行真的说了那条规则",
+			foot_shown.contains(_loc.t("checkin_three_joys")),
+			"底行写着：%s" % foot_shown)
+	# 底行不许折行：折出来的那一截在 VBox 那个固定高的一格之外，
+	# 直接画到面板外面去。量的是**排好版之后**的行数——`get_line_count()`
+	# 依赖框宽，框没排版时它报的是别的。
+	_ck("首访底行是一行（折行就画到面板外面去了）",
+			_world._popup_fragment.get_line_count() <= 1,
+			"折成了 %d 行，框宽 %.0fpx" % [_world._popup_fragment.get_line_count(),
+					_world._popup_fragment.size.x])
+	await _snap("06b_checkin_首访弹窗")
+	_world._check_in_popup.visible = false
+
 	# ---- 07..11 五个小游戏 ----
 	# 走 World3D._run_mini_game() 同一套挂载方式，只是不同步等它结束，
 	# 拍完自己收掉，免得 check-in 的 await 链被拖住。

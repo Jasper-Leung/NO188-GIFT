@@ -72,6 +72,58 @@ func _ck(label: String, cond: bool, detail: String = "") -> void:
 		print("[FAIL] ", label + ("（" + detail + "）" if detail != "" else ""))
 
 
+## 剔掉行注释（GDScript 只有 `#` 行注释），保留字符串字面量里的 `#`。
+## 文本判据读源码之前必须先过这一道——本工程栽过两次同一个坑：
+## `edge_line_color` 声明了整整一个项目从没被读过、`HUD3D` 那块注释里
+## 描述的帮助面板从来没被打开过。**注释里写着的那句话和代码真的那么干，
+## 是三件事**，而 `contains()` 分不出来。
+func _strip_comments(src: String) -> String:
+	var out: Array = []
+	for line in src.split("\n"):
+		var res := ""
+		var quote := ""
+		for i in line.length():
+			var ch := line[i]
+			if quote != "":
+				res += ch
+				if ch == quote:
+					quote = ""
+			elif ch == "\"" or ch == "'":
+				quote = ch
+				res += ch
+			elif ch == "#":
+				break
+			else:
+				res += ch
+		out.append(res)
+	return "\n".join(out)
+
+
+## 读一个 .gd 文件、剔掉注释、再切出**某一个函数**的正文。
+##
+## 两个动作各自都有它自己的理由，缺一个就量错东西：
+## · 剔注释——见 `_strip_comments()`，不剔的话下面那段解释本身的散文里
+##   就写着要找的那个 key，把真调用删掉照样全绿。
+## · 限死函数体——不限的话量的是"这个文件里有这句话"，而这一族要的
+##   是"**这一处**有没有调它"。同一个字符串在文件别处也合法出现。
+## 限的时候要认 `static func`：只找 `"\nfunc "` 的话，一个 static 函数
+## 后面若跟的是另一个 static 函数，正文会一路取到文件末尾。
+func _func_body(path: String, fn: String) -> String:
+	var src := _strip_comments(FileAccess.get_file_as_string(path))
+	var start := src.find("func %s(" % fn)
+	if start < 0:
+		return ""
+	var lines := src.substr(start).split("\n")
+	var body: Array = []
+	for i in lines.size():
+		if i > 0:
+			var t := lines[i].strip_edges()
+			if t.begins_with("func ") or t.begins_with("static func "):
+				break
+		body.append(lines[i])
+	return "\n".join(body)
+
+
 func _ensure_autoloads() -> void:
 	for n in {"GameManager": "res://scripts/GameManager.gd",
 			"AudioManager": "res://scripts/AudioManager.gd",
@@ -267,6 +319,98 @@ func _run() -> void:
 	_gm._clear_save()
 	_teleport(4)
 	await process_frame
+	# ---------- 4b 首访那一屏有没有把「规则」说出口 ----------
+	#
+	# 「还差 2 次」顶栏一直在写，所以"这一站要来三次"玩家知道；
+	# **"每次换一件乐事"这一半从头到尾没有任何一个像素告诉过玩家**——
+	# 于是他把两次回访读成"再玩一遍刚才那件"，而三次到访是完满评级
+	# 唯一的门槛、也是全游戏最强的重玩钩子。补的那一句写在**首访**，
+	# 因为那是唯一一次他还来得及决定要不要为这件事再跑两趟的时刻。
+	#
+	# 量的是 `_popup_foot_text()` 这个**纯函数**（不碰画笔），所以要在
+	# `check_in()` **之前**问：那一刻 `is_collected(4)` 还是假，问到的才是首访那一支。
+	var foot_first: String = _world._popup_foot_text(4)
+	_ck("首访底行说出了「三次到访，三件乐事」这条规则",
+			foot_first.contains(_root_loc().t("checkin_three_joys")),
+			"底行写着：%s" % foot_first)
+	# 正对照：原来那半句还在。把「获得碎片」换成规则句的话这一条会红。
+	_ck("正对照：首访底行仍然报「获得碎片」（不是被规则句顶掉了）",
+			foot_first.contains(_root_loc().t("fragment_obtained")),
+			"底行写着：%s" % foot_first)
+	# **这一行必须放得下**。量的是 `get_string_size()` 而不是那个框的宽度——
+	# `FragmentLabel` 开着 `AUTOWRAP_WORD_SMART`，字比框宽就折行，
+	# 而框在 VBox 里是固定高的一格，折出来的那一截画到面板外面去。
+	#
+	# **框宽必须先把弹窗显示出来量**：那一瞬弹窗还是 `visible = false`，
+	# 容器没排过版，而带 `autowrap_mode` 的 Label 在排版之前 `size.x` 是
+	# **1px**——于是"字比框宽"恒真，量到的是一个还没存在过的框
+	# （第一版就栽在这里：框宽读到 1px、两条一起红，读起来像产品坏了）。
+	# 顺便把弹窗放出来还顺带量到了"这一屏真的排得下"之外的那一半：
+	# 面板是 `.tscn` 里写死的 600×360、VBox 两侧各 inset 30，
+	# 而**那个 540 是产品自己的排版结果，不许在测试里手抄**。
+	var lbl: Label = _world._popup_fragment
+	var popup: Control = _world._check_in_popup
+	var was_popup_visible: bool = popup.visible
+	var popup_was_collecting: bool = _world._collecting_label.visible
+	popup.visible = true
+	_world._collecting_label.visible = false
+	await process_frame
+	await process_frame
+	var frame_w: float = lbl.size.x
+	_ck("正对照：弹窗排过版之后那一行的框宽是个真宽度（不是 1px）",
+			frame_w > 200.0, "框宽 %.1fpx——弹窗多半还没排版" % frame_w)
+	# 取不到字体的话 `fnt` 是 null，下面两条会直接报错，
+	# 所以先钉一条"字体真的取到了"。
+	var fnt: Font = lbl.get_theme_font("font")
+	var fsz: int = lbl.get_theme_font_size("font_size")
+	_ck("正对照：那一行真的量到了字宽（两语都 > 0，字体不是 null）",
+			fnt != null and fsz > 0, "font=%s size=%d" % [str(fnt), fsz])
+
+	var loc: Node = _root_loc()
+	var saved_lang: String = str(loc.get("current_language"))
+	# **必须走 `set_language()`，不许 `set("lang", …)`**：那个属性名是
+	# `current_language`，而 `Object.set()` 对不存在的属性是**静默空操作**——
+	# 于是"切到英文"那一步没发生，量到的还是中文，而两条断言一模一样地绿着
+	# （第一版正是这样：英文那条 detail 里印出来的写着「获得碎片：禽」）。
+	# 这和 CLAUDE.md 里「量状态切换的断言必须自己先把起点摆出来」是同一条，
+	# 只是这次连切都没切成功。
+	loc.call("set_language", "zh")
+	var t_zh: String = _world._popup_foot_text(4)
+	var zh_w: float = 0.0 if fnt == null \
+			else fnt.get_string_size(t_zh, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+	_ck("首访那一行中文放得下（不折行、不画到面板外）", zh_w <= frame_w,
+			"字宽 %.0fpx，框宽 %.0fpx，字号 %d" % [zh_w, frame_w, fsz])
+	loc.call("set_language", "en")
+	# 正对照：这一遍真的切过去了。`set_language()` 只在 key 不存在时静默
+	# 返回，而 key 写错的话上面那条量到的仍然是中文。
+	_ck("正对照：这一遍真的切到了英文（不然下面那条量的是同一串字）",
+			str(loc.get("current_language")) == "en"
+			and _world._popup_foot_text(4) != t_zh,
+			"current_language=%s，底行写着：%s"
+			% [str(loc.get("current_language")), _world._popup_foot_text(4)])
+	var t_en: String = _world._popup_foot_text(4)
+	var w_en: float = 0.0 if fnt == null \
+			else fnt.get_string_size(t_en, HORIZONTAL_ALIGNMENT_LEFT, -1, fsz).x
+	_ck("首访那一行英文也放得下（英文长一截，只量中文等于没量）",
+			w_en <= frame_w,
+			"字宽 %.0fpx，框宽 %.0fpx，字号 %d；写着：%s"
+			% [w_en, frame_w, fsz, t_en])
+	loc.call("set_language", saved_lang)
+	# 摆出来的现场要原样收回去：后面紧跟着的就是真的 `check_in(4)`，
+	# 而那一趟自己会把弹窗弹出来、被玩家按掉。留一个可见的弹窗在那儿，
+	# 后面量到的就不是这一趟的世界了。
+	popup.visible = was_popup_visible
+	_world._collecting_label.visible = popup_was_collecting
+	# 读源码文本：几何函数对不对、和画笔有没有去调它是两件事，而**这一族
+	# 连"函数被调过"都不量得到**（首访那一屏在这一次里根本没弹出来）。
+	# 剥掉注释再限死函数体——不剥注释的话，这句解释本身的散文里就写着
+	# `checkin_three_joys`，把真调用删掉照样全绿。
+	var w3src: String = _func_body(
+			"res://scripts/World3D.gd", "_popup_foot_text")
+	_ck("画笔真的调了那条规则（读源码文本，剥注释 + 限函数体）",
+			not w3src.is_empty() and w3src.contains('t("checkin_three_joys")'),
+			"函数体 %d 字，里面没有那个 key" % w3src.length())
+
 	_gm.check_in(4)                   # 第 1 次：拿到碎片
 	_teleport(4)
 	await process_frame
