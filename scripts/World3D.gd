@@ -151,7 +151,11 @@ const STATION_KEEPOUT_PAD := 1.6
 const STATION_GLB_CONFIG: Array = [
 	{"path": "res://assets/models/station_0.glb", "scale": 10.0, "label_y": 12.0, "glow_y": 8.0, "glow_range": 12.0},
 	{"path": "res://assets/models/station_1.glb", "scale": 10.0, "label_y": 10.0, "glow_y": 7.0, "glow_range": 10.0},
-	{"path": "res://assets/models/station_2.glb", "scale": 10.0, "label_y": 14.0, "glow_y": 10.0, "glow_range": 15.0, "rot_y": 180.0},
+	# 槽位 2 已退役：原 station_2.glb 是唯一的图生 3D，2026-10-05 换成 station_琴台.glb（槽位 13）。
+	# 留一个空槽而不是把别的模型指过来，是因为 model_idx 是被 road_data.gd 抄进
+	# 16 座站的**下标**——挪槽位要连 16 行一起改，而空槽让「指向已退役槽位」
+	# 变成一条能被断言拦住的错误（见 tools/verify_stations.gd）。
+	{"path": "", "retired": true},
 	{"path": "res://assets/models/station_3.glb", "scale": 10.0, "label_y": 10.0, "glow_y": 7.0, "glow_range": 10.0, "rot_y": 180.0},
 	{"path": "res://assets/models/station_4.glb", "scale": 10.0, "label_y": 11.0, "glow_y": 8.0, "glow_range": 12.0, "rot_y": -120.0},
 	{"path": "res://assets/models/tree.glb", "scale": 8.0, "label_y": 14.0, "glow_y": 10.0, "glow_range": 12.0, "rot_y": 0.0},
@@ -164,6 +168,22 @@ const STATION_GLB_CONFIG: Array = [
 	{"path": "res://assets/models/station_凉亭.glb", "scale": 12.0, "label_y": 8.0, "glow_y": 5.0, "glow_range": 10.0},
 	{"path": "res://assets/models/station_廊.glb", "scale": 10.0, "label_y": 8.0, "glow_y": 5.0, "glow_range": 10.0},
 	{"path": "res://assets/models/station_亭灯.glb", "scale": 14.0, "label_y": 10.0, "glow_y": 6.0, "glow_range": 10.0},
+	# 13：琴台 —— 顶掉原 station_2（图生 3D，参考图出处不明，是最后一件阻塞发行的资产）
+	#
+	# rot_y = 120：Blender 是 Z-up、正面朝 +Y，导出时按 (x, y, z)_B → (x, z, −y)_G
+	# 换轴，所以**正面落在 Godot 的 −z**。绕 Y 转 θ 之后 local −Z 走到
+	# (−sinθ, 0, −cosθ)，而量出来的「站心 → 最近路心线」方向是 (−0.866, 0, +0.5)，
+	# 解出 θ = 120。换一个方向就是玩家从路上只看见这座台子的背面（六棵树），
+	# 而那一屏是 16 座站里唯一能把琴认出来的一屏。这一条是**量出来的**：
+	# 把它退回 0，净空从 11.70m 掉到 5.24m（脚底直接压上路面，回归红 3 条）。
+	#
+	# scale 10：站心离路心线 18m，转 120° 之后「离路最近的那一面」正好是模型的
+	# 本地 z 轴，也就是**台阶那一头**（本地 z ∈ [−0.63, +0.73]，六棵树绕的是
+	# 后半个圈、落在 −z 那一侧）。实测净空 11.70m ≈ 18 − 10 × 0.63。
+	# 注意这不是"算出 0.63 就完事"：那六棵树曾经绕前半个圈放，于是最近的那一面
+	# 变成 0.94，一度只剩 8.6m——而**旋转盒的 AABB 量不到这个差别**，
+	# 见 tools/verify_stations.gd 里关于三把量错尺子的注释。
+	{"path": "res://assets/models/station_琴台.glb", "scale": 10.0, "label_y": 15.0, "glow_y": 7.0, "glow_range": 12.0, "rot_y": 120.0},
 ]
 
 ## 屋顶的暖中性色。口径和 glTF 的 baseColorFactor 一致（也就是当初在 Blender 里

@@ -1060,16 +1060,22 @@ echo. > .editor_mode
   判据钉的是**相对 `assets/` 的逐字路径**，所以「登记了但路径打错」和「压根没登记」一起红。
   **反方向也钉**：登记表里留着一个已经删掉的文件同样红——那份清单会让人去找一份
   不存在的授权凭证，而那种错**在发版当天才会被发现**。
-  **当前未核实的三项**（阻塞商用发行）：`assets/bike.glb` 与它的贴图**来源不明**
-  （mesh 名 `10489_bicycle_L2` 是从某个编号目录下载的指纹，Blender 导出时原样保留了
-  上游节点名）；`assets/models/station_2.*` 是**上传参考图**后生成的，所以还要按
-  **上传物**的条款算风险；7 个 Tripo 资产的**账号档位与当时的条款**未定，
-  而 README 末尾那行 `*Tripothon S1 · @TripoAI*` 暗示管着它们的可能是**活动条款**
-  而不是通用服务条款。**别把「待核实」改成「已核实」来让发版流程走通**——
-  `verify_provenance.gd` 有一条专门拦这个（对外署名的未核实数不得少于内部清单的）。
-  顺带一条将来会踩的雷：`tools/subset_font.py` 是**原地覆盖**字体文件的，
-  而 OFL §3 要求修改过的版本**不得使用保留字体名**——它现在产出的任何子集都是违规分发。
-  Web 导出正式启用前必须先改它（子集另存 + 改写 name 表 ID 3/4/6）
+  **当前未核实的两项**（**都不再阻塞发行**，2026-10-05 之后）：6 个 Tripo 资产的
+  **账号档位、生成日期与当时的条款**未定，而 README 末尾那行
+  `*Tripothon S1 · @Tripothon · @TripoAI*` 暗示管着它们的可能是**活动条款**
+  而不是通用服务条款；另外 `export_presets.cfg` 的 `package/unique_name`
+  还是占位 `com.example.gift188`，上架前必须换。
+  `assets/bike.glb` 已是 **CC0 1.0**（取得者 2026-10-05 确认），
+  原 `assets/models/station_2.*`（唯一的**图生 3D**）已于同日**退役**——
+  它不是被核实掉的，是被自建的 `station_琴台.glb` **换掉**的：
+  **图生 3D 的风险按「上传物的权利链」算，而那一条在生成物里查不到、补材料也消不掉。**
+  **别把「待核实」改成「已核实」来让发版流程走通**——
+  顺带一条已经处理掉的：`tools/subset_font.py` 原来**原地覆盖**字体文件，
+  而 OFL §3 要求修改版**不得使用保留字体名**——它产出的任何子集都是违规分发。
+  现在默认**另存** + 改写 name 表 ID 3/4/6，原地覆盖要 `--in-place` 加
+  `--ofl-reserved-name-cleared` **两个**键（保留字体名写在**上游 LICENSE 文件里、
+  不在 TTF 里**，量不出来，所以做成两次显式确认而不是替人判断）。
+  **当前整轮不做子集**——发行前字体整个换掉。
 - 改 `World3D._tint_station_roofs()` / `STATION_ROOF_TINT` 前跑 `verify_station_roof.gd` + `lookdev_journey.gd` 看 `04_ride`（填色要过 `linear_to_srgb`，写错方向屋顶比墙暗 30 倍，数字还是"暖的"，只有比值看得出来）
 - 改 `GameManager.check_in()` 里那两个闩锁 / `all_fragments_maxed()` / `_load_save()` 末尾的补齐 / `World3D._on_all_collected()` / `_on_all_maxed()` / `_spawn_synthesis_animation()` / `PostcardVariant.compute_variant()` 前跑 `verify_minimap.gd` 第 9/10 节 + `verify_postcard_ending.gd` §3b + `verify_interact_latch.gd` 第 4 节 + `verify_checkin_all5.gd`（"集齐"与"走完"是两个时刻，判据只能有一个）
 - 改 `SynthesisPanel.gd` 的任何一处 / `World3D._synthesis_choice_open` / `_on_all_collected()` 的尾巴 / `_on_synthesis_choice()` / `HUDLayer/SynthesisPanel` 节点前跑 `verify_interact_latch.gd` **第 10 节** + `verify_minimap.gd` 第 9 节 + `verify_demo_path.gd` 第 1 节 + `lookdev_journey.gd` 看 `13b_synthesis_集齐二选一` 与 `13c_after_再骑一圈`。三件事一条都不能省：**第 10 节量面板本身**（两个按钮都在屏内不叠、都有 `focus_mode`、ESC 收得掉、`_all_done` 没被顺带翻过去）；**`verify_minimap` 第 9 节现在必须先选「再骑一圈」再逐站核对脚下的圈**——它原来直接接着扫，扫的时候面板还开着，`_nearby_*` 早被清成 -1，十条断言一起红，而那个红是**新行为的正确结果**，不是产品坏了；**`verify_demo_path` 第 1 节**守着 90 秒演示不被这个面板打断（`fill_finished_run()` 走直写字段不发信号，而刷满的碎片站被 `is_station_exhausted` 挡在 `_nearby_station_idx` 之外，演示里根本打不了卡）
@@ -2884,3 +2890,47 @@ First Ride / **Master** / Pilgrim / **Master** / Full——第 2 档和第 4 档
 `user://` 的任何东西，都是"量具的输入不是这一遍的输出"那一族的新成员。
 （同族已记的两条：`mutate_settings.py` 读上一次跑剩下的绿日志；
 `check_all.sh` 跑之前要把 `layout.json` 存一份、跑完还回去。）
+
+## 这一轮新记的一条（2026-10-05，第十轮 P0-2 琴台）
+
+### 一个转过角度的物体，它的 AABB 里有一个**不存在的角**
+
+「驿站脚底离路面还剩多少净空」这条断言在 `verify_stations.gd` 里
+量错了**三把尺子**，而**每一把都全绿过**——三把量出来的数还各不相同：
+
+| 尺子 | 琴台净空 | 咬不咬得住 |
+| :--- | :--- | :--- |
+| ① 旋转后的**世界 AABB** 的 4 个角 | 5.82m | 红（但这是错的红，见下） |
+| ② 本地 AABB 的 8 个角变换后的最小值 | 13.34m | **绿，可它把 `scale` 翻到 20 也照样绿**（量到 9.67m） |
+| ③ 世界 AABB 里的**精确点到盒**距离 | 4.08m | 红（同样是错的） |
+| ④ **精确点到旋转盒**（转回本地系再算） | 11.70m | 对，且两个突变都咬住 |
+
+根因是**旋转后的 AABB 有一半是空的**：琴台转 120° 之后，世界盒子的那个
+「空的角」落在离模型本体 13.9m 的空中，而它正是①和③量到的东西——
+**那个角从来没有任何几何在那里**。②反过来太松，因为本地盒的 8 个角
+在旋转之后离中心线更远了。
+
+正解是把采样点**转回模型的本地坐标系**，盒子自然就轴对齐了，三段式的
+点到 AABB 公式直接可用（`Basis(Vector3.UP, -rot) * (p - center) / scale`）。
+可推广的一条：**凡是"这个转过的物体离某条线多远"，先把点转回它的本地系
+再量，不要量它的世界 AABB**——世界 AABB 对旋转物体是一个**上界**，
+而它恰好在"角"那个方向上松得最多。
+
+连着一条更要紧的：**`verify_stations.gd` 自己手抄了一份
+`World3D.STATION_GLB_CONFIG`**，而那份副本**没有 `rot_y`**。
+于是产品把琴台转了 120°、副本按 0° 量，测出来的 7.27m 冻结在那里，
+改 `scale` 都不动。正解是 `GDScript.get_script_constant_map()` 现场读产品那份
+（`World3D.gd` 的常量全是字面量，所以读得到），**跑之前先钉一条正对照
+「真的读到 14 条」**，读不到就当场 `[ABORT]` 而不是继续跑一个空表。
+这就是 CLAUDE.md 里「手抄的常量副本会自己长出一套预算曲线」的第三次，
+前两次是草皮的 `RING_DENSITY` 和预算注释里那三个数。
+
+第三条同族，也是这一轮最贵的教训：**突变用 `sed` 在这些源文件上不咬合**。
+`sed -i 's|station_琴台.glb", "scale": 10.0|...|'` 因为文件里的中文/UTF-8
+匹配不上而**静默空转**，改完跑一遍还是 PASS——而"突变没咬住"和
+"判据写对了"在输出里长得一模一样。改用
+`python -c` + `io.open(..., encoding='utf-8')` + `assert s.count(old) == 1`，
+计数不为 1 直接炸。**凡是要靠突变证明判据会红的编辑，先确认那个编辑真的落地了。**
+（同族的另一半：`mutate_*.py` 读上一次跑剩下的绿日志、
+`fails()` 按 8 字符切而 `[FAIL] ` 是 7。）
+

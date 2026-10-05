@@ -17,11 +17,16 @@
 | :--- | :--: | :--- |
 | 本工程原创（几何 / 着色器 / UI / 文本 / 音频） | 全部非下列项 | 无 |
 | 字体（LXGW WenKai） | 1 | 低（OFL 1.1，附署名与 OFL 正文即可） |
-| Tripo AI 生成模型 + 贴图 | 14 | **中**（取决于生成时的账号档位与当时的条款） |
+| Tripo AI 生成模型 + 贴图 | 12 | **中**（取决于生成时的账号档位与当时的条款） |
 | 自行车模型 + 贴图 | 2 | 低（**CC0 1.0**，资产取得者 2026-10-05 确认） |
 
-**当前状态：仍有 1 件阻塞商用发行**（`station_2` 的图生 3D 参考图，见 §2.2），
-另有 12 项 ⚠️ 待补证据。
+**当前状态：已无阻塞商用发行的 ❌ 项。** 仍有 12 项 ⚠️ 待补证据
+（6 个 Tripo 模型 + 6 张贴图的账号档位 / 生成日期 / 活动条款存档，见 §2.2）。
+
+> 2026-10-05：原 `station_2.glb`（唯一的**图生 3D**、也是最后一件 ❌）已退役，
+> 换成本工程自建的 `station_琴台.glb`（Blender 手工建模，见 §2.4）。
+> **图生 3D 的风险随那份资产一起离场**——它不只是"没查到条款"，
+> 而是"上传物的权利链根本追不到"，那种风险不是补一份材料能消掉的。
 
 ---
 
@@ -58,7 +63,7 @@ CC0 是真的——`10489_bicycle` 这个 `<数字>_<名字>` 前缀只是**从�
 
 ---
 
-### 2.2 ⚠️ 中风险 · Tripo AI 生成模型（7 个 GLB + 7 张 basecolor）
+### 2.2 ⚠️ 中风险 · Tripo AI 生成模型（6 个 GLB + 6 张 basecolor）
 
 | 文件 | 模型名 | 内部 mesh |
 | :--- | :--- | :--- |
@@ -66,30 +71,29 @@ CC0 是真的——`10489_bicycle` 这个 `<数字>_<名字>` 前缀只是**从�
 | `assets/models/tree.glb` | pine_tree | `tripo_mesh_a7d0729d-…` |
 | `assets/models/station_0.glb` | traditional_chinese_pavilion | `tripo_mesh_6d3cc7fc-…` |
 | `assets/models/station_1.glb` | wooden_tea_house | （UUID） |
-| `assets/models/station_2.glb` | （**图生图**：`tripo_image_7564331c-…`） | `tripo_mesh_7564331c-…` |
 | `assets/models/station_3.glb` | wooden_house | （UUID） |
 | `assets/models/station_4.glb` | glass_greenhouse | （UUID） |
 
-外加同目录 7 张 `*_basecolor.jpg`（就是上面那 7 个 GLB 内嵌的贴图，Godot 导入后另存了一份）。
+外加同目录 6 张 `*_basecolor.jpg`（就是上面那 6 个 GLB 内嵌的贴图，Godot 导入后另存了一份）。
 
 | 字段 | 内容 |
 | :--- | :--- |
 | 来源 | **Tripo AI**（每个 GLB 的 `asset.generator == "Tripo"`，`version 2.0`） |
-| 生成方式 | 7 件里 6 件是**文生 3D**（mesh 名是 Tripo 任务 UUID）；<br>`station_2` 是**图生 3D**（image 名 `tripo_image_<uuid>`，即上传过一张参考图） |
+| 生成方式 | **6 件全部是文生 3D**（mesh 名是 Tripo 任务 UUID）。<br>原第 7 件 `station_2.glb` 是图生 3D，2026-10-05 退役（见 §2.4） |
 | 许可 | **取决于生成时的账号档位与当时的条款** |
 | 核实 | ❌ 未完成 |
 
-**为什么这 7 件风险低于自行车**：`generator` 字段直接写了 Tripo，
+**为什么这 6 件风险低于自行车**：`generator` 字段直接写了 Tripo，
 模型是服务生成的产物，不是从别处抄来的既有作品；
-6 件纯文生，连一张外部参考图都没吃过。
+6 件全是文生 3D，连一张外部参考图都没吃过。
+（原第 7 件是图生 3D——观感来自一张你无权使用的图，而**上传行为本身**就可能
+违反图源站的条款。那一件的风险等级必须按「上传物的风险」算，
+不是按「生成物的风险」算，而**那种风险补材料消不掉**，
+所以它是被换掉而不是被核实的，见 §2.4。）
 
-**但两点必须查清**：
+**还必须查清的一点**：
 
-1. **`station_2` 上传的那张参考图是哪一张。** 图生 3D 意味着它的观感来自一张
-   你无权使用的图（很可能是一张图库照片或别人的模型截图）。
-   **上传行为本身**就可能违反图源站的条款——哪怕生成物是新的。
-   这一件的风险等级应当按「上传物的风险」算，不是按「生成物的风险」算。
-2. **README 末尾那行 `*Tripothon S1 · #Tripothon · @TripoAI*`。**
+1. **README 末尾那行 `*Tripothon S1 · #Tripothon · @TripoAI*`。**
    如果这批资产是在 Tripo 的活动期里生成的，那么**活动条款**（而不是通用服务条款）
    管着它们，而活动条款通常**附带署名或公开可见性义务**——
    那正是 `CREDITS.md` 要满足的东西，但也可能还有别的义务。
@@ -155,6 +159,33 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 
 ---
 
+### 2.3b ✅ 原创 · `assets/models/station_琴台.glb`
+
+| 字段 | 内容 |
+| :--- | :--- |
+| 文件 | `assets/models/station_琴台.glb`（116,912 B，1 mesh / 5 primitive / 1011 面） |
+| 顶替 | 原 `station_2.glb`（Tripo 图生 3D，2026-10-05 退役） |
+| 建模 | **Blender 5.2.2 手工建模**，坐标按米、Y 轴向上，无 UV、无贴图 |
+| 授权 | 与本仓库其余原创部分同（见根目录 `LICENSE`） |
+
+**为什么是"换掉"而不是"补材料"**：图生 3D 的观感来自一张上传的参考图，
+而那张图的来源与许可**在生成物里没有任何痕迹**——`asset.generator` 只写得到
+"Tripo"，写不到那张图是谁的。补一份活动条款解决不了"上传物是谁的"这个问题。
+本工程本来就有 7 座站用同一套约定自建（`station_驿楼` … `station_亭灯`），
+第 8 座照同一套做即可，**零新增风险**。
+
+**它必须继续守住的四件事**（都由 `tools/verify_station_roof.gd` 与
+`tools/verify_stations.gd` 量着）：
+
+1. **材质名带 `琴台_` 前缀**，且含 `_roof` —— `World3D._tint_station_roofs()`
+   按 `_roof` 后缀认，改名就会有一片屋顶掉回青瓦。
+2. **挡车半径 < `STATION_PASS_RADIUS`(15m)** —— 本模型实测半跨 8.09m、
+   加 `STATION_KEEPOUT_PAD`(1.6) 得 **9.69m**。这一圈树原本撑到 11.78m，
+   差 3.2m 就要贴到打卡圈上，而顶栏「下一处」永远减不到 0、圈永远不亮。
+3. **名牌高度 ≥ 净空 1m** —— 模型高 7.95m，`label_y` 取 10.0。
+4. **六个 mesh 一批的 GLB 惯例**：1 mesh、每材质一个 primitive、
+   只带 `POSITION` + `NORMAL`、无 UV。
+
 ### 2.4 ✅ 原创 · 音频（17 个 .ogg）
 
 | 来源脚本 | 产物 | 随机种子 |
@@ -208,8 +239,6 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 | `models/station_0_traditional_chinese_pavilion_3d_model_basecolor.jpg` | 贴图 | Tripo AI | **待核实** | ⚠️ |
 | `models/station_1.glb` | 模型 | Tripo AI | **待核实** | ⚠️ |
 | `models/station_1_wooden_tea_house_3d_model_basecolor.jpg` | 贴图 | Tripo AI | **待核实** | ⚠️ |
-| `models/station_2.glb` | 模型 | Tripo AI（**图生 3D**） | **待核实** | ❌ |
-| `models/station_2_tripo_image_7564331c-6364-4002-9adf-a086dd0012a6_0_0.jpg` | 贴图（= 上传的参考图） | Tripo AI | **待核实** | ❌ |
 | `models/station_3.glb` | 模型 | Tripo AI | **待核实** | ⚠️ |
 | `models/station_3_wooden_house_3d_model_basecolor.jpg` | 贴图 | Tripo AI | **待核实** | ⚠️ |
 | `models/station_4.glb` | 模型 | Tripo AI | **待核实** | ⚠️ |
@@ -221,6 +250,7 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 | `models/station_神苑.glb` | 模型 | 本工程自建 | 同 LICENSE | ✅ |
 | `models/station_茶寮.glb` | 模型 | 本工程自建 | 同 LICENSE | ✅ |
 | `models/station_驿楼.glb` | 模型 | 本工程自建 | 同 LICENSE | ✅ |
+| `models/station_琴台.glb` | 模型 | 本工程自建（2026-10-05，顶掉原 `station_2.glb`） | 同 LICENSE | ✅ |
 | `fonts/LXGWWenKai-Regular.ttf` | 字体 | LXGW WenKai 1.522 | **SIL OFL 1.1** | ✅ |
 | `audio/bgm.ogg` | 音频 | 本工程合成 | 同 LICENSE | ✅ |
 | `audio/ambient/wind.ogg` | 音频 | `gen_ambient_audio.py` | 同 LICENSE | ✅ |
@@ -244,7 +274,7 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 | `shaders/grass.gdshader` | 着色器 | 本工程原创 | 同 LICENSE | ✅ |
 | `shaders/water.gdshader` | 着色器 | 本工程原创 | 同 LICENSE | ✅ |
 
-**45 个受管文件。** 缺 1 项 ❌、12 项 ⚠️、32 项 ✅。
+**44 个受管文件。** **缺 0 项 ❌**、12 项 ⚠️、32 项 ✅。
 
 ---
 
@@ -262,12 +292,14 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 ## 五、核实状态汇总
 
 - [x] ✅ `assets/bike.glb` / `bike_10489_bicycle_diffuse.jpg` —— **CC0 1.0**（取得者 2026-10-05 确认）
-- [ ] ❌ `assets/models/station_2.glb` —— 查清上传的参考图是哪一张
-- [ ] ❌ 7 个 Tripo 资产 —— 账号档位 / 生成日期 / 活动条款原文
-- [ ] ⚠️ `export_presets.cfg` 三处占位符
+- [x] ✅ 原 `assets/models/station_2.glb` —— **已退役**（2026-10-05 换成自建的
+      `station_琴台.glb`，图生 3D 的上传物权利链追不到，那种风险补材料消不掉）
+- [ ] ⚠️ 6 个 Tripo 资产 + 6 张贴图 —— 账号档位 / 生成日期 / 活动条款原文
+- [ ] ⚠️ `export_presets.cfg` 的 `package/unique_name` —— 仍是占位
+      （`com.example.gift188`），上架前必须换成真实包名
 - [x] ✅ 字体子集化 —— **当前不做子集**（25.5 MB 全量随包），`tools/subset_font.py`
       的 OFL §3 违规已在脚本里装护栏（见 §2.3）；换字体之后再重新评估
 - [x] ✅ 音频 17 件 —— 本工程脚本合成
-- [x] ✅ 驿站小件 7 件 —— 本工程自建
+- [x] ✅ 驿站小件 8 件 —— 本工程自建（新增 `station_琴台.glb`）
 - [x] ✅ 字体本身 —— SIL OFL 1.1
 - [x] ✅ 几何 / 着色器 / UI / 文本 —— 原创

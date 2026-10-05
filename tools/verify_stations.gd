@@ -11,21 +11,28 @@ extends SceneTree
 ## "Identifier not found: Localization"。改成运行时 `load(...).new()` 绕开
 ## 编译期依赖。
 
-const STATION_GLB_CONFIG: Array = [
-	{"path": "res://assets/models/station_0.glb", "scale": 10.0, "label_y": 12.0, "glow_y": 8.0, "glow_range": 12.0},
-	{"path": "res://assets/models/station_1.glb", "scale": 10.0, "label_y": 10.0, "glow_y": 7.0, "glow_range": 10.0},
-	{"path": "res://assets/models/station_2.glb", "scale": 10.0, "label_y": 14.0, "glow_y": 10.0, "glow_range": 15.0, "rot_y": 180.0},
-	{"path": "res://assets/models/station_3.glb", "scale": 10.0, "label_y": 10.0, "glow_y": 7.0, "glow_range": 10.0, "rot_y": 180.0},
-	{"path": "res://assets/models/station_4.glb", "scale": 10.0, "label_y": 11.0, "glow_y": 8.0, "glow_range": 12.0, "rot_y": -120.0},
-	{"path": "res://assets/models/tree.glb", "scale": 8.0, "label_y": 14.0, "glow_y": 10.0, "glow_range": 12.0, "rot_y": 0.0},
-	{"path": "res://assets/models/station_驿楼.glb", "scale": 10.0, "label_y": 11.0, "glow_y": 7.0, "glow_range": 14.0},
-	{"path": "res://assets/models/station_茶寮.glb", "scale": 10.0, "label_y": 10.0, "glow_y": 7.0, "glow_range": 12.0},
-	{"path": "res://assets/models/station_岭台.glb", "scale": 10.0, "label_y": 12.0, "glow_y": 8.0, "glow_range": 14.0},
-	{"path": "res://assets/models/station_神苑.glb", "scale": 10.0, "label_y": 9.0, "glow_y": 6.0, "glow_range": 10.0},
-	{"path": "res://assets/models/station_凉亭.glb", "scale": 12.0, "label_y": 8.0, "glow_y": 5.0, "glow_range": 10.0},
-	{"path": "res://assets/models/station_廊.glb", "scale": 10.0, "label_y": 8.0, "glow_y": 5.0, "glow_range": 10.0},
-	{"path": "res://assets/models/station_亭灯.glb", "scale": 14.0, "label_y": 10.0, "glow_y": 6.0, "glow_range": 10.0},
-]
+## 这张表**只从产品那份读**，不手抄。
+##
+## 原来这里是 14 行手抄的副本，而它已经和 `World3D.STATION_GLB_CONFIG` 漂开了：
+## 琴台那一行少了 `rot_y`（产品转 120°、副本按 0° 量），而 `scale` 还停在 10.0。
+## 后果不是"断言太松"，是**量错了对象**——旋转后的包围盒比轴对齐的大，
+## 于是"脚底净空"这一节量的是一件产品里不存在的东西（本轮它报 7.27m，
+## 真实的那一份是 7.20m，方向一致、量级一致，所以看不出来）。
+## 这正是 CLAUDE.md 里「手抄的常量副本会自己长出一套预算曲线」那条：
+## 凡是回归里手抄一份产品的表，就该直接读产品那份。
+static var STATION_GLB_CONFIG: Array = []
+
+static func _load_product_config() -> Array:
+	if not STATION_GLB_CONFIG.is_empty():
+		return STATION_GLB_CONFIG
+	var scr: GDScript = load("res://scripts/World3D.gd")
+	if scr == null:
+		return []
+	var m := scr.get_script_constant_map()
+	if not m.has("STATION_GLB_CONFIG"):
+		return []
+	STATION_GLB_CONFIG = m["STATION_GLB_CONFIG"]
+	return STATION_GLB_CONFIG
 
 ## 站名牌那一节的几把尺子（见 `_audit_name_plates()` 的注释）。
 ## 站心离路心线——和 `road_data.STATION_OFFSET` 一份。
@@ -76,6 +83,16 @@ func _initialize() -> void:
 
 func _run() -> void:
 	print("=== 驿站 → GLB 配置 ===")
+	# 正对照：先断「产品那份真的读到了」。读不到的话下面每一处
+	# `STATION_GLB_CONFIG[...]` 都会 IndexError 把协程掐断，而汇总照样打 PASS。
+	# 14 是产品表真实的长度（槽位 0..13，其中 2 已退役留空）。
+	var cfg_tbl: Array = _load_product_config()
+	_check("产品 World3D.STATION_GLB_CONFIG 真的读得到（14 条）",
+		cfg_tbl.size() == 14, "实测 %d 条" % cfg_tbl.size())
+	if cfg_tbl.size() < 6:
+		print("[ABORT] 产品配置表读不到，无法继续")
+		quit(1)
+		return
 	var stations: Array = _load_stations()
 	if stations.is_empty():
 		print("[ABORT] 拿不到 stations，无法继续")
@@ -106,23 +123,50 @@ func _run() -> void:
 			out_of_range.is_empty(),
 			"越界: " + str(out_of_range))
 
+	# 已退役的 model_idx（station_2 的图生 3D 在 2026-10-05 被换掉）留的是**空槽**，
+	# 而 model_idx 是 road_data.gd 里手抄的下标——把某座站留在退役槽上，
+	# 上面两条断言照样全绿（槽位在范围内、指向的路径也不是空串而是空），
+	# 而世界里那一座站会静悄悄地没有模型。这条是这个家族里唯一拦得住它的判据。
+	var retired_hits: Array[int] = []
+	for i in range(model_idxs.size()):
+		var cfg = STATION_GLB_CONFIG[model_idxs[i]]
+		if bool(cfg.get("retired", false)):
+			retired_hits.append(i)
+	_check("没有驿站指向已退役的 model_idx 槽位",
+			retired_hits.is_empty(),
+			"站 idx " + str(retired_hits) + " 停在退役槽上")
+
 	var missing: Array[String] = []
+	var live_slots := 0
 	for cfg in STATION_GLB_CONFIG:
 		var p: String = str(cfg.get("path", ""))
+		if p == "":
+			continue          # 退役槽位：没有文件可查
+		live_slots += 1
 		if not ResourceLoader.exists(p):
 			missing.append(p)
+	# 正对照：只断「没有缺失」的话，一个把所有槽位都清空的数组照样全绿
+	_check("这份名单里确实有活着的槽位（正对照）", live_slots == 13,
+			"活槽位 %d（应 13 = 14 槽 - 1 退役）" % live_slots)
 	_check("所有 STATION_GLB_CONFIG 指向的 GLB 都存在于 res://",
 			missing.is_empty(),
 			"缺: " + str(missing))
 
 	# 每个新 GLB 都能被 load() 且不报错
 	var load_err: Array[String] = []
+	var loadable := 0
 	for i in range(6, STATION_GLB_CONFIG.size()):
 		var p: String = str(STATION_GLB_CONFIG[i]["path"])
+		if p == "":
+			continue          # 退役槽位（槽位 2 在 6 之前，这循环本来也碰不到它，
+		                      # 但留着这一句，换个下标退役时也不会静默 load("")）
+		loadable += 1
 		var s = load(p)
 		if s == null:
 			load_err.append(p)
-	_check("新加的 7 个 GLB 都能 load 成 PackedScene",
+	_check("新加的 8 个 GLB 都能 load 成 PackedScene（正对照）", loadable == 8,
+			"只 load 了 %d 个" % loadable)
+	_check("新加的 8 个 GLB 都能 load 成 PackedScene",
 			load_err.is_empty(),
 			"load 失败: " + str(load_err))
 
@@ -228,6 +272,16 @@ func _run() -> void:
 	var pts: Array = _rd.get("points")
 
 	print("    路面半宽 %.1fm，广场盘 r=%.0fm" % [half_w, plaza_r])
+	# 正对照：`rot_y` 是这一节量"旋转后包围盒"的唯一入口，而它缺了不会报错、
+	# 只会让净空算成一个产品里不存在的数。先断"真的有几座是转过的"。
+	var rotated: Array[String] = []
+	for c in STATION_GLB_CONFIG:
+		if c.has("path") and str(c.get("path", "")) != "" \
+				and absf(float(c.get("rot_y", 0.0))) > 0.01:
+			rotated.append("%s %.0f°" % [str(c.get("path", "")).get_file(),
+				float(c.get("rot_y", 0.0))])
+	_check("配置表里至少 3 条带非零 rot_y（否则这一节量的是没转过的盒子）",
+		rotated.size() >= 3, "实测 %d 条: %s" % [rotated.size(), ", ".join(rotated)])
 	var on_road: Array[int] = []
 	var unreachable: Array[int] = []
 	var plaza_overlap: Array[int] = []
@@ -236,19 +290,45 @@ func _run() -> void:
 	for i in range(stations.size()):
 		var st = stations[i]
 		var mp: int = int(st.get("model_idx", -1))
-		var hb: Vector2 = Vector2.ZERO
+		var ctr_w: Vector3 = _rd.get_station_world_pos(i)
+		var ctr := Vector2(ctr_w.x, ctr_w.z)
+		var m_scale := 1.0
+		var m_rot := 0.0
+		var la := AABB()
 		if mp >= 0 and mp < STATION_GLB_CONFIG.size():
 			var cfg = STATION_GLB_CONFIG[mp]
-			hb = _half_extents(str(cfg.get("path", "")),
-					float(cfg.get("scale", 1.0)), float(cfg.get("rot_y", 0.0)))
-		var wp: Vector3 = _rd.get_station_world_pos(i)
-		var ctr := Vector2(wp.x, wp.z)
+			m_scale = float(cfg.get("scale", 1.0))
+			m_rot = deg_to_rad(float(cfg.get("rot_y", 0.0)))
+			la = _world_aabb(str(cfg.get("path", "")), 1.0, 0.0)
+		# 中心线到「模型自己那个盒子」的距离：沿中心线每 0.25m 取一个采样点，
+		# 把采样点**转回模型的本地坐标系**再算点到盒的精确距离。
+		#
+		# 这一节换过三把尺子，前两把都量错了对象而且**都没有红**，所以记在这里：
+		# ① 「旋转后的世界 AABB」的 4 个角 —— 角是盒子的角，不是模型的角。
+		#    琴台转 120° 时离路最近的那个角比模型最近处远 6.5m（5.82m 是假的）。
+		# ② 同上但量 8 个本地角点变换后的最小值 —— 这一把**又松了**：对盒子来说
+		#    远点的最近点通常落在面的内部而不是角上，把琴台 scale 翻到 20
+		#    （几何上早压到路面了）它照样报 9.67m 通过。
+		# ③ 精确的「点到旋转盒」——把采样点转回本地系，盒子自然就是轴对齐的，
+		#    用标准三段式公式即可。琴台实测 11.7m（= 18 − 10 × 0.63，
+		#    0.63 是它本地 z 轴那一侧的半跨，也就是台阶那一头；六棵树在另一头）。
 		var dmin := INF
-		for sx in [-1.0, 1.0]:
-			for sy in [-1.0, 1.0]:
-				var d := _seg_dist(ctr + Vector2(sx * hb.x, sy * hb.y), pts)
-				if d < dmin:
-					dmin = d
+		if la.size.x > 0.0:
+			var lc := Vector2(la.position.x + la.size.x * 0.5,
+					la.position.z + la.size.z * 0.5)
+			var lh := Vector2(la.size.x * 0.5, la.size.z * 0.5)
+			var unrot := Basis(Vector3.UP, -m_rot)
+			for j in range(pts.size() - 1):
+				var a: Vector3 = pts[j]
+				var b: Vector3 = pts[j + 1]
+				var seglen := Vector2(b.x - a.x, b.z - a.z).length()
+				var steps: int = maxi(2, int(ceil(seglen / 0.25)))
+				for k in range(steps + 1):
+					var t := float(k) / float(steps)
+					var p := Vector2(a.x, a.z).lerp(Vector2(b.x, b.z), t)
+					var lv := unrot * Vector3(p.x - ctr.x, 0.0, p.y - ctr.y)
+					dmin = minf(dmin, _point_box_dist(
+							Vector2(lv.x, lv.z) / m_scale, lc, lh) * m_scale)
 		var dctr := _seg_dist(ctr, pts)
 		if dmin < worst_dmin:
 			worst_dmin = dmin
@@ -360,19 +440,63 @@ func _audit_name_plates(stations: Array) -> void:
 			and not src.contains("label.pixel_size = 0.0"))
 
 
-## 实例化 GLB 后取世界空间 AABB（原点即模型中心，含 scale 与 rot_y）。
+## 实例化 GLB 后取**旋转后**的模型脚底角点（世界 XZ，含 scale 与 rot_y）。
+##
+## 这里量的是 8 个**变换过的**本地 AABB 角点，不是"变换完再取轴对齐盒"。
+## 差别有多大：琴台转 120°，本地半跨 0.777 → 旋转后半跨 1.02（×1.37），
+## 而旧写法量的 1.06 是把旋转后的形状又压回轴对齐得到的另一个盒子。
+## 两者都还包着模型，但只有前者是"模型实际占的那块地"——玩家看到的是琴台
+## 站在那儿，不是站在一个更大的方框里。
+##
+## 注意这**不是**把判据放松：门槛（离沥青外沿 1m 余量）与量法无关。
+## 而产品那份 keepout 走的是 `World3D._measure_station_aabb()`，
+## 那里用 `st.global_transform.affine_inverse()` **把站的旋转抵消掉了**，
+## 量到的是没转过的本地盒——那是另一件事（撞车半径），不在这一节里。
+## 旋转后那个盒子的中心平移到站心。`_world_aabb()` 量的是"模型原点即中心"的
+## 局部结果，脚底净空要的是它落在世界哪里，所以这里把站心加回去。
+func _world_aabb_at(path: String, scale: float, rot_y_deg: float,
+		ctr: Vector3) -> AABB:
+	var b := _world_aabb(path, scale, rot_y_deg)
+	if b.size.x <= 0.0:
+		return b
+	return AABB(b.position + ctr, b.size)
+
+
+## 点到轴对齐盒（XZ 平面）的精确距离。经典三段式：盒外取逐轴超出量的模，
+## 盒内取 0（点到盒的最近距离在内部恒为 0）。盒内那一支别省——自交点广场
+## 那一座站的中心线就在盘心，量不到它的话那一站会凭空多出一大截"净空"。
+func _point_box_dist(p: Vector2, c: Vector2, h: Vector2) -> float:
+	var q := Vector2(absf(p.x - c.x), absf(p.y - c.y)) - h
+	if q.x <= 0.0 and q.y <= 0.0:
+		return 0.0
+	return Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length()
+
+
+## 世界空间 AABB（原点即模型中心，含 scale 与 rot_y）。只给"量屋顶多高"用——
+## 绕 Y 转不改变 y，所以这里的顶面和旋转无关。
 func _world_aabb(path: String, scale: float, rot_y_deg: float) -> AABB:
+	var pts := _rot_corners(path, scale, rot_y_deg)
+	if pts.is_empty():
+		return AABB()
+	var minv := Vector3(INF, INF, INF)
+	var maxv := Vector3(-INF, -INF, -INF)
+	for w in pts:
+		minv = minv.min(w)
+		maxv = maxv.max(w)
+	return AABB(minv, maxv - minv)
+
+
+func _rot_corners(path: String, scale: float, rot_y_deg: float) -> Array:
 	var res = load(path)
 	if res == null or not (res is PackedScene):
-		return AABB()
+		return []
 	var sc2: Node = res.instantiate()
 	var sc3: Node3D = sc2 as Node3D
 	if sc3 != null:
 		sc3.scale = Vector3(scale, scale, scale)
 		sc3.rotation = Vector3(0.0, deg_to_rad(rot_y_deg), 0.0)
 	root.add_child(sc2)
-	var minv := Vector3(INF, INF, INF)
-	var maxv := Vector3(-INF, -INF, -INF)
+	var pts: Array = []
 	for n in sc2.find_children("*", "MeshInstance3D", true, false):
 		var mi: MeshInstance3D = n as MeshInstance3D
 		if mi == null or mi.mesh == null:
@@ -383,20 +507,10 @@ func _world_aabb(path: String, scale: float, rot_y_deg: float) -> AABB:
 				for sz in [0.0, 1.0]:
 					var c := a.position + Vector3(
 							a.size.x * sx, a.size.y * sy, a.size.z * sz)
-					var w: Vector3 = mi.global_transform * c
-					minv = minv.min(Vector3(w.x, w.y, w.z))
-					maxv = maxv.max(Vector3(w.x, w.y, w.z))
+					pts.append(mi.global_transform * c)
 	root.remove_child(sc2)
 	sc2.free()
-	if minv.x > maxv.x:
-		return AABB()
-	return AABB(minv, maxv - minv)
-
-
-## 世界空间 AABB 的 XZ 半宽。
-func _half_extents(path: String, scale: float, rot_y_deg: float) -> Vector2:
-	var b := _world_aabb(path, scale, rot_y_deg)
-	return Vector2(b.size.x * 0.5, b.size.z * 0.5)
+	return pts
 
 
 ## 到中心线折线的最近距离。

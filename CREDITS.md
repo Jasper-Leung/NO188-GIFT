@@ -268,20 +268,35 @@ express Statement of Purpose.
 
 ### 4.2 ⚠️ 待核实 · Tripo AI 生成模型
 
-以下 7 个模型及其 basecolor 贴图由 **Tripo AI** 生成
-（每个 GLB 内部 `asset.generator == "Tripo"`）：
+以下 **6** 个模型及其 basecolor 贴图由 **Tripo AI** 生成
+（每个 GLB 内部 `asset.generator == "Tripo"`），**全部是文生 3D**：
 
 `bush` · `tree` · `station_0`（traditional_chinese_pavilion）·
-`station_1`（wooden_tea_house）· `station_2`（图生 3D）·
-`station_3`（wooden_house）· `station_4`（glass_greenhouse）
+`station_1`（wooden_tea_house）· `station_3`（wooden_house）·
+`station_4`（glass_greenhouse）
 
 - 生成服务：Tripo AI — https://tripo3d.ai
 - 账号档位 / 生成日期：**待补**
 - 适用条款（通用服务条款 or 活动条款）：**待补**
-- 图生 3D 的参考图出处：**待核实**
 
-> `station_2` 是**上传参考图**后生成的，因此还要遵守**上传物本身**的条款。
-> 见 `PROVENANCE.md` §2.2。
+> 原本还有第 7 个 `station_2`——它是用**上传参考图**的方式生成的，
+> 因此还要遵守**上传物本身**的条款，而那张图的来源在生成物里查不到。
+> 2026-10-05 已用本工程自建的 `station_琴台.glb` 换掉并退役，
+> 见 `PROVENANCE.md` §2.2 与 §2.3b。
+
+### 4.3 驿站建筑（8 件）· 本工程自建
+
+`驿楼` · `茶寮` · `岭台` · `神苑` · `凉亭` · `廊` · `亭灯` · **`琴台`**
+
+全部由本仓库用 Blender 手工建模后导出 GLB，**无 UV、无贴图**，
+材质为程序化纯色。授权与本工程原创部分相同（见根目录 `LICENSE`）。
+
+`琴台` 是 2026-10-05 新建的，替代原 Tripo 的 `station_2`。
+它的造型取自 `docs/station_joy_prompts.md` §3.12 定的两条硬要求：
+**六棵细瘦的树围成半圈、中间留天光**，以及**琴和台面必须看得见**——
+古琴的**十三根弦一根不少**（几何上确实建了 13 根，但骑行那一档 18m 外
+那 13 根只占约 7px、间距 0.54px，**数不出来的**；量法见
+`docs/station_joy_prompts.md` §3.12 末尾「一条做不到的要求」）。
 
 ---
 

@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://clj4fxvsqlgri"
-path="res://.godot/imported/station_2.glb-f74176d37b29e954c50152f208f92629.scn"
+uid="uid://brambirkw28lo"
+path="res://.godot/imported/station_琴台.glb-1122611d377adcb2abc00142f8a449ac.scn"
 
 [deps]
 
-source_file="res://assets/models/station_2.glb"
-dest_files=["res://.godot/imported/station_2.glb-f74176d37b29e954c50152f208f92629.scn"]
+source_file="res://assets/models/station_琴台.glb"
+dest_files=["res://.godot/imported/station_琴台.glb-1122611d377adcb2abc00142f8a449ac.scn"]
 
 [params]
 
@@ -23,7 +23,7 @@ nodes/use_name_suffixes=true
 nodes/use_node_type_suffixes=true
 meshes/ensure_tangents=true
 meshes/generate_lods=true
-meshes/create_shadow_meshes=false
+meshes/create_shadow_meshes=true
 meshes/light_baking=1
 meshes/lightmap_texel_size=0.2
 meshes/force_disable_compression=false

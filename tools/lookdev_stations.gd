@@ -137,12 +137,32 @@ func _run() -> void:
 	print("=== 驿站布局定妆照（带窗口跑）===")
 	DirAccess.make_dir_recursive_absolute(SAVE_DIR)
 
-	# --script 模式仍会把 project.godot 里的 main_scene 挂上来，先摘干净。
+	# --script 模式仍会把 project.godot 里的 main_scene 挂上来（GiftBox），
+	# 铺满全屏，不处理的话每一张俯拍都盖着它。
+	#
+	# **这里 hide() 而不是 queue_free()，而这条是量出来的，不是读代码猜的**：
+	# 原来的 `c.queue_free()` 一跑到这行就**当场段错误**（signal 11），
+	# 崩点在 World3D 的 `PausePanel._ready()` → `_update_quality_button()`，
+	# 也就是**下一批新建文字的第一行字**被写进按钮的那一刻。改 hide() 就干净跑完。
+	#
+	# 三件事要说清，因为它们决定这条注释会不会变成误导：
+	# · **与本站替换无关**——用 `git worktree` 拉一份 HEAD 单跑过，同样的摘法照样崩，
+	#   所以这条工具此前是**跑不动的**（不是"最近才坏"，是"一直没跑过"）。
+	# · **不是产品的问题**：`tools/verify_panel_keyboard.gd` 带窗口起同一个 World3D 是绿的，
+	#   而游戏自己的换场走 `change_scene_to_packed()`、主场景在正常游玩里也是排完版才走的。
+	#   崩的是"主场景刚挂上、还没排过版，就在同一帧被销毁"这个只有本脚本才有的时序。
+	# · **为什么崩，一句话说不清**：换 `remove_child()` 再 `queue_free()` 一样崩，
+	#   所以"销毁与重建撞车"那套解释是不成立的，我不写。量到的只有前面那两句。
+	#
+	# 只 hide 不 free 是安全的：GiftBox 是 2D Control，不抢相机，而本脚本后面
+	# 会把 World3D 的 HUDLayer / HUD3D / FragmentBarLayer 一并 hide 掉，
+	# 定妆照要的正是"什么都没有"的那一屏。
 	for c in root.get_children():
 		if c == _gm or c == root.get_node("AudioManager") \
 				or c == root.get_node("Localization"):
 			continue
-		c.queue_free()
+		if c is CanvasItem:
+			(c as CanvasItem).hide()
 	await process_frame
 	await process_frame
 
