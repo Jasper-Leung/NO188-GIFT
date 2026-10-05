@@ -18,6 +18,11 @@ extends SceneTree
 ## 另外顺手钉住"行道树不许站在湖里"：树在 SIDE_OFFSET 11m，
 ## 碗沿在 BASIN_ROAD_CLEAR(16)，这条本来是余量，但余量只有 5m，
 ## 改任一个常数都可能吃掉它，而吃掉的症状是玩家看见一棵树从水面长出来。
+##
+## 第 8 节是**听得见**：环境音里那份"哪些站有水声"的名单。
+## 它和上面七条是同一个病的两头——上面量的是"地上有没有水"，
+## 它量的是"耳朵能不能收到"，而两边当时各自自洽：碗在 2/4/6，
+## 手抄的名单写着 `[3, 4]`。
 
 ## 运行时 `load()` 而不是 `preload`：preload 会把 road_data.gd 拉进**编译期**，
 ## 而它引用了 `Localization` autoload —— `--script` 模式下 analyzer 解析不了
@@ -258,6 +263,36 @@ func _run() -> void:
 	_ck("被挖的地面占全场不到 6%（水不是一片海）",
 			float(wet) / float(total) < 0.06,
 			"%.2f%%" % (100.0 * float(wet) / float(total)))
+
+	# ---- 8 听得见：环境音的水声挂在真正有水的那些站上 ----
+	#
+	# 这条守的是一个**已经发生过**的缺陷：`EnvironmentAudioManager` 里
+	# `const WATER_STATIONS = [3, 4]` 是手抄的，而碗在 2/4/6 —— 玩家在
+	# idx=3（右岭岭台，一滴水都没有）听得见水声，在**两处碗都在那儿**的
+	# 南溪茶寮与西湾神苑一路骑过去静悄悄。世界里没有第二个东西在报这件事。
+	#
+	# 期望值不抄下标，用**站名**挑出来的那三个（就是第 1 节用的那个 `want`）：
+	# 抄下标的话，产品把碗挪到别的站，这条会和被测代码漂到同一份副本上去。
+	var audio = load("res://scripts/EnvironmentAudioManager.gd")
+	var heard: Array = audio.water_stations()
+	var heard_sorted := heard.duplicate()
+	heard_sorted.sort()
+	_ck("有水的这三座站真的听得见水声（按下标对拍，不是抄一份表）",
+			heard_sorted == want_sorted,
+			"水声挂在 %s，站名挑出来的是 %s" % [str(heard_sorted), str(want_sorted)])
+	# 正对照：一个"什么都返回空"的实现，上面那条会跟着一起绿。
+	_ck("正对照：水声名单不是空的（真的挑出了三座）",
+			heard.size() == 3, "挑出 %d 座" % heard.size())
+	# 反向：碗真的挪走了，名单必须跟着挪。
+	# 断的是"这份名单是从 BASIN_SHAPES 现算的"，而那份表就是产品的唯一出处——
+	# 抄一份的话两条一起绿，而抄出来的那份恰好是这一族最容易漂的形状。
+	var basin_stations: Array = []
+	for bs in _water_data_script.BASIN_SHAPES:
+		basin_stations.append(int(bs["station"]))
+	basin_stations.sort()
+	_ck("水声名单是从 water_data.BASIN_SHAPES 现算的（不是第二份手抄）",
+			heard_sorted == basin_stations,
+			"算出来的 %s，碗在 %s" % [str(heard_sorted), str(basin_stations)])
 
 	_finish()
 

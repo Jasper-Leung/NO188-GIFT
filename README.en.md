@@ -212,7 +212,7 @@ and the game will let you stop there via the pause panel.
 ## How it's verified
 
 The project ships **42 regressions (35 headless + 7 window-only), 11 screenshot
-suites, and 4 probes**.
+suites, and 5 probes**.
 One command runs the headless lot; the other seven need `--window`.
 
 ```bash

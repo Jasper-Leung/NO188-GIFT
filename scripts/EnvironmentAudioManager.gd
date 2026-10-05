@@ -3,7 +3,14 @@ extends Node3D
 ##
 ## 每驿站 3 个 AudioStreamPlayer3D（wind/birds/water）常驻播放，
 ## 靠 Godot 内置 3D 距离衰减做淡入淡出（max_distance=120，30m 内可听）。
-## 水景只在水边的两个碎片驿站（idx=3 竹雨庭 / idx=4 禽语湖湾）播放。
+## 水景**只在真的有水的驿站**播放，而"哪些站有水"的唯一出处是
+## `water_data.BASIN_SHAPES`——这里曾经手抄过一份 `[3, 4]`，两份各说各话：
+## 玩家在 idx=3（右岭岭台，那儿**一滴水都没有**）听得见水声，而在 idx=2
+## 南溪茶寮与 idx=6 西湾神苑——**两处碗都在那儿**——一路骑过去静悄悄。
+## 注释同样写着假话（"idx=3 竹雨庭"：3 是右岭岭台，竹雨庭是 14）。
+## 可推广的一条：**「哪些东西带 X」这种名单，抄一份就会漂**，而漂了之后
+## 两侧各自自洽、没有一处会报错——回归里现在按 `water_stations()` 实测，
+## 不看任何副本。
 ## 客家山歌每驿站触发一次：dist<30 且未打卡且未播过 → 播一次即标记。
 ## _on_all_collected 时 stop_all 淡出，避免与 synthesis SFX 冲突。
 
@@ -17,7 +24,8 @@ var _song_played_once: Array = []
 var _check_timer: float = 0.0
 var _stopped = false
 
-const WATER_STATIONS: Array = [3, 4]
+const WaterDataRef = preload("res://scripts/water_data.gd")
+
 const AMBIENT_MAX_DIST: float = 120.0
 const SONG_MAX_DIST: float = 50.0
 const SONG_TRIGGER_DIST: float = 30.0
@@ -25,13 +33,24 @@ const AMBIENT_VOL: float = -6.0
 const SONG_VOL: float = -4.0
 
 
+## 有水的驿站下标，现算自 `water_data.BASIN_SHAPES`。
+## **不要**再手抄一份：那正是本文件原来那句 `const WATER_STATIONS = [3, 4]`
+## 犯的错，而它错得两侧各自自洽——`verify_water.gd` 第 7 节现在按本函数实测。
+static func water_stations() -> Array:
+	var out: Array = []
+	for shape in WaterDataRef.BASIN_SHAPES:
+		out.append(int(shape["station"]))
+	return out
+
+
 func setup(stations: Array) -> void:
 	_stations = stations
+	var wet := water_stations()
 	for i in range(stations.size()):
 		var pos = stations[i]
 		_wind_players.append(_make_player(pos, "wind", AMBIENT_MAX_DIST, AMBIENT_VOL))
 		_bird_players.append(_make_player(pos + Vector3(0, 5, 0), "birds", AMBIENT_MAX_DIST, AMBIENT_VOL))
-		if WATER_STATIONS.has(i):
+		if wet.has(i):
 			_water_players.append(_make_player(pos, "water", AMBIENT_MAX_DIST, AMBIENT_VOL))
 		else:
 			_water_players.append(null)
