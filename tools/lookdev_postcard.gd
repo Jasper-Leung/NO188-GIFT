@@ -427,10 +427,21 @@ func _check_no_bird_in_header() -> void:
 ## 几何全绿而屏上五个空框是没有谁能拦住的。这里量像素。
 ##
 ## 判据是**每一格里都有一片那片颜色**，不是"五格颜色两两不同"：
-## `FragmentIcon` 画的是 1~2px 的细线，五件摊在 56×56 上各占几十个像素，
+## `FragmentIcon` 画的是 1~2px 的细线，五件摊在 64×64 上各占几十到上百像素，
 ## 所以按「取到几个接近本件颜色的像素」断，门槛取 8（实测 60~200），
 ## 既拦得住"一个都没画"，又留得住 AGX 之后色偏的余量。
 ## 而「五格真的并排排开」交给几何断言——这里量的只是**画没画**。
+##
+## 「墨有没有压到名字那一行」**不能按颜色数**——`EndCard.gd:308` 把那个名字
+## Label 自己就填成了 `FRAGMENT_COLS[i]`，所以「名字行里有本件颜色的像素」
+## 恒成立（实测 27~38 个，就是那两个字自己的笔画），而它量不到图标一根线。
+## 旧布局下这条又恰好是**恒绿的**：那时框是 48×92 的竖长条而 `NAME_DY` 是 68，
+## 名字行的顶沿落在图标框**之内**，`_name_rect_under` 的 `r.position.y <=
+## ir.end.y - 1.0` 那一跳直接跳过它 → 取样框是空的 → 数出来 0 → 通过。
+## **恒绿长得和"产品对了"一模一样。**
+## 所以改成**差分**：藏掉五个图标再拍一张，两张相减——
+## 变了的像素才是图标落的墨。这一路的正对照是同一张差分图在**图标框自己**
+## 那一块必须**大于 0**，否则"到处都等于 0"只是尺子没通电。
 func _check_choice_joys_pixels(card: Control) -> void:
 	var img: Image = root.get_texture().get_image()
 	var cols: Array = load("res://scripts/Postcard.gd").FRAGMENT_COLS
@@ -447,8 +458,8 @@ func _check_choice_joys_pixels(card: Control) -> void:
 	if icons.size() != 5:
 		return
 	var per: Array = []
-	var on_name: Array = []
 	var lift: Array = []
+	var name_rects: Array = []
 	for i in icons.size():
 		var r: Rect2 = icons[i].get_global_rect()
 		var want: Color = cols[i]
@@ -477,29 +488,74 @@ func _check_choice_joys_pixels(card: Control) -> void:
 					hi += 1
 		per.append(n)
 		lift.append(hi)
-		# 同一个颜色有没有跑到**名字那一行**上去。这一条量的是玩家看得见的
-		# 那一件事：五件的设计范围并不是 ±16（竹到 y −24..+20、禽到 x +21），
-		# 而 `FragmentIcon` 按 `size.x` 缩放、以控件中心为原点——框开成方形
-		# 就一定装不下。第一版 56×56 装不下，竹的梢压着「竹」那个字，
-		# 而**几何断言当时全绿**（控件不叠，都在屏内）。墨有没有落进名字行
-		# 只有像素能量得到，所以判据就落在像素上。
-		var nm_r: Rect2 = _name_rect_under(ed, icons[i])
-		var m := 0
-		if nm_r.size.x > 0.0:
-			for dy in range(0, int(nm_r.size.y)):
-				for dx in range(0, int(nm_r.size.x)):
-					var c3: Color = img.get_pixel(int(nm_r.position.x) + dx,
-							int(nm_r.position.y) + dy)
-					if absf(c3.r - want.r) < 0.22 and absf(c3.g - want.g) < 0.22 \
-							and absf(c3.b - want.b) < 0.22:
-						m += 1
-		on_name.append(m)
+		name_rects.append(_name_rect_under(ed, icons[i]))
 	_ck("五个图标都真的画出了自己的颜色（每件 ≥8 像素）",
 			per.min() >= 8, "实际 %s" % str(per))
-	_ck("没有一件的笔画压到自己名字那一行（0 像素）",
-			on_name.max() == 0, "实际 %s" % str(on_name))
 	_ck("禽那一只的翅是**留白**（格子里有 ≥60 个明显更亮的像素）",
 			lift[4] >= 60, "五件实测 %s" % str(lift))
+
+	await _check_icon_ink_stops(icons, name_rects)
+
+	_ck("五个名字 Label 都真的定位到了（量法的前提）",
+			name_rects.all(func(r: Rect2) -> bool: return r.size.x > 0.0))
+
+
+## 「图标落的墨有没有跑到名字那一行」——**差分量**，不按颜色数。
+##
+## 按颜色数是量不到的：`EndCard.gd` 把那个名字 Label **自己就填成了
+## `FRAGMENT_COLS[i]`**（它在屏上就该是那个颜色），于是"名字行里有本件颜色的
+## 像素"恒成立——旧判据实测 27~38 个，那就是「云」「茶」那两个字自己的笔画，
+## 而它一根图标墨都没量到。而它在旧布局下又恰好是**恒绿**的：那时框是 48×92 的
+## 竖长条、`NAME_DY` 是 68，名字行的顶沿落在图标框**之内**，
+## `_name_rect_under` 的 `r.position.y <= ir.end.y - 1.0` 那一跳直接跳过它，
+## 取样框是空的 → 数出来 0 → 通过。**空取样框的 0 和"没溢出"的 0 长得一样。**
+##
+## 所以拍两张相减：藏掉五个图标再拍一次，**变了**的像素才是图标落的墨。
+## 正对照是同一张差分图在**图标框自己**那一块必须 > 0——否则"到处都等于 0"
+## 只是尺子没通电（藏 `visible` 之后忘了等两帧、或者根本没藏掉，都会是 0）。
+func _check_icon_ink_stops(icons: Array, name_rects: Array) -> void:
+	var with_icons: Image = root.get_texture().get_image()
+	for c in icons:
+		c.visible = false
+	await process_frame
+	await process_frame
+	var without: Image = root.get_texture().get_image()
+	for c in icons:
+		c.visible = true
+	await process_frame
+
+	# 差一格就算：图标是 1~2px 的细线，而拿样框要跟着控件的实际位置走。
+	var diff := 0.08
+	var on_name: Array = []
+	for i in icons.size():
+		on_name.append(_count_diff(with_icons, without, name_rects[i], diff))
+	_ck("图标落的墨一个像素都没落到名字那一行（差分计数 0）",
+			on_name.max() == 0, "五件实测 %s" % str(on_name))
+
+	var on_self: Array = []
+	for i in icons.size():
+		on_self.append(_count_diff(with_icons, without,
+				icons[i].get_global_rect(), diff))
+	# 正对照：同一把尺子在图标框自己那一块必须量得到东西（细线实测几十~几百）。
+	# 没有它，"到处都等于 0"和"尺子没通电"在输出上完全一样。
+	_ck("正对照：同一张差分图在图标框里量得到墨（每件 ≥5）",
+			on_self.min() >= 5, "五件实测 %s" % str(on_self))
+
+
+func _count_diff(a: Image, b: Image, r: Rect2, thr: float) -> int:
+	if r.size.x < 1.0 or r.size.y < 1.0:
+		return -1
+	var n := 0
+	for y in range(maxi(0, int(r.position.y)), mini(a.get_height() - 1,
+			int(r.position.y) + int(r.size.y) - 1)):
+		for x in range(maxi(0, int(r.position.x)), mini(a.get_width() - 1,
+				int(r.position.x) + int(r.size.x) - 1)):
+			var p := a.get_pixel(x, y)
+			var q := b.get_pixel(x, y)
+			if absf(p.r - q.r) > thr or absf(p.g - q.g) > thr \
+					or absf(p.b - q.b) > thr or absf(p.a - q.a) > thr:
+				n += 1
+	return n
 
 
 ## 找出紧贴在某个图标框下面、横向对得上的那个名字 Label 的屏上矩形。

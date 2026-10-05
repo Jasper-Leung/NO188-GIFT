@@ -1,7 +1,9 @@
 extends Control
 ## FragmentIcon — 单碎片放大图 (F-15)
-## 用法：new() 后设 fragment_idx / color / alpha，size 决定绘制基准，
-## _draw 内部用 draw_set_transform 把 32px 设计坐标缩放到实际尺寸。
+## 用法：new() 后设 fragment_idx / color / alpha，size 决定绘制基准。
+## `_draw` 按 `extent(fragment_idx)`——这一件**实际占的那块矩形**——在两个方向
+## 各算一次缩放比取小的那个，所以**框可以开成任何比例**；按控件中心对原点
+## 是不行的，五件没有一件是中心对称的（竹偏下、禽偏右）。
 ## 复用 FragmentBar 的小图标形态，但支持任意大小。
 
 var fragment_idx: int = 0
@@ -9,11 +11,116 @@ var color: Color = Color.WHITE
 var alpha: float = 1.0
 
 
+## 五件各自的**实际占位**（设计坐标，已乘 `paint_*` 的那个 sc 与半个线宽）。
+##
+## 这张表**不是事实来源**——`extent()` 才是，而它是从**画笔真正摆的那些点**
+## 上并出来的（`cloud_outline` / `gaiwan_parts` / `guqin_parts` / `bamboo_parts`
+## / `bird_parts` 五条都是不碰画笔的纯函数）。这张表只当**对拍**：回归拿它
+## 逐值比 `extent()`，改一次形状而忘了改表，那条断言会红——而如果反过来
+## （拿表当出处、几何从表里长出来），那张表就会安静地变成第二个事实来源
+## （CLAUDE.md 里记过三次的同一条）。
+##
+## 量它这件事本身有教训：云那条轮廓本身**宽 98**（`sc = 0.40` 才缩回 ±19.6）、
+## 禽的喙伸到 x +20、竹的叶梢在 y −15，**五件没有一件是 ±16**。旧版把缩放比
+## 写成 `size.x / 32.0` 并按控件中心对原点，于是框开成任何比例都必然有一侧
+## 溢出——正方形等于一分余量都没给。实测 56×56 那一版：云 左右各溢出 7.00px、琴 2.79、禽 1.14、茶 顶上 1.05，**竹根本不溢出**——溢出是**横向**的，云那一条最宽（设计坐标 40.0 宽，scale 1.75 → 70px 塞进 56px 的框）。
+## `EndCard` 后来拿一个 48×92 的竖长条绕开了，绕的是**摆框**那一处，
+## 可"缩放比只由宽决定"这条病还在（180×180 那一档禽的喙到 x≈202）。
+const EXTENT := {
+	0: Rect2(-20.0, -6.8, 40.0, 13.6),     # 云：轮廓 ×0.40
+	1: Rect2(-14.11, -17.84, 28.22, 33.2), # 茶：盖碗 ×0.83（盖钮最高）
+	2: Rect2(-17.25, -8.76, 35.19, 22.19),  # 琴：琴身+琴轸 ×0.85
+	3: Rect2(-13.7, -13.78, 27.41, 30.01), # 竹：竹身+叶 ×0.82
+	4: Rect2(-14.4, -14.4, 33.3, 28.8),    # 禽：剪影 ×0.9（喙伸到右）
+}
+
+
+## 这件东西在设计坐标里**实际占的那块矩形**（不碰画笔的纯函数）。
+##
+## 回归钉的是它而不是 `EXTENT` 那张表：表是手抄的，而这里是从画笔
+## 真正摆出来的点上并出来的——改一次形状而忘了改表，那张表会安静地
+## 变成第二个事实来源（CLAUDE.md 里记过三次的同一条）。
+static func extent(idx: int) -> Rect2:
+	match idx:
+		0: return _grow(_rect_of_poly(cloud_outline(96)), 2.0, 0.40)
+		1: return _grow(_rect_of_parts(gaiwan_parts()), 2.0, 0.83)
+		2: return _grow(_rect_of_parts(guqin_parts()), 2.6, 0.85)
+		3: return _grow(_rect_of_parts(bamboo_parts()), 1.6, 0.82)
+		4: return _grow(_rect_of_parts(bird_parts()), 2.0, 0.90)
+	return Rect2(-16.0, -16.0, 32.0, 32.0)
+
+
+static func _grow(r: Rect2, stroke_w: float, sc: float) -> Rect2:
+	# `r` 是**未乘 sc 的设计坐标**，而画笔在 `c + Vector2(p) * sc` 上落墨，
+	# 所以**占位矩形的本体也要乘 sc**——只把线宽乘上去的话量到的是
+	# 半个身子（云那条轮廓本身宽 98，漏了这一乘就成 ±49 而不是 ±19.6）。
+	# 线宽的一半也要算进去：`draw_line` 的笔画从中心线往两边各铺半个线宽，
+	# 而"占位"问的是墨落在哪儿，不是中心线落在哪儿。
+	var rs := Rect2(r.position * sc, r.size * sc)
+	var g := stroke_w * 0.5 * sc
+	return rs.grow_individual(g, g, g, g)
+
+
+static func _rect_of_poly(p: PackedVector2Array) -> Rect2:
+	if p.is_empty():
+		return Rect2()
+	var r := Rect2(p[0], Vector2.ZERO)
+	for i in range(1, p.size()):
+		r = r.expand(p[i])
+	return r
+
+
+static func _rect_of_parts(parts: Array) -> Rect2:
+	var acc := Rect2()
+	var first := true
+	for part in parts:
+		var k := String(part["k"])
+		var got := Rect2()
+		if k == "poly":
+			got = _rect_of_poly(part["p"])
+		elif k == "line":
+			got = _rect_of_poly(PackedVector2Array([part["a"], part["b"]]))
+		elif k == "circle":
+			var c: Vector2 = part["ctr"]
+			var rad := float(part["r"])
+			got = Rect2(c - Vector2(rad, rad), Vector2(rad, rad) * 2.0)
+		elif k == "ellipse":
+			var ec: Vector2 = part["ctr"]
+			var er := Vector2(float(part["rx"]), float(part["ry"]))
+			got = Rect2(ec - er, er * 2.0)
+		else:
+			continue
+		if first:
+			acc = got
+			first = false
+		else:
+			acc = acc.merge(got)
+	return acc
+
+
+## 这一件在 `box` 那个尺寸里**实际会画到的那块矩形**（控件局部坐标）。
+##
+## 回归调的是这个函数而不是把算式抄一遍——抄一遍就等于给了它一个能自己漂的
+## 机会，而"`_draw` 的几何对而画笔没去调它"本来就是这一族量不到的东西
+## （回归另有两条读源码文本的钉子，见 `verify_postcard_ending.gd` 第 4 节）。
+static func drawn_rect(idx: int, box: Vector2) -> Rect2:
+	var ext: Rect2 = extent(idx)
+	var s: float = minf(box.x / ext.size.x, box.y / ext.size.y)
+	var org: Vector2 = box * 0.5 - (ext.position + ext.size * 0.5) * s
+	return Rect2(org + ext.position * s, ext.size * s)
+
+
 func _draw() -> void:
-	if size.x < 1.0:
+	if size.x < 1.0 or size.y < 1.0:
 		return
-	var s = size.x / 32.0
-	draw_set_transform(size / 2.0, 0.0, Vector2(s, s))
+	# **两个方向各自算，取小的那个**——不是按宽，也不是按 32 的定数。
+	# 按宽算的话高瘦的框会把上下溢出，按 32 算的话五件没有一件装得下
+	# （见 `EXTENT` 那段注释）。中心也取**占位矩形的中心**而不是控件中心：
+	# 竹偏下、禽偏右 2.25，按控件中心摆它们整体偏一边。
+	var ext: Rect2 = extent(fragment_idx)
+	var s: float = minf(size.x / ext.size.x, size.y / ext.size.y)
+	draw_set_transform(size / 2.0 - (ext.position + ext.size * 0.5) * s,
+			0.0, Vector2(s, s))
 	var col = Color(color.r, color.g, color.b, alpha)
 	match fragment_idx:
 		0: paint_cloud(self, Vector2.ZERO, col, alpha, 0.40)

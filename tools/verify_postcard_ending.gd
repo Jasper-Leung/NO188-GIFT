@@ -1615,6 +1615,158 @@ func _audit_choice_joys(card: Control, ed: Control, keep_card: Control) -> void:
 	_ck("五个名字不叠", not row_overlap)
 	_ck("五件那一排在卡片下沿之下",
 			names[0].get_rect().position.y > keep_card.get_rect().end.y)
+	_audit_icon_fit(icons)
+
+
+## 图标**装不装得进它的框**——这一族量的是"墨落在哪儿"，而旧版量不到的原因是
+## 它把缩放比写成 `size.x / 32.0` 并按控件中心对原点：五件的设计范围没有
+## 一件落在 ±16 那个方框里（实算 云 40.0×13.6 / 茶 28.22×33.2 / 琴 35.19×22.19 /
+## 竹 27.41×30.01 / 禽 33.3×28.8；云那条轮廓**未乘 sc 时本身宽 98**），
+## 于是**框开成任何比例都必然有一侧溢出**。实测 56×56 那一版：云左右各溢出
+## **7.00px**、琴 2.79、禽 1.14、茶 顶上 1.05，而**竹根本不溢出**——溢出是
+## **横向**的，云那一条最宽。**而"墨出框了"根本不是几何量**，所以下面这十几条
+## 补的是几何那一侧；像素那一侧在 `lookdev_postcard.gd` 的 `10_终局二选一`，
+## 而它量的是**差分**（藏掉图标拍两张相减），不是"数同色像素"——那个名字
+## Label 自己就填着 `FRAGMENT_COLS[i]`，按颜色数恒成立。
+func _audit_icon_fit(icons: Array) -> void:
+	print("\n---------- 4b. 五件图标装不装得进它的框 ----------")
+	var names5 := ["云", "茶", "琴", "竹", "禽"]
+	# `EXTENT` 那张表是**手抄的**，而 `extent()` 才是从画笔真正摆的那些点上
+	# 并出来的。拿表当出处的话它会安静地变成第二个事实来源（CLAUDE.md 记过
+	# 三次的同一条），所以这里只当**对拍**：改了形状忘了改表，那条会红。
+	var drift_bad := ""
+	var worst := 0.0
+	for i in 5:
+		var e: Rect2 = FragmentIconScript.extent(i)
+		var t: Rect2 = FragmentIconScript.EXTENT[i]
+		var d: float = maxf(maxf(absf(e.position.x - t.position.x),
+				absf(e.position.y - t.position.y)),
+				maxf(absf(e.size.x - t.size.x), absf(e.size.y - t.size.y)))
+		worst = maxf(worst, d)
+		if d > 0.02:      # 表按两位小数手抄，容差就是那半位
+			drift_bad += " %s差%.3f" % [names5[i], d]
+	_ck("五件各自的占位矩形量得出来（不是退化的一条线）", worst > 0.0, "worst=%f" % worst)
+	_ck("占位矩形 == EXTENT 那张手抄的表", drift_bad == "",
+			"对不上的:" + drift_bad)
+
+	# 框的比例：EndCard 现在摆的是**正方形**，而这一条要量的是"任何比例都装得下"
+	# ——正方形装得下不代表 48×92 那条竖长条也装得下，反过来也一样。
+	var boxes := [[64.0, 64.0], [56.0, 56.0], [48.0, 92.0], [92.0, 48.0], [22.0, 22.0]]
+	var out_bad := ""
+	var fills := ""
+	# `Rect2.encloses()` 是**逐分量精确比**的，而缩放比是 `minf()` 挑出来的
+	# 那一个方向，浮点残差会让正好贴边的那条边落到 −0.000002 上——第一版就是
+	# 在这里红的，报出来是"禽和琴在三档框下都溢出"，而画面上它们好好地在那儿。
+	# **量具比被测物更严的时候，红的是尺子。**
+	# 容差只能加在**远侧**那两条边上：贴边本来就该算装下（缩放比正是按贴边
+	# 算出来的），而近侧那条边正好是 0。两处都收进去的话（第一版的
+	# `Rect2.grow(-EPS)`，那个还是**绕中心**缩放的）满框那一种会全红。
+	var EPS := 0.01
+	var slack := Vector2(EPS, EPS)
+	for bx in boxes:
+		var box := Vector2(bx[0], bx[1])
+		for i in 5:
+			var dr: Rect2 = FragmentIconScript.drawn_rect(i, box)
+			var lim := Rect2(-slack, box + slack)
+			if not lim.encloses(dr):
+				out_bad += " %s@%.0fx%.0f→%s" % [names5[i], box.x, box.y, str(dr)]
+			# 「装得下」在**画得极小**的时候是恒真的，所以同时钉住它真的占满了
+			# 至少一条边——一个把缩放比除以 1000 的实现照样"装得下"。
+			if i == 0 or dr.size.x >= box.x - 0.5 or dr.size.y >= box.y - 0.5:
+				fills += "%s %.1fx%.1f " % [names5[i], dr.size.x, dr.size.y]
+	_ck("五件在五种框的比例下都整个落在框内", out_bad == "", "越界的:" + out_bad)
+	_ck("正对照：装下不是靠画得极小（每件至少占满一条边）",
+			fills.split(" ").size() >= 5, fills)
+
+	# **正对照，也是这整节存在的理由**：旧的那条规则把缩放比写成 `size.x / 32.0`
+	# 并按**控件中心**对原点，也就是默认五件都落在原点周围那个 ±16 的方框里。
+	# 量"有没有一件真的落在外面"——这正是旧规则必然溢出的那个前提，而少了它，
+	# 上面那几条"装得下"可以是恒真的（把图标缩到 1% 它照样装得下）。
+	var old_bad := ""
+	for i in 5:
+		var e2: Rect2 = FragmentIconScript.extent(i)
+		if e2.position.x < -16.0 or e2.position.y < -16.0 \
+				or e2.end.x > 16.0 or e2.end.y > 16.0:
+			old_bad += " %s x[%.1f..%.1f] y[%.1f..%.1f]" % [names5[i],
+				e2.position.x, e2.end.x, e2.position.y, e2.end.y]
+	_ck("正对照：五件全都落在 ±16 那个方框之外——旧规则必然溢出",
+			old_bad.count("x[") == 5, "落在框内的:" + (old_bad if old_bad == "" else "（无）"))
+
+	# 真实控件：EndCard 摆出来的那五个。**量它们自己的 rect**，不拿
+	# `ICON_W`/`ICON_H` 手算——HBox 那条链上算一遍就等于自己测自己。
+	var live_bad := ""
+	var dy_bad := ""
+	for c in icons:
+		var i2: int = int(c.get("fragment_idx"))
+		if c.size.x < 1.0 or c.size.y < 1.0:
+			live_bad += " 第%d格尺寸退化 %s" % [i2 + 1, str(c.size)]
+			continue
+		# 名字那一行在框底之下：图标整个落在框内之后，"墨会不会压到字"由
+		# 「名字行盒的上沿 ≥ 框底」这条**几何**说了算，不必再逐件量可见下沿
+		# （原来量的是竹的 `46 + 20×1.5`，而那个 1.5 是缩放比、随框宽漂）。
+		var nm: Control = null
+		for k in c.get_parent().get_children():
+			if k is Label and k.text == _loc.t("fragment_%d" % i2):
+				nm = k
+		if nm == null:
+			dy_bad += " 找不到第%d件的名字" % (i2 + 1)
+		elif nm.get_rect().position.y < c.get_rect().end.y - 0.5:
+			dy_bad += " %s 的名字压在图标框里" % names5[i2]
+	_ck("正对照：五个控件都真的排过版（有真尺寸）", live_bad == "", live_bad)
+	_ck("名字那一行整个在图标框之下（不再靠'某一件恰好探出多少'）",
+			dy_bad == "", dy_bad)
+
+	# **读源码文本**：上面量的是 `extent()` / `drawn_rect()` 这两个纯函数，
+	# 而量不到画笔有没有真的去调它们——`--headless` 根本不调 `_draw()`，
+	# 所以把 `_draw()` 里那一句换成写死的常数，几何断言照样全绿而画面重新溢出
+	# （和 `edge_line_color`、`_draw_map_caption` 那几条同族）。
+	# 先剔注释再限函数体：判据自己的注释越详细，它越容易替自己挡枪。
+	var fi_body := _func_body(_strip_comments(
+			FileAccess.get_file_as_string("res://scripts/FragmentIcon.gd")), "_draw")
+	_ck("画笔真的用了两个方向取小的那个缩放比",
+			fi_body.contains("minf(size.x / ext.size.x, size.y / ext.size.y)"),
+			"`_draw()` 的函数体里没有那句 minf——几何对而画笔没去调它")
+	_ck("正对照：那一句不是从注释里读到的（剔过注释了）",
+			fi_body.length() > 40 and not fi_body.contains("两个方向各自算"))
+
+
+## 剔掉 `#` 注释（认引号，免得字符串里的 # 把后半行吃掉）。
+func _strip_comments(src: String) -> String:
+	var out := ""
+	for line in src.split("\n"):
+		var q := ""
+		var cut := -1
+		for i in line.length():
+			var ch := line[i]
+			if q != "":
+				if ch == q:
+					q = ""
+			elif ch == "\"" or ch == "'":
+				q = ch
+			elif ch == "#":
+				cut = i
+				break
+		out += (line if cut < 0 else line.substr(0, cut)) + "\n"
+	return out
+
+
+## 从 `func <fn>(` 那行切到下一个顶格的 `func ` / `static func `。
+func _func_body(src: String, fn: String) -> String:
+	var lines := src.split("\n")
+	var from := -1
+	for i in lines.size():
+		if (lines[i].begins_with("func %s(" % fn)
+				or lines[i].begins_with("static func %s(" % fn)):
+			from = i
+			break
+	if from < 0:
+		return ""
+	var to := lines.size()
+	for i in range(from + 1, lines.size()):
+		if lines[i].begins_with("func ") or lines[i].begins_with("static func "):
+			to = i
+			break
+	return "\n".join(lines.slice(from, to))
 
 func _audit_ending_restored() -> void:
 	print("\n---------- 5. 存档恢复已选结局 ----------")
