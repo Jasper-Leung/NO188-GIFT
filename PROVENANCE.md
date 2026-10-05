@@ -110,20 +110,48 @@ CC0 是真的——`10489_bicycle` 这个 `<数字>_<名字>` 前缀只是**从�
 | 许可 | **SIL Open Font License 1.1**（字体文件 `name` 表 ID 13 自己写着） |
 | 核实 | ✅ 条款明确 |
 
-**要做的**：把 OFL 1.1 全文与上面两行版权放进 `CREDITS.md`，并在游戏内可见。
+**要做的**：把 OFL 1.1 全文与上面两行版权放进 `CREDITS.md`，并在游戏内可见。（已完成）
 
-**⚠️ 顺带查出一处将来会踩的雷**：当前仓库里是**未经修改的上游全量字体**
-（25.5 MB，与上游同尺寸）。而 `tools/subset_font.py` 的用法是
-「**原地覆盖** `assets/fonts/LXGWWenKai-Regular.ttf`」——
-OFL §3 明确要求：**修改过的版本不得使用保留字体名（Reserved Font Name）**，
-而脚本原样保留文件名与 `name` 表，所以**它产出的任何子集都是违规分发**。
-Web 导出确实需要子集（25 MB 会打进 PCK 首屏），所以这不是可以不做的事。
+### 2.3b ✅ 已装护栏 · 子集化（**当前不做子集**）
 
-**修法**：`subset_font.py` 的 `subprocess` 调用加上
-`--name-IDs='*' --name-legacy --notdef-outline` 之外，还必须
-`--drop-tables+=DSIG` 并**改写 name 表 ID 3/4/6 为非保留名**（例如
-`188 Gift Subset`），或者干脆把子集写成另一个文件名并保留全量字体作为来源。
-**这是 Part 7（设置/打包）里 Web 导出正式启用前必须解决的一条。**
+**现状（2026-10-05）**：字体**不子集化**，25.5 MB 全量随包。发行计划里
+**字体要整个换掉**，所以子集这件事要等换完字体、新字体的条款确定之后再做。
+
+**为什么原来记着一条 ⚠️**：旧版 `tools/subset_font.py` 是**原地覆盖**
+`assets/fonts/LXGWWenKai-Regular.ttf` 的，而 SIL OFL 1.1 §3 写的是
+「No Modified Version may use the Reserved Font Name(s)」。裁剪就是
+Modified Version，而脚本原样保留了文件名与 `name` 表 ID 3/4/6 ——
+于是**它产出的任何子集都是一个自称「LXGW WenKai」的修改版**。§3 违规不可逆：
+文件发出去之后再改名，违规已经发生了。
+
+**已经改成三道**（`tools/subset_font.py`，2026-10-05）：
+
+| | 旧版 | 现在 |
+| :--- | :--- | :-- |
+| 输出 | `os.replace` 盖回**源字体** | 另存 `assets/fonts/LXGWWenKai-Subset.ttf`，**源字体一个字节都不动** |
+| name 表 3/4/6 | 原样保留 | 改写成 `188 Gift Subset`（非保留名）；§3 只约束 ID 4，但 macOS/Windows 字体菜单认的是 ID 3 和 6，所以三个一起改 |
+| DSIG | 留着（裁剪后必然失效） | `drop_tables += ["DSIG"]` |
+| 原地覆盖 | 无门槛 | 要 `--in-place` **加** `--ofl-reserved-name-cleared` 两个键才肯跑 |
+
+**⚠️ 护栏装的是"停下来问"，不是"我替你判断"** —— 因为
+**「有没有保留字体名」这件事从二进制里读不出来**：保留字体名是在版权声明
+之后声明的名字（§1），而本字体 `name` 表 ID 0 的版权行里**没有**这一句：
+
+```
+Copyright 2021-2026 LXGW (https://github.com/lxgw/LxgwWenKai)
+Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee)
+```
+
+没有声明就等于本字体自己没保留任何名字，§3 对它不成立。但字形派生自 Klee，
+而 **Klee 的 OFL 头里通常带 `with Reserved Font Name 'Klee'`** ——
+**这一句在 `LICENSE` 文件里，不在 TTF 里**，所以任何脚本都量不出来。
+**真要发子集之前，先去 `github.com/fontworks-fonts/klee` 把 LICENSE 那几行读出来。**
+
+**实测**（2026-10-05 跑一遍，产物已删，源字体 25,575,676 B 未变）：
+2193 字符 → **24.39 MB → 0.89 MB**，`name` 3/4/6 确认为
+`188 Gift Subset` / `188 Gift Subset` / `188GiftSubset`，`DSIG` 已不在表里，
+`name` ID 0 的版权行**原样保留**（OFL §2 要求）。
+
 
 ---
 
