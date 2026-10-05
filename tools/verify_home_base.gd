@@ -25,6 +25,9 @@ extends SceneTree
 ##      断言全工程恰好 16 座，这里再钉一次是因为家是这一轮新加的东西）
 ##  10 小地图上那枚钉
 ##  11 「到家」那一句是**边沿触发**（停着不重弹、出去再进才又来一次）
+##  12 **从路上看得见**（家与路的关系——前面十一节量的一律是家与地/家与碑/
+##      家与玩家，**一条都没问过家与路**，和水的那个 bug 同一个形状；
+##      参照 `verify_road_steles.gd` 第 3.3 节，阈值同源）
 ##
 ## 第 4 / 5 / 6 / 7 节的数值全部从 `HomeBase.get_script_constant_map()` 现读，
 ## 不在本文件里手抄一份——手抄的常量会长出第二套预算（CLAUDE.md 第五轮 ③）。
@@ -128,6 +131,7 @@ func _run() -> void:
 	await _section9_not_a_station(rd)
 	_section10_minimap(home)
 	_section11_pass_line(home)
+	_section12_sightline(home)
 
 	_ck("整份回归真的跑完了（断言条数 ≥ %d，缺一节的话这里会红）" % HOME_MIN_CK,
 			_ck_total >= HOME_MIN_CK, "实际 %d 条" % _ck_total)
@@ -493,6 +497,129 @@ func _section11_pass_line(home: Node3D) -> void:
 			"got=%s" % hud._pass_label.text)
 	hud._pass_left = 0.0
 	hud._pass_label.text = ""
+
+
+# ---------------------------------------------------------------- 12 看得见
+## **从路上看得见**。这一节量的是**家与路**的关系，而前面十一节量的一律是
+## **家与地/家与碑/家与玩家**的关系——和水的那个 bug 同一个形状：
+## `verify_water.gd` 十六节全在量碗与水，一条都没问过路与水，
+## 于是"玩家一整圈没看见过一片水"而两侧各自自洽。
+##
+## 这条不是"离树多远"——离得近也可能在视线的另一侧。量两样：
+## ① **行道树**站没站进视线：从**房子正对的那一个中心线点**
+##    （`road_pt`，不是"离落点最近的那个中心线点"——8 字两瓣靠得近，
+##    全局最近点会落到另一瓣上，见 CLAUDE.md 第六轮 ①）到房子画一条线段，
+##    任何树都不许进这条线段 2.5m 以内（树冠半宽 ≈2.0m @ `SCALE_MAX`=9）。
+##    **写完量过：最近的一棵在 15.8m 外**，把 `HOME_OFFSET` 在 10~15m 之间
+##    扫一遍这个数一动不动——所以这条守的是"树表仍然覆盖这一片"，
+##    真正会咬人的是第二样。
+## ② **地形**挡没挡：从骑行眼高往门牌那个高度打一条线，沿途查地形。
+##    路在路基上、家坐在山坡上，中间一道起伏就够把房子挡掉，而
+##    `probe_water_visibility.gd` 量水的正是同一条线（那边三处余量
+##    0.36~1.30m，这边才是真正贴着门槛的一个）。
+func _section12_sightline(home: Node3D) -> void:
+	print("\n-- 12 从路上看得见（家与路的关系，前面十一节一条都没问过）--")
+	if home == null or not home.placed:
+		return
+	var site: Vector3 = home.site
+	var trees: Array = _world._tree_scatter.trees()
+	_ck("拿得到行道树的落点（正对照：这一族量的是视线，不是树的个数）",
+			trees.size() > 40, "%d 棵" % trees.size())
+	if trees.is_empty():
+		return
+	var here := Vector2(home.site.x, home.site.z)
+	var road_pt: Vector2 = home.road_pt
+	var blockers: Array = []
+	var nearest := 1e9
+	for t in trees:
+		var tp: Vector3 = t["pos"]
+		var d := _seg_dist(Vector2(tp.x, tp.z), road_pt, here)
+		nearest = minf(nearest, d)
+		if d < 2.5:
+			blockers.append(Vector2(tp.x, tp.z))
+	_ck("从路心线到房子那条视线上没有行道树（挡住的 %d 棵）" % blockers.size(),
+			blockers.is_empty(),
+			"最近的一棵离线 %.1fm%s" % [nearest,
+					("，位置 %s" % str(blockers)) if blockers.size() > 0 else ""])
+	# **余量打出来，因为一条永远绿的断言和一个恒真的断言在报告里长得一模一样。**
+	# 实测最近的一棵在 15.8m 外——而且把 `HOME_OFFSET` 在 10~15m 之间扫一遍，
+	# 这个数**一动不动**（15.780 / 17.050 / 23.72…），因为最近的那几棵离得远
+	# 在**沿路的方向**上，不是横向。所以树上这条守的不是"树挡不挡"，
+	# 守的是"树表仍然覆盖这一片"（下一条正对照），真正有风险的是下一段的地形。
+	var near_list: Array = []
+	for t in trees:
+		near_list.append(_seg_dist(Vector2(t["pos"].x, t["pos"].z), road_pt, here))
+	near_list.sort()
+	print("       （视线上最近的几棵树：%s m；这段视线长 %.1fm）"
+			% [str(near_list.slice(0, 4)), here.distance_to(road_pt)])
+	# 正对照：房子这条视线 25m 之内真的站着树。缺了它，"树表里一棵都没有"
+	# 和"这族的尺子根本没通电"在输出上一样——而上面那条在树表为空时恒绿。
+	var around := 0
+	for t in trees:
+		if _seg_dist(Vector2(t["pos"].x, t["pos"].z), road_pt, here) < 25.0:
+			around += 1
+	_ck("正对照：房子这条视线 25m 之内确实种着树（不是量了一片空气）",
+			around > 0, "25m 内 %d 棵，离线最近 %.1fm" % [around, nearest])
+
+	# ---- 地形挡不挡 ----
+	#
+	# 树那条量不到风险（余量 15.8m），真正会咬人的是**地形**：路在路基上、
+	# 家坐在山坡上，两边高差能有几米，中间一道起伏就够把房子挡掉。
+	# 问法和水那条探针一样——从骑行眼高往房子**墙脚**打一条线，
+	# 沿途查地形有没有高过它。眼睛高度见 `Player3D.CAM_UP` 那一族（1.6m）。
+	var tb: Node3D = _world._terrain_builder
+	var rb: Node3D = _world._road_builder
+	var eye_y: float = float(rb.get_road_ribbon_height(road_pt.x, road_pt.y)) + 1.6
+	# 打的是**墙脚**而不是门牌。第一版瞄的是 `site.y + 1.5`（门牌那个高度），
+	# 于是最后那一格永远"视线上比地面高 1.50m"——**这个 1.50 是 target 自己
+	# 减出来的常数**，不管中间发生什么它都不变：把 `HOME_AT` 在整条环上扫了
+	# 十一个位置，最紧的那一格报出来是 1.45~1.50，一动不动。
+	# 那是一条**恒真的断言**（恒等于"1.50 > 0"），而恒真在报告里和恒绿一模一样。
+	#
+	# 瞄墙脚是对的，但**终点那一格仍然不能量**：在 t=1 处 `ray_y` 恰好等于
+	# `target_y`，而 `g` 就是房子脚下那块地——两者本来就差一个浮点残差，
+	# 于是每档落点都在终点报一个 ±0.00（实测 0.050/0.120/0.200 报 0.00，
+	# 0.080 报 -0.00 并判成"被挡住在 15.0m 处"——那 15.0m 正是视线全长）。
+	# 终点不是"地形挡住了视线"，终点就是终点本身。所以采样到 t<1 为止、
+	# 留一格给"到达"，这样只有中间的真起伏才会把余量压成负数。
+	var target_y: float = site.y
+	var steps := maxi(int(here.distance_to(road_pt)), 12)
+	var margin := INF
+	var margin_at := -1.0
+	var blocked := -1.0
+	for s in range(1, steps):
+		var t: float = float(s) / float(steps)
+		var q: Vector2 = road_pt.lerp(here, t)
+		var ray_y: float = eye_y + (target_y - eye_y) * t
+		var g: float = float(tb.get_height_at(q.x, q.y))
+		if ray_y - g < margin:
+			margin = ray_y - g
+			margin_at = q.distance_to(road_pt)
+		if g > ray_y and blocked < 0.0:
+			blocked = q.distance_to(road_pt)
+	_ck("从路面眼高看得见房子墙脚（地形没挡在中间%s）"
+			% ("，挡住的话在离路 %.1fm 处" % blocked if blocked > 0.0 else ""),
+			blocked < 0.0,
+			"视线上最紧的一格在离路 %.1fm 处、离地形 %.2fm" % [margin_at, margin])
+	print(("       （路面 %.2fm → 房子墙脚 %.2fm，最紧的一格在离路 %.1fm 处、"
+			+ "离地形 %.2fm）") % [eye_y, target_y, margin_at, margin])
+	# 正对照：把终点从墙脚换成**墙脚之下 2m**（那个点在土里），
+	# 同一支采样器必须判出"被挡住"。缺了这条，上面那条判据可以是
+	# `blocked` 恒为 -1 的空转——"没有违规"和"从来没查过"在输出上
+	# 长得一模一样，而终点那一格本来就不能量，正好给恒绿留了位置。
+	# 瞄深一点的点对比差足够大（最后一格 ray 比脚下地形低约 1.7m），
+	# 所以这条判据在任何合法落点上都应该成立，不是靠某个落点凑出来的。
+	var blocked_under := -1.0
+	for s2 in range(1, steps):
+		var t2: float = float(s2) / float(steps)
+		var q2: Vector2 = road_pt.lerp(here, t2)
+		var ray_y2: float = eye_y + (target_y - 2.0 - eye_y) * t2
+		if float(tb.get_height_at(q2.x, q2.y)) > ray_y2 and blocked_under < 0.0:
+			blocked_under = q2.distance_to(road_pt)
+	_ck("正对照：瞄到墙脚之下 2m 的那个点时视线确实被地形挡住%s"
+				% ("（在离路 %.1fm 处）" % blocked_under if blocked_under > 0.0 else ""),
+				blocked_under > 0.0)
+
 
 
 # ---------------------------------------------------------------- 工具
