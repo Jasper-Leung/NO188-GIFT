@@ -252,6 +252,100 @@ func _run() -> void:
 			gs > 0.15,
 			"正对照的通道差只有 %.3f，这条判据就成了恒绿" % gs)
 
+	# ------------------------------------------------- ⑤ 砾石有石头一级的明暗
+	# 真把带子建出来量，而不是量剖面表。
+	#
+	# 中心线在这里是**替身**：明暗是按**下标**算的（`_stone_mottle(i, c, sgn)`），
+	# 而没有地形构建器时 `_terrain_h()` 恒返回 0，所以这一节量的**只有颜色**，
+	# 与中心线摆在哪无关。点数取 2457 —— 1228.8m 的环路按 0.5m 重采样之后
+	# 就是这个量级，而"翻转次数"那条判据量的是环上的密度，替身得给对。
+	var ring: Array = []
+	var cols_n: int = prof.size()
+	var R := 180.0
+	for i in 2457:
+		var a: float = TAU * float(i) / 2457.0
+		ring.append(Vector3(cos(a) * R, 0.0, sin(a) * R))
+	var verge: Node3D = RV.new()
+	verge.name = "VergeProbe"
+	# 这份脚本 extends SceneTree，所以**没有** `add_child`——挂在 `root` 下面。
+	# 第一版写成 `add_child(verge)` 的话 parse 就红，而 `--script` 模式下一行
+	# parse 错之后 `quit()` 走不到，进程直接超时退出，看起来像"回归跑了很久"。
+	root.add_child(verge)
+	verge.call("build", ring, soft_bound)
+	var vmesh: MeshInstance3D = verge.get_node("VergeMesh")
+	var arr: Array = vmesh.mesh.surface_get_arrays(0)
+	var _built_cols: PackedColorArray = arr[Mesh.ARRAY_COLOR]
+	# 每个中心线点铺 `cols * 2` 个顶点（路左一路右），不是 `cols`。
+	# 第一版拿 `size / cols` 当行数，于是行数翻倍而循环仍按 `per_side` 步进，
+	# 越界取到 29520 —— 症状是一行 SCRIPT ERROR、**汇总永远打不出来**。
+	var _built_len: int = _built_cols.size() / (cols_n * 2)
+	_ck("真把带子建出来了（正对照：%d 行 × %d 列）" % [_built_len, cols_n],
+			_built_len > 2000,
+			"只建出 %d 行——带子没铺满，量到的不是全线" % _built_len)
+
+	# 上面第 ④ 节量的是**剖面表里那六个数**，而那条带子在被 build() 铺出去
+	# 之前是**六列常量**——1228m 的环上每一个顶点都填同一个值。真砾石读成
+	# 石头靠的是石子与石子之间的明暗差，而这里是零，所以骑行视角下它读成
+	# 一条**水泥路肩**。这一节量的是**建出来的网格上的顶点色**，不是剖面表。
+	#
+	# 三条一起写：变化幅度、变化的粒度、以及一条**正对照**（漂白带那一列
+	# 必须是常量——它要是也开始抖，第 ① 节「最亮的一列 == SOFT_BOUND」
+	# 量的就不再是那条线了）。
+	var per_side: int = cols_n * 2
+	var gravel_lum: Array[float] = []
+	var line_lum: Array[float] = []
+	var flips: int = 0
+	var prev := -1.0
+	for v in _built_len:
+		var base: int = v * per_side
+		for c in range(0, cols_n):
+			var col: Color = _built_cols[base + c]
+			var l: float = _lum(col)
+			if c == 0:
+				gravel_lum.append(l)
+				if prev >= 0.0 and signf(l - prev) != 0.0:
+					flips += 1
+				prev = l
+			elif c == mark_i:
+				line_lum.append(l)
+	# 变化幅度：压暗系数下限是 STONE_DARK，所以最暗那个顶点至少要暗到
+	# 常量的 80% 以下，否则等于没压。
+	var gmin := INF
+	var gmax := -INF
+	for l in gravel_lum:
+		gmin = minf(gmin, l)
+		gmax = maxf(gmax, l)
+	var g_spread: float = (gmax - gmin) / maxf(gmax, 0.0001)
+	_ck("砾石那列有石头一级的明暗（跨度 %.3f ≥ 0.12）" % g_spread,
+			g_spread >= 0.12,
+			"最暗 %.4f 最亮 %.4f 跨度 %.4f" % [gmin, gmax, g_spread])
+	# 变化的粒度：1200 多米的环上至少要有几十次明暗翻转。零翻转就是常量。
+	_ck("明暗是逐顶点变的不是整条一起变（翻转 %d 次 ≥ 24）" % flips,
+			flips >= 24,
+			"只翻了 %d 次——这条带子还是一整块板子" % flips)
+	# 正对照：漂白带那一列必须仍然是**常量**，它一抖第 ① 节量的就不是它了。
+	var lmin := INF
+	var lmax := -INF
+	for l in line_lum:
+		lmin = minf(lmin, l)
+		lmax = maxf(lmax, l)
+	var l_spread: float = (lmax - lmin) / maxf(lmax, 0.0001)
+	_ck("正对照：漂白带那列保持常量（跨度 %.4f ≤ 0.001）" % l_spread,
+			l_spread <= 0.001,
+			"漂白带自己也在抖，跨度 %.4f——第 ① 节的亮峰就不是它了" % l_spread)
+	# 「最暗的砾石仍比沥青亮」**这一条这里量不到，别装。**
+	# 它手上有两个数在两个不同的空间里：手上的 gmin 是**反照率**的相对亮度
+	# （0.077），而"沥青 0.378"那个数是 `lookdev_verge.gd` 正交俯拍量到的
+	# **渲出来**的显示值。拿它们比，比的是两个量——而这正是本文件开头写的
+	# 那条「反照率对比度不是渲出来的对比度」，第一版判据栽的也是它。
+	# 反过来，按反照率比也不成立：沥青走的是 `asphalt.gdshader` 自己的那套
+	# 处理，而路肩是 `SPECULAR_DISABLED` + 顶点色的裸 StandardMaterial3D，
+	# 两者从反照率到屏幕像素的路不一样长。
+	# 这条**归 `lookdev_verge.gd` 的像素判据**，它量的是同一张图上的
+	# 「沥青那一列」与「砾石最暗的那一列」。这里只把数打出来备查。
+	print("  （供 lookdev_verge 对拍：砾石反照率亮度 %.4f ~ %.4f）"
+			% [gmin, gmax])
+
 	# ------------------------------------------------------------ 画笔接线
 	# 纯函数对不对、和画笔有没有去调它是两件事（--headless 下一笔都不落盘）。
 	_ck("画笔真的调了 verge_profile(...)",

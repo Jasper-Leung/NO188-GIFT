@@ -69,6 +69,25 @@ const LINE := Color(0.580, 0.575, 0.558)
 ## 14.5m 处多出一圈比周围亮的环。这一档是把外沿**反算**回地形那个值的。
 const GRASS := Color(0.292, 0.422, 0.180)
 
+## 石头一级的明暗。**只压暗，不提亮。**
+##
+## 上一版整条带子是**六列常量色**——1228m 的环上每一个顶点都填同一个值，
+## 于是它在数学上就是一块浇好的水泥板，而"读成水泥"不是观感问题，
+## 是**逐顶点零变化**的直接后果。真砾石之所以读成石头，靠的是
+## 石子与石子之间的明暗差，而这里一丁点都没有。
+##
+## 幅度是量出来的，不是拍的。`lookdev_verge` 正交俯拍实测（2026-10-05）：
+## 沥青 0.378、砾石 0.494、漂白带峰值 0.798。压到 0.80 那一档，最暗的
+## 砾石是 0.494 × 0.80 = **0.395**，仍在沥青 0.378 之上——"路肩是从
+## 路面上退下去的一层"这条不能翻，而它是 CLAUDE.md 里钉着的正对照。
+## 提亮那一头**不许开**：开了就有可能造出一列比漂白带还亮的顶点，
+## 而 `verify_road_verge.gd` 量的正是"剖面里最亮的一列 == SOFT_BOUND"，
+## 那个亮峰一旦被砾石抢走，判据量的就是别的东西了。
+const STONE_DARK := 0.80
+## 只给**砾石那三列**（剖面下标 0~2）。漂白带和最外沿那两列一个顶点都不动：
+## 前者是"最亮的一列"这条判据的被测对象，后者接着地形，接缝判据在盯它。
+const STONE_COLS := 2
+
 var _terrain_builder: Node3D = null
 var _mesh: MeshInstance3D = null
 
@@ -85,6 +104,19 @@ static func verge_profile(soft_bound: float) -> Array:
 		[soft_bound + 1.1, LINE.lerp(GRASS, 0.62)],
 		[OUTER, GRASS],
 	]
+
+
+## 逐顶点的石头明暗，落在 `[STONE_DARK, 1.0]`。
+##
+## **必须是纯函数**：同一个 `(中心线下标, 剖面列, 哪一侧)` 每次都给出同一个值，
+## 而 `verify_road_verge.gd` 与 `lookdev_verge.gd` 各建一遍这条带子、两次
+## 逐点对拍——用全局 RNG 的话第二次的带子和第一次对不上，而症状是
+## "回归偶发红、图偶发不一样"，极难归因。中心线每 0.5m 一个点，所以这个
+## 尺度的变化在骑行视角下就是**石头一级**。
+static func _stone_mottle(i: int, c: int, sgn: int) -> float:
+	var h: int = (i * 73856093) ^ (c * 19349663) ^ (sgn * 83492791)
+	h = (h ^ (h >> 13)) * 1274126177
+	return lerpf(STONE_DARK, 1.0, float((h >> 7) & 0xFFFF) / 65535.0)
 
 
 func set_terrain_builder(tb: Node3D) -> void:
@@ -126,7 +158,10 @@ func build(centerline: Array, soft_bound: float) -> void:
 				var k: float = clampf((d - INNER) / 2.5, 0.0, 1.0)
 				var y: float = lerpf(th - 0.15, th + LIFT, k * k * (3.0 - 2.0 * k))
 				verts.append(Vector3(x, y, z))
-				colors.append(prof[c][1])
+				var col: Color = prof[c][1]
+				if c <= STONE_COLS:
+					col = col * _stone_mottle(i, c, int(sgn))
+				colors.append(col)
 
 	# 带子在环上首尾相接，所以最后一段绕回 0——不接的话出发点与终点
 	# 之间会裂一道口子，而那恰好是玩家每一趟都经过的地方。
