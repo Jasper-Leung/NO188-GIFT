@@ -223,6 +223,25 @@ func setup(sun: DirectionalLight3D, fill: DirectionalLight3D, world_env: WorldEn
 	world_env.environment = _env
 	# Sky 同样是 sub_resource，所以整个换掉而不是就地改它的 material。
 	# 顺带把 `background_mode` 钉在 BG_SKY：白天的天就是靠它画的。
+	# 引擎侧先量过一遍：**Godot 4.6 的 `ProceduralSkyMaterial` 没有任何云属性。**
+	# 整张属性表 25 条（`sky_top_color` / `sky_horizon_color` / `sky_curve` /
+	# `ground_*` / `sun_angle_max` / `sun_curve` / `sky_cover` /
+	# `sky_cover_modulate` / `*_energy_multiplier` / `use_debanding` …），
+	# 没有 `cloud_*`、没有 `coverage` —— 所以"给天加几朵云"在本引擎上
+	# 不是一个旋钮，要做只能是另铺一层自己的网格。
+	#
+	# 而另铺一层在这个取景下量不到好处，只量得到代价（2026-10-05 实测）：
+	# 骑行视角 `12b_day_正午.png` 里**看得见的天只有 fy 0.086~0.15 一条**——
+	# 上面是顶栏衬底（fy 0.086 以下），下面 `FarRidge` 三层的轮廓顶实测在
+	# fy 0.15~0.28 —— 也就是**屏高 6%**。而 `lookdev_journey.gd` 的
+	# `SKY_HUE_ROW = 0.12`（`day_row.r < day_row.b * 0.75`、黄昏那两条色相方向）
+	# 量的是**同一条带**，而且 `_sky_row()` 是 **5 列的均值不是中位数**——
+	# 一朵跨住两列的白云就足以把 r/b 推过 0.75。那会红，而那个红的意思是
+	# "云画对了"，不是产品坏了。
+	#
+	# 所以这里**不加云，也不放宽那两条判据**（它们当初是因为评审那条红滤片带
+	# 才加的）。要看天，把相机抬起来拍 `lookdev_horizon.gd` 的 `road_eye` /
+	# `hilltop`，那两张开角大得多，云层在那儿是有的地方可放的。
 	_sky_mat = ProceduralSkyMaterial.new()
 	_sky_mat.sky_top_color = DAY_SKY_TOP.srgb_to_linear()
 	_sky_mat.sky_horizon_color = DAY_SKY_HORIZON.srgb_to_linear()

@@ -2934,3 +2934,38 @@ First Ride / **Master** / Pilgrim / **Master** / Full——第 2 档和第 4 档
 （同族的另一半：`mutate_*.py` 读上一次跑剩下的绿日志、
 `fails()` 按 8 字符切而 `[FAIL] ` 是 7。）
 
+
+## 这一轮新记的一条（2026-10-05，第十一轮 P1-1 地平线：云为什么没加）
+
+### 引擎里没有那个旋钮，而"另铺一层"量到的只有代价
+
+P1-1 三件事里山线层次早就做完了（`FarRidge.LAYERS` 是照着 `lookdev_journey`
+§12f 一档一档调出来的，**不许顺手取整**），剩下「云」与「地标」。
+云这一件先量引擎再量取景，两头都堵着：
+
+**① 引擎侧**：Godot 4.6 的 `ProceduralSkyMaterial` **没有任何云属性**。
+把实例的 `get_property_list()` 全倒出来是 25 条——
+`sky_top_color` / `sky_horizon_color` / `sky_curve` / `ground_horizon_color` /
+`ground_bottom_color` / `ground_curve` / `sun_angle_max` / `sun_curve` /
+`sky_cover` / `sky_cover_modulate` / `sky_energy_multiplier` /
+`ground_energy_multiplier` / `use_debanding` / `render_priority` ——
+没有 `cloud_*`，没有 `coverage`。所以"给天加几朵云"在本引擎上不是旋钮，
+要做只能是另铺一层自己的网格。
+（顺带一条：`get_python_api_docs` 那套查的是 **Blender** 的 API，
+`bpy.types.ShaderNodeTexSky` 返回的是 `sky_type` / `sun_disc` / `sun_elevation`
+那一族 Blender 旋钮。查 Godot 的类要起一个 Godot 进程去
+`ClassDB.class_get_property_list()` 现场读，别拿错引擎的文档当依据。）
+
+**② 取景侧**：骑行视角 `12b_day_正午.png` 里**看得见的天只有 fy 0.086~0.15
+一条**——上面压着顶栏衬底（fy 0.086 以下），下面 `FarRidge` 三层的轮廓顶
+实测落在 fy 0.15~0.28——也就是**屏高的 6%**。而 `lookdev_journey.gd` 的
+`SKY_HUE_ROW = 0.12` 量的是**同一条带**，`day_row.r < day_row.b * 0.75`
+（现在 r/b = 0.45）和黄昏那两条色相方向全靠它；更要命的是 `_sky_row()`
+取的是 **5 列的均值不是中位数**，一朵跨住两列的白云就足以把 r 推过那条线。
+那会红，而**那个红的意思是"云画对了"**，不是产品坏了。
+
+所以**没加云，也没放宽那两条判据**（它们当初是因为评审那条红滤片带才加的）。
+真要加，量法得先换：不是改 `SKY_HUE_ROW`，而是让判据**跳过云**——
+比如按"这像素比同行的中位色亮多少"把云剔掉再取色相。
+可推广的一条：**"看得见的天"有多宽，是加任何东西之前该先量的那个数**——
+它同时决定了新东西放不放得下、和现有取样框会不会被砸中。
