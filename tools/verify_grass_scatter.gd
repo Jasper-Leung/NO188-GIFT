@@ -736,15 +736,35 @@ func _shader_silhouette() -> void:
 		"blade_count 的 hint_range 上限 %.1f >= 实际值 %.1f（否则编辑器里也调不上去）"
 		% [hr, n])
 
-	# 退饱和：绿通道与红通道的差要压住。旧值 tip=(0.40,0.55,0.24)，差 0.15。
+	# 绿-红通道差是**一条带**，不是上限。旧判据只写了 `<= 0.10` 那半边，
+	# 于是一路把叶片按在 0.090 那一档——而**上限量的是"不是塑料草坪"，
+	# 缺的那半边量的是"是草"**。两条各自都成立，合起来是一丛麦子：
+	# 正午实测（`lookdev_journey` 12b，太阳色 (1.0,0.97,0.92) 乘完再过 AGX）
+	# 草叶的绿-红差是 **0.075**，而 `terrain_grass.gdshader` 的 `ground_dry`
+	# 正好是 0.075——草皮和旱死的草是同一个颜色。
+	#
+	# 下界取 0.16 不是审美，是**它必须比脚下的地形更绿**：
+	# `terrain_grass.gdshader` 的 `ground_color` 是 0.190，土是黄褐的、
+	# 活草叶不是，所以 0.090 那一档**比土还黄**。
+	# 上界 0.24 留着原来那个"塑料草坪"的教训（0.15 那档真的塑料），
+	# 留出余量是因为这一族量的是**反照率**而 AGX 会把中间调去饱和。
 	for uni in ["blade_base", "blade_tip"]:
 		var c := _uni_color(src, uni)
 		var spread: float = c.y - c.x
-		_check(spread <= 0.10,
-			"%s 的绿-红通道差 <= 0.10，不是塑料草坪（%.1f, %.1f, %.1f = %.3f）"
-			% [uni, c.x, c.y, c.z, spread])
+		_check(spread >= 0.16 and spread <= 0.24,
+			("%s 的绿-红通道差 %.3f 落在 [0.16, 0.24]：下界是「比土绿」，"
+			+ "上界是上一版「塑料草坪」的教训（0.15 那档真的塑料）"
+			+ "（%.3f, %.3f, %.3f）")
+			% [uni, spread, c.x, c.y, c.z])
 		_check(c.z <= c.x + 0.02,
-			"%s 蓝通道没有塌到绿通道之下（%.1f vs %.1f）" % [uni, c.z, c.x])
+			"%s 蓝通道没有塌到红通道之下（%.3f vs %.3f）" % [uni, c.z, c.x])
+
+	# 正对照：尺子量得到"绿"。拿地形自己的 `ground_dry` 当那根**不该绿**的尺子
+	# ——它 0.075，而正午草叶实测就是 0.075，所以"比旱草绿"这件事是量得到的。
+	var dry := _uni_color(_terrain_src(), "ground_dry")
+	_check(dry.y - dry.x < 0.16,
+		"正对照：地形自己的 ground_dry 绿-红差 %.3f 落在带外（尺子量得到不绿）"
+		% (dry.y - dry.x))
 
 	# **草叶不许比它脚下的地更暗、更不绿**——这一族才是量"这片草看起来像草吗"。
 	# 上面那两条只管草叶**彼此之间**别太艳，于是两版颜色都过：blade_base 比
@@ -817,6 +837,11 @@ func _uni_color(src: String, name: String) -> Vector3:
 		return Vector3(-1, -1, -1)
 	return Vector3(float(m.get_string(1)), float(m.get_string(2)),
 		float(m.get_string(3)))
+
+
+## 地形着色器的源码。正对照要用它自己的 `ground_dry` 当"不该绿"那根尺子。
+func _terrain_src() -> String:
+	return FileAccess.get_file_as_string("res://assets/shaders/terrain_grass.gdshader")
 
 
 ## 逐字节比较两格草的内容
