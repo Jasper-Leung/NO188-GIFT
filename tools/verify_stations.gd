@@ -85,10 +85,10 @@ func _run() -> void:
 	print("=== 驿站 → GLB 配置 ===")
 	# 正对照：先断「产品那份真的读到了」。读不到的话下面每一处
 	# `STATION_GLB_CONFIG[...]` 都会 IndexError 把协程掐断，而汇总照样打 PASS。
-	# 14 是产品表真实的长度（槽位 0..13，其中 2 已退役留空）。
+	# 17 是产品表真实的长度（槽位 0..16，其中 2 已退役留空）。
 	var cfg_tbl: Array = _load_product_config()
-	_check("产品 World3D.STATION_GLB_CONFIG 真的读得到（14 条）",
-		cfg_tbl.size() == 14, "实测 %d 条" % cfg_tbl.size())
+	_check("产品 World3D.STATION_GLB_CONFIG 真的读得到（17 条）",
+		cfg_tbl.size() == 17, "实测 %d 条" % cfg_tbl.size())
 	if cfg_tbl.size() < 6:
 		print("[ABORT] 产品配置表读不到，无法继续")
 		quit(1)
@@ -146,8 +146,8 @@ func _run() -> void:
 		if not ResourceLoader.exists(p):
 			missing.append(p)
 	# 正对照：只断「没有缺失」的话，一个把所有槽位都清空的数组照样全绿
-	_check("这份名单里确实有活着的槽位（正对照）", live_slots == 13,
-			"活槽位 %d（应 13 = 14 槽 - 1 退役）" % live_slots)
+	_check("这份名单里确实有活着的槽位（正对照）", live_slots == 16,
+			"活槽位 %d（应 16 = 17 槽 - 1 退役）" % live_slots)
 	_check("所有 STATION_GLB_CONFIG 指向的 GLB 都存在于 res://",
 			missing.is_empty(),
 			"缺: " + str(missing))
@@ -164,11 +164,57 @@ func _run() -> void:
 		var s = load(p)
 		if s == null:
 			load_err.append(p)
-	_check("新加的 8 个 GLB 都能 load 成 PackedScene（正对照）", loadable == 8,
+	_check("新加的 11 个 GLB 都能 load 成 PackedScene（正对照）", loadable == 11,
 			"只 load 了 %d 个" % loadable)
-	_check("新加的 8 个 GLB 都能 load 成 PackedScene",
+	_check("新加的 11 个 GLB 都能 load 成 PackedScene",
 			load_err.is_empty(),
 			"load 失败: " + str(load_err))
+
+	# ---- 16 座站必须指向 16 个**互不相同**的 model_idx ----------------
+	#
+	# 这是评审 第三轮 §1.1「16 座站里 12 个模型、三对共用 GLB」那一条的判据。
+	# 原来三对共用（起程/东岭驿楼、右岭/西谷岭台、岭口/北岭凉亭）时，
+	# 「model_idx 都在范围内」「槽位不是退役的」「GLB 都能 load」**全部照绿**
+	# ——共用不是坏值，是**一个合法的重复**，所以上面那几条一条都拦不住它。
+	#
+	# **两路都要，缺一头就漏一头**：按 model_idx 的重数拦「两座站占同一个
+	# 槽位」，而**两个不同的槽位指向同一个文件**同样是共用——那一路只有按
+	# 解析出来的 path 数重数才拦得住（突变验过：把槽位 16 的 path 改成
+	# 槽位 6 的文件，上面两条照绿、只有下面两条红）。
+	var slot_counts := {}
+	for m in model_idxs:
+		slot_counts[m] = int(slot_counts.get(m, 0)) + 1
+	var shared: Array[String] = []
+	for k in slot_counts.keys():
+		if int(slot_counts[k]) > 1:
+			var who: Array[int] = []
+			for i in range(model_idxs.size()):
+				if model_idxs[i] == int(k):
+					who.append(i)
+			shared.append("slot %d 被 %d 座站共用（站 idx %s）"
+					% [int(k), int(slot_counts[k]), str(who)])
+	_check("16 座站指向 16 个互不相同的 model_idx（没有两座站共用一个槽位）",
+			shared.is_empty(), " ; ".join(shared))
+	# 正对照：真的读了 16 个槽位下来。只断「不共用」的话，一个把所有
+	# model_idx 都读成同一个值的产品会拿到 1 个槽位、照样全绿。
+	_check("正对照：去重后确实有 16 个 model_idx", slot_counts.size() == 16,
+			"去重后只有 %d 个" % slot_counts.size())
+
+	var path_counts := {}
+	for m in model_idxs:
+		var pp: String = str(STATION_GLB_CONFIG[m].get("path", ""))
+		if pp == "":
+			continue
+		path_counts[pp] = int(path_counts.get(pp, 0)) + 1
+	var shared_path: Array[String] = []
+	for k in path_counts.keys():
+		if int(path_counts[k]) > 1:
+			shared_path.append("%s 被 %d 座站共用"
+					% [str(k), int(path_counts[k])])
+	_check("16 座站指向 16 个互不相同的 GLB 文件（两个槽位不许指向同一个文件）",
+			shared_path.is_empty(), " ; ".join(shared_path))
+	_check("正对照：去重后确实有 16 个 GLB 文件", path_counts.size() == 16,
+			"去重后只有 %d 个" % path_counts.size())
 
 	# 每个驿站都要有名字（中英）、color、event
 	var bad_name: Array[int] = []

@@ -184,6 +184,31 @@ const STATION_GLB_CONFIG: Array = [
 	# 变成 0.94，一度只剩 8.6m——而**旋转盒的 AABB 量不到这个差别**，
 	# 见 tools/verify_stations.gd 里关于三把量错尺子的注释。
 	{"path": "res://assets/models/station_琴台.glb", "scale": 10.0, "label_y": 15.0, "glow_y": 7.0, "glow_range": 12.0, "rot_y": 120.0},
+	# 14..16：拆开三对共用同一个 GLB 的驿站（评审 第三轮 §1.1「16 座站里
+	# 12 个模型、三对共用 GLB」）。**换的是新几何，不是再调一次参数**——
+	# lookdev_stations.gd 里那条「共用模型的站之间有多像」是**诊断不是判据**：
+	# 同一个 GLB 实测 0.0114，而真的一对不同建筑 0.0407，离阈值 0.04 只差
+	# 0.0007，所以颜色签名这把尺子分不开它们，唯一的解法是换模型。
+	#
+	# 谁替换谁、为什么是这三个剪影（尺寸取自 GLB 往返实测，z 下沿 = 0）：
+	# · 14 钟楼 给「东岭驿楼」，原来与「起程驿楼」共用 station_驿楼.glb。
+	#   驿楼 1.10×1.10×0.97 读出来是矮墩；钟楼 0.72×0.72×1.48 又高又窄，
+	#   同一趟骑行里两座楼的前后剪影差一个数量级。
+	# · 15 望台 给「西谷岭台」，原来与「右岭岭台」共用 station_岭台.glb。
+	#   岭台 1.56 见方、0.74 高，是一堵实心的墙；望台 1.62×1.12×0.67 只有
+	#   四根柱子和一圈栏杆，**中间那一半是空气**，角上再立一根压顶的红界标。
+	# · 16 风亭 给「北岭凉亭」，原来与「岭口凉亭」共用 station_凉亭.glb。
+	#   凉亭 1.24×0.56×0.50 是横着的实心矮墩；风亭 1.16 见方、1.04 高，
+	#   四根 6cm 的腿撑起一大片薄瓦，顶上再顶一根红针。
+	#
+	# 三个都是 Blender 5.2.2 手工建模 + GLB 导出，**零纹理、零新资产来源**，
+	# 与 6..12 那一族同一套调色板：`roof` 必须是冷的（`_tint_station_roofs()`
+	# 还要在它上面刷暖色），`stone` 必须在（`verify_station_roof.gd` 拿它当尺子）。
+	# **label_y / glow_y 一个读者都没有**（高度是 `label_y_for()` 从量出来的
+	# AABB 顶反解的），这里填的只是给人看的，别拿它当高度的出处。
+	{"path": "res://assets/models/station_钟楼.glb", "scale": 10.0, "label_y": 16.5, "glow_y": 9.0, "glow_range": 14.0},
+	{"path": "res://assets/models/station_望台.glb", "scale": 10.0, "label_y": 8.5, "glow_y": 5.5, "glow_range": 10.0},
+	{"path": "res://assets/models/station_风亭.glb", "scale": 10.0, "label_y": 12.5, "glow_y": 7.0, "glow_range": 12.0},
 ]
 
 ## 屋顶的暖中性色。口径和 glTF 的 baseColorFactor 一致（也就是当初在 Blender 里

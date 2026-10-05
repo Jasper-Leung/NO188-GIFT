@@ -186,6 +186,30 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 4. **六个 mesh 一批的 GLB 惯例**：1 mesh、每材质一个 primitive、
    只带 `POSITION` + `NORMAL`、无 UV。
 
+### 2.3c ✅ 原创 · `station_钟楼.glb` / `station_望台.glb` / `station_风亭.glb`
+
+| 字段 | 内容 |
+| :--- | :--- |
+| 文件 | `station_钟楼.glb`（22,336 B / 296 面）、`station_望台.glb`（17,732 B / 232 面）、`station_风亭.glb`（20,464 B / 280 面） |
+| 顶替 | **三对共用同一个 GLB 的驿站**：`起程驿楼`/`东岭驿楼`（原 `station_驿楼.glb`）、`右岭岭台`/`西谷岭台`（原 `station_岭台.glb`）、`岭口凉亭`/`北岭凉亭`（原 `station_凉亭.glb`） |
+| 建模 | **Blender 5.2.2 手工建模**，与 §2.3b 那 8 座同一套约定：无 UV、无贴图、坐标按米、材质名 `<站名>_roof` / `<站名>_stone` |
+| 授权 | 与本仓库其余原创部分同（见根目录 `LICENSE`） |
+
+**为什么必须是新几何，而不是旧模型换一次颜色**：`lookdev_stations.gd` 里那条
+「共用同一模型的站之间有多像」是**诊断不是判据**——同一个 GLB 的
+`起程驿楼`↔`东岭驿楼` 实测 **0.0114**，而真的一对不同建筑
+（`琴音林`↔`竹雨庭`）是 **0.0407**，离 0.04 的阈值只差 **0.0007**。
+那一族的颜色签名分不开它们，**任取哪条线都是噪声**，所以唯一的解法是换模型。
+三个剪影按"和它顶掉的那一座差得开"来选：`钟楼` 高瘦（0.72×0.72×1.48）
+对 `驿楼` 的矮胖（1.10×1.10×0.97）、`望台` 是**架空的宽低平台**
+（1.62×1.12×0.67，一半是空气）对 `岭台` 的实心方墙、`风亭` 是高瘦的柱廊
+（1.16×1.16×1.04）对 `凉亭` 的低实心板（1.24×0.56×0.50）。
+
+**它们同样要守住的东西**（`tools/verify_station_roof.gd` / `verify_stations.gd` 量着）：
+材质名带 `_roof` / `_roof_2` 后缀、有 `_stone` 可当尺子、屋顶刷色后在线性空间里
+**确实暖**（`r − b ≥ 0.004`，实测 0.0595）、屋顶/墙的亮度比落在 `[0.30, 0.90]`
+（实测 0.52）。
+
 ### 2.4 ✅ 原创 · 音频（17 个 .ogg）
 
 | 来源脚本 | 产物 | 随机种子 |
@@ -214,6 +238,8 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
   所以下面那张全量登记表由脚本对着目录数出来，不靠手数。）
 - **驿站小件模型**：`assets/models/station_亭灯|凉亭|岭台|廊|神苑|茶寮|驿楼.glb`
   （共 7 个，10–22 KB，**无贴图**）——由 Blender 5.2.40 导出，
+  另有 2026-10-05 新建的 `station_琴台` / `station_钟楼` / `station_望台` /
+  `station_风亭` 同一族做法（**驿站小件共 11 个**，见 §2.3c 与 §2.5），
   材质名沿用 `World3D.STATION_ROOF_TINT` 的 `<站名>_roof` 后缀约定，
   即**本工程自己建的**。
   **核实**：源 `.blend` 里没有链接进来的现成资产库模型（若有请在提交里一并注明）。
@@ -251,6 +277,9 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 | `models/station_茶寮.glb` | 模型 | 本工程自建 | 同 LICENSE | ✅ |
 | `models/station_驿楼.glb` | 模型 | 本工程自建 | 同 LICENSE | ✅ |
 | `models/station_琴台.glb` | 模型 | 本工程自建（2026-10-05，顶掉原 `station_2.glb`） | 同 LICENSE | ✅ |
+| `models/station_钟楼.glb` | 模型 | 本工程自建（2026-10-05） | 同 LICENSE | ✅ |
+| `models/station_望台.glb` | 模型 | 本工程自建（2026-10-05） | 同 LICENSE | ✅ |
+| `models/station_风亭.glb` | 模型 | 本工程自建（2026-10-05） | 同 LICENSE | ✅ |
 | `fonts/LXGWWenKai-Regular.ttf` | 字体 | LXGW WenKai 1.522 | **SIL OFL 1.1** | ✅ |
 | `audio/bgm.ogg` | 音频 | 本工程合成 | 同 LICENSE | ✅ |
 | `audio/ambient/wind.ogg` | 音频 | `gen_ambient_audio.py` | 同 LICENSE | ✅ |
@@ -300,6 +329,6 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 - [x] ✅ 字体子集化 —— **当前不做子集**（25.5 MB 全量随包），`tools/subset_font.py`
       的 OFL §3 违规已在脚本里装护栏（见 §2.3）；换字体之后再重新评估
 - [x] ✅ 音频 17 件 —— 本工程脚本合成
-- [x] ✅ 驿站小件 8 件 —— 本工程自建（新增 `station_琴台.glb`）
+- [x] ✅ 驿站小件 11 件 —— 本工程自建（新增 `station_琴台/钟楼/望台/风亭.glb`）
 - [x] ✅ 字体本身 —— SIL OFL 1.1
 - [x] ✅ 几何 / 着色器 / UI / 文本 —— 原创
