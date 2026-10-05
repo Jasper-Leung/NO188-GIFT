@@ -303,18 +303,18 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 | `shaders/grass.gdshader` | 着色器 | 本工程原创 | 同 LICENSE | ✅ |
 | `shaders/water.gdshader` | 着色器 | 本工程原创 | 同 LICENSE | ✅ |
 
-**44 个受管文件。** **缺 0 项 ❌**、12 项 ⚠️、32 项 ✅。
+**47 个受管文件。** **缺 0 项 ❌**、12 项 ⚠️、32 项 ✅。
 
 ---
 
-## 四、仓库里另外三处该补而没补的
+## 四、三份发行凭据的现状 + 还欠的最后一处
 
 
 | 项 | 现状 | 该怎么办 |
 | :--- | :--- | :--- |
-| `LICENSE` | **不存在** | 定作品授权（建议 MIT 或 CC-BY-4.0），并声明第三方资产另受各自条款约束 |
-| `CREDITS.md` | **不存在** | 已建（见该文件），需把 §2.1/§2.2 的核实结果填进去 |
-| `export_presets.cfg` | `company_name` / `product_name` / `package.name` 全空，`package.unique_name = "com.example.$genname"` | 商用前必填。`com.example.*` 这种占位包名**过不了任何应用商店的审核** |
+| `LICENSE` | **已建**，MIT，覆盖本工程原创部分（程序、几何、着色器、界面、音频、文本），第三方资产明确排除在外 | —（§2.1/§2.2 的核实结果见 `CREDITS.md`） |
+| `CREDITS.md` | **已建**（约 15.4 KB），是**随发行物发出去**的那一份；未核实项照实标着，§3/§4 收着自行车与 6 个 Tripo 资产 | — |
+| `export_presets.cfg` | 三份预设**各填各的、没有共用一份身份**：`Windows Desktop`（`[preset.0]`）`application/company_name` = `Jasper-Leung`、`application/product_name` = `188号礼物` **都已填**；`Android`（`[preset.2]`）`package/name` = `188号礼物` **已填**；`Web`（`[preset.1]`）**没有** `application/*` 与 `package/*` 这些键（那份导出本来就不需要身份） | **唯一还欠的一处**：Android 段的 `package/unique_name` **还是**占位 `com.example.gift188` —— `com.example.` 前缀**过不了任何应用商店的审核**，上架前必须换成真实包名 |
 
 ---
 
@@ -324,8 +324,8 @@ Copyright 2020 The Klee Project Authors (https://github.com/fontworks-fonts/Klee
 - [x] ✅ 原 `assets/models/station_2.glb` —— **已退役**（2026-10-05 换成自建的
       `station_琴台.glb`，图生 3D 的上传物权利链追不到，那种风险补材料消不掉）
 - [ ] ⚠️ 6 个 Tripo 资产 + 6 张贴图 —— 账号档位 / 生成日期 / 活动条款原文
-- [ ] ⚠️ `export_presets.cfg` 的 `package/unique_name` —— 仍是占位
-      （`com.example.gift188`），上架前必须换成真实包名
+- [ ] ⚠️ `export_presets.cfg` 的 `package/unique_name`（只有 Android 段有这一格）
+      —— 仍是占位（`com.example.gift188`），上架前必须换成真实包名
 - [x] ✅ 字体子集化 —— **当前不做子集**（25.5 MB 全量随包），`tools/subset_font.py`
       的 OFL §3 违规已在脚本里装护栏（见 §2.3）；换字体之后再重新评估
 - [x] ✅ 音频 17 件 —— 本工程脚本合成

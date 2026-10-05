@@ -80,6 +80,52 @@ func _read(path: String) -> String:
 	return f.get_as_text()
 
 
+## 从散文里往外读数字时用：单字符是否 ASCII 数字。
+## 不写 `String.is_digit()`——4.6 实测报
+## `Parse Error: Cannot find member "is_digit" in base "String"`，而 Parse Error
+## 在 `--headless` 下是一条断言都不打、退出码还可能是 0。
+func _is_digit(c: String) -> bool:
+	return c.length() == 1 and c >= "0" and c <= "9"
+
+
+## 取一个预设的**全部**配置：`[preset.N]` 头到下一个**裸** `[preset.N]` 头之间。
+## 必须把 `.options` 那段一起包进来——`application/*` 与 `package/*` 全写在
+## `.options` 里，只切 `[preset.N]` 头那几行什么都量不到。而 `[preset.N.options]`
+## 自己也以 `[preset.` 开头（`Windows Desktop` 段的 `.options` 头在段内偏移 527），
+## 切的时候必须跳过它——按 `.count(".") == 1` 认裸头。
+## 而**同一个键名在不同预设里语义不同**（`package/name` 只有 Android 有），
+## 全文件搜会串：量「Windows 段填了没」却量到 Android 的那一格。
+func _preset(eps: String, platform: String) -> String:
+	var i := eps.find("platform=\"" + platform + "\"")
+	if i < 0:
+		return ""
+	var s := eps.substr(0, i).rfind("[preset.")
+	if s < 0:
+		s = i
+	var rest := eps.substr(s)
+	var j := rest.find("\n[preset.", 10)
+	while j >= 0:
+		var eol := rest.find("\n", j + 1)
+		var line := rest.substr(j + 1, (eol if eol >= 0 else rest.length()) - j - 1)
+		if line.count(".") == 1 and line.ends_with("]"):
+			return rest.substr(0, j)
+		j = rest.find("\n[preset.", j + 1)
+	return rest
+
+
+## 取 `## <heading>` 到下一个 `## ` 之间的那一段。
+## 「文档不许说谎」这条必须**限死在某一节里**——PROVENANCE 全文别的地方
+## 确实有该出现的「不存在」：§二说 `station_2.glb` 已退役，删掉的 `assets/models/station_2.*`
+## 在仓库里**就是**不存在。把扫描范围放到全文，那条判据会先被这一处合法用法喂饱。
+func _section(prov: String, heading: String) -> String:
+	var i = prov.find("## " + heading)
+	if i < 0:
+		return ""
+	var rest := prov.substr(i)
+	var j = rest.find("\n## ", 3)
+	return rest if j < 0 else rest.substr(0, j)
+
+
 func _initialize() -> void:
 	print("=== 资产来源清单回归 ===")
 	_run.call_deferred()
@@ -130,6 +176,24 @@ func _run() -> void:
 			"登记表行数 == assets/ 实际文件数（表 %d 行 / 实际 %d 个）"
 			% [rows.size(), files.size()])
 
+	# §三 表头下面那一行「N 个受管文件」报的是**文档自己对表报的数**。
+	# 上面两条钉的是**表 vs 仓库**；这条钉的是**文档 vs 表**——三处对不上时
+	# 前两条会绿，而那一行在说谎（2026-10-05 实测：文档写 44、表里是 47 行）。
+	var n_managed := -1
+	var cc := prov.rfind("个受管文件")
+	if cc >= 0:
+		var d0 := cc
+		while d0 > 0 and not _is_digit(prov.substr(d0 - 1, 1)):
+			d0 -= 1
+		var d1 := d0
+		while d1 > 0 and _is_digit(prov.substr(d1 - 1, 1)):
+			d1 -= 1
+		if d1 < d0:
+			n_managed = int(prov.substr(d1, d0 - d1))
+	_check(n_managed == rows.size(),
+			"§三 那行「N 个受管文件」和表行数一致（文档 %d / 表 %d 行）"
+			% [n_managed, rows.size()])
+
 	# —— 第二组：内部清单 vs 对外署名文件 ——
 	# 这一组是这份脚本真正想守的东西。`PROVENANCE.md` 是内部档案，
 	# `CREDITS.md` 是**随发行物发出去的**。未核实的项如果只停在内部档案里，
@@ -168,6 +232,51 @@ func _run() -> void:
 	_check(lic.contains("MIT License"), "LICENSE 写明了是哪一份许可")
 	_check(lic.contains("第三方资产不在此授权范围内"),
 			"LICENSE 明说第三方资产不在它授权范围内（MIT 只覆盖原创部分）")
+
+	# —— 第五组：PROVENANCE 第 §4 节不许和仓库对不上 ——
+	# §4 是「仓库里还欠什么」那一节，而它自己已经说了三轮谎：写着 `LICENSE` 与
+	# `CREDITS.md` **不存在**（两份文件都在，而且下面第四组还在断言 LICENSE
+	# 必须存在）；写着 export_presets 三个字段**全空**（其实早就填了）。
+	# 它没有运行时后果——只影响下一个决定能不能上架的人——而「文档与代码
+	# 各说各话、两边都绿」在本工程已经发生了好几次。
+	var sec4 := _section(prov, "四、")
+	_check(not sec4.is_empty(), "PROVENANCE.md 的 §4 存在（§4 是「仓库还欠什么」那一节）")
+	for f in ["LICENSE", "CREDITS.md", "export_presets.cfg"]:
+		_check(FileAccess.file_exists("res://" + f), "§4 点到的 %s 在仓库里" % f)
+	_check(not sec4.contains("不存在"),
+			"§4 里没有任何一项被写成「不存在」——而它点到的三份文件都在"
+			+ "（把整节扫出来 %d 次）" % sec4.count("不存在"))
+
+	# §4 那一栏说的是 export_presets 的**身份字段**。量的是文件的**真实值**，
+	# 不是文档里那句话——文档错了而量文档的话，这条永远是绿的。
+	# 三份预设**各填各的**，所以必须按 `[preset.N]` 切段量：
+	# `application/*` 只有 Windows 有，`package/*` 只有 Android 有，Web 两样都没有。
+	# 全文件搜会串——量「Windows 段填了没」却量到 Android 的那一格。
+	var eps := _read("res://export_presets.cfg")
+	var ep_win := _preset(eps, "Windows Desktop")
+	var ep_and := _preset(eps, "Android")
+	var ep_web := _preset(eps, "Web")
+	_check(not ep_win.is_empty(), "export_presets.cfg 里找得到 Windows Desktop 段")
+	_check(not ep_and.is_empty(), "export_presets.cfg 里找得到 Android 段")
+	_check(not ep_web.is_empty(), "export_presets.cfg 里找得到 Web 段")
+	for kv in ["application/company_name=\"Jasper-Leung\"",
+			"application/product_name=\"188号礼物\""]:
+		_check(ep_win.contains(kv), "§4 说 Windows 段已填的字段确实已填：%s" % kv)
+	_check(ep_and.contains("package/name=\"188号礼物\""),
+			"§4 说 Android 段的 package/name 已填，文件里确实是")
+	_check(not ep_web.contains("package/") and not ep_web.contains("application/"),
+			"§4 说 Web 段没有这些身份键，文件里确实没有（别默认三份共用一份身份）")
+	# 正对照：那一处真的还没换的必须仍然在**文件**里是占位。双向的——
+	# 把 §4 整节删掉、或者把 unique_name 换成真域名而 §4 没跟上，它都会红。
+	# 否则把 §4 全改写成「都填好了」也能绿，这份档案就把唯一一处真的缺口藏起来。
+	_check(ep_and.contains("package/unique_name=\"com.example.gift188\""),
+			"§4 没把唯一还欠的一处藏起来（Android 段的 unique_name 还是占位）")
+	# 这一组量不到「§4 把某一项写成已填好、而它其实还是占位」：那需要解析
+	# 文档的语义，字符串对拍做不了（把该列改成「已填」而保留键名，
+	# 所有 contains 判据都照绿）。量得了的是上面那条：**文件的真值**——
+	# 文件里那一格还是占位这件事不会自己变绿。§4 写没写对，靠的是
+	# 「§4 是这一份状态唯一的出处」这个约定，不是回归。
+
 
 	print("\n================ 汇总 ================")
 	print("[verify_provenance] %s  (失败项 %d)" % [
